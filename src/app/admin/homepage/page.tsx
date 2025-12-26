@@ -1,8 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { doc, getDoc, setDoc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
 import { Homepage } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { saveHomepageData, loadHomepageData } from "./actions";
 
 export default function HomepageEditor() {
   const [loading, setLoading] = useState(true);
@@ -48,11 +47,9 @@ export default function HomepageEditor() {
 
   const loadData = async () => {
     try {
-      const docRef = doc(db, "homepage", "main");
-      const docSnap = await getDoc(docRef);
-      
-      if (docSnap.exists()) {
-        setData(docSnap.data() as Homepage);
+      const result = await loadHomepageData();
+      if (result) {
+        setData(result);
       }
     } catch (error) {
       console.error("Error loading homepage data:", error);
@@ -69,8 +66,7 @@ export default function HomepageEditor() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const docRef = doc(db, "homepage", "main");
-      await setDoc(docRef, data);
+      await saveHomepageData(data);
       
       toast({
         title: "Success",
