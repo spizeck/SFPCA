@@ -1,0 +1,86 @@
+{
+  "homepage": {
+    "hero": {
+      "title": "Saba Foundation for Preventing Cruelty to Animals",
+      "subtitle": "Dedicated to the welfare and protection of animals on the beautiful island of Saba",
+      "ctaPrimary": "Meet Our Animals",
+      "ctaSecondary": "Support Our Mission"
+    },
+    "about": {
+      "title": "About SFPCA",
+      "content": "The Saba Foundation for Preventing Cruelty to Animals (SFPCA) is a non-profit organization dedicated to improving the lives of animals on Saba.\n\nWe provide veterinary care, rescue services, and work to find loving homes for animals in need. Our mission is to create a compassionate community where every animal is treated with respect and care."
+    },
+    "services": {
+      "title": "Our Services",
+      "items": [
+        {
+          "title": "Veterinary Services",
+          "description": "Professional veterinary care including vaccinations, spay/neuter services, and emergency treatment for animals in need."
+        },
+        {
+          "title": "Animal Adoption",
+          "description": "We help connect loving families with animals looking for their forever homes. All our animals are health-checked and ready for adoption."
+        },
+        {
+          "title": "Animal Registration",
+          "description": "Register your pets with SFPCA to help us maintain accurate records and ensure the safety of all animals on Saba."
+        }
+      ]
+    },
+    "donation": {
+      "title": "Support Our Mission",
+      "content": "Your donations help us provide essential care, food, and medical treatment to animals in need. Every contribution makes a difference in an animal's life.",
+      "paymentMethods": "Bank Transfer:\nAccount Name: SFPCA\nAccount Number: [To be provided]\nBank: [To be provided]\n\nPayPal: donations@sfpca.org\n\nFor other donation methods, please contact us directly."
+    }
+  },
+  "siteSettings": {
+    "contact": {
+      "phone": "+599 416 3295",
+      "email": "info@sfpca.org",
+      "whatsapp": "+599 416 3295",
+      "address": "The Bottom, Saba, Caribbean Netherlands",
+      "hours": "Monday - Friday: 9:00 AM - 5:00 PM\nSaturday: 10:00 AM - 2:00 PM\nSunday: Closed\n\nEmergency services available 24/7"
+    },
+    "social": {
+      "facebook": "https://facebook.com/sfpca",
+      "instagram": "https://instagram.com/sfpca",
+      "twitter": ""
+    }
+  },
+  "animals": [
+    {
+      "name": "Max",
+      "species": "dog",
+      "sex": "male",
+      "approxAge": "2 years",
+      "description": "Max is a friendly and energetic dog who loves to play. He's great with children and other pets. Max is looking for an active family who can give him plenty of exercise and love.",
+      "status": "available",
+      "photos": []
+    },
+    {
+      "name": "Luna",
+      "species": "cat",
+      "sex": "female",
+      "approxAge": "1 year",
+      "description": "Luna is a sweet and gentle cat who enjoys quiet companionship. She's perfect for a calm household and loves to curl up in sunny spots. Luna is litter-trained and very affectionate.",
+      "status": "available",
+      "photos": []
+    },
+    {
+      "name": "Charlie",
+      "species": "dog",
+      "sex": "male",
+      "approxAge": "5 years",
+      "description": "Charlie is a loyal and well-behaved dog who has been with us for a while. He's house-trained, knows basic commands, and would make an excellent companion for someone looking for a calm, mature dog.",
+      "status": "available",
+      "photos": []
+    }
+  ],
+  "admins": {
+    "admin@example.com": {
+      "email": "admin@example.com",
+      "role": "admin",
+      "createdAt": "2024-01-01T00:00:00.000Z"
+    }
+  }
+}

@@ -1,0 +1,39 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is admin
+    function isAdmin() {
+      return request.auth != null && 
+             exists(/databases/$(database)/documents/admins/$(request.auth.token.email));
+    }
+    
+    // Homepage content - public read, admin write
+    match /homepage/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Site settings - public read, admin write
+    match /siteSettings/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Animals - public can read available animals, admin can write
+    match /animals/{animalId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+    
+    // Admins collection - only admins can read/write
+    match /admins/{email} {
+      allow read, write: if isAdmin();
+    }
+    
+    // Default deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
