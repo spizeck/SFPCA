@@ -9,6 +9,7 @@ import { DonationSection } from "@/components/homepage/donation-section";
 import { ContactSection } from "@/components/homepage/contact-section";
 import { Footer } from "@/components/homepage/footer";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { HashClear } from "@/components/hash-clear";
 
 async function getHomepageData(): Promise<Homepage | null> {
   try {
@@ -84,6 +85,7 @@ export default async function HomePage() {
 
   return (
     <main className="min-h-screen scroll-smooth">
+      <HashClear />
       <ThemeToggle />
       <HeroSection data={homepage.hero} />
       <AboutSection data={homepage.about} />

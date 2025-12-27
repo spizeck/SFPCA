@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { signInWithPopup, GoogleAuthProvider, signInWithEmailAndPassword } from "firebase/auth";
+import { signInWithPopup, GoogleAuthProvider, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mounted, setMounted] = useState(false);
+  const [isSignIn, setIsSignIn] = useState(true);
   const router = useRouter();
   const { toast } = useToast();
 
@@ -58,7 +59,7 @@ export default function LoginPage() {
         } else {
           toast({
             title: "Access Denied",
-            description: "You are not authorized to access the admin area.",
+            description: "This account is not authorized for admin access. Please contact the site administrator to have your account added to the admin list.",
             variant: "destructive",
           });
           await auth.signOut();
@@ -101,7 +102,7 @@ export default function LoginPage() {
         } else {
           toast({
             title: "Access Denied",
-            description: "You are not authorized to access the admin area.",
+            description: "This account is not authorized for admin access. Please contact the site administrator to have your account added to the admin list.",
             variant: "destructive",
           });
           await auth.signOut();
@@ -125,16 +126,108 @@ export default function LoginPage() {
     }
   };
 
+  const handleEmailSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const result = await createUserWithEmailAndPassword(auth, email, password);
+      
+      toast({
+        title: "Account Created",
+        description: "Your account has been created successfully! Please contact the site administrator to be added to the admin list.",
+      });
+      
+      // Sign out the user since they're not admin yet
+      await auth.signOut();
+      
+      // Reset form
+      setEmail("");
+      setPassword("");
+      setIsSignIn(true);
+    } catch (error: any) {
+      console.error("Registration error:", error);
+      toast({
+        title: "Registration Failed",
+        description: error.code === 'auth/email-already-in-use'
+          ? "An account with this email already exists."
+          : error.code === 'auth/weak-password'
+          ? "Password should be at least 6 characters."
+          : "An error occurred during registration. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEmailAuth = async (e: React.FormEvent) => {
+    if (isSignIn) {
+      await handleEmailSignIn(e);
+    } else {
+      await handleEmailSignUp(e);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email) {
+      toast({
+        title: "Email Required",
+        description: "Please enter your email address first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      await sendPasswordResetEmail(auth, email);
+      toast({
+        title: "Password Reset Email Sent",
+        description: "Check your inbox for instructions to reset your password.",
+      });
+    } catch (error: any) {
+      console.error("Password reset error:", error);
+      toast({
+        title: "Error",
+        description: error.code === 'auth/user-not-found'
+          ? "No account found with this email."
+          : "Failed to send password reset email. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4 relative">
       <ThemeToggle />
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl">SFPCA Admin</CardTitle>
-          <CardDescription>Sign in to access the admin dashboard</CardDescription>
+          <CardDescription>{isSignIn ? "Sign in to access the admin dashboard" : "Create a new account"}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <form onSubmit={handleEmailSignIn} className="space-y-3">
+          <div className="flex items-center justify-center space-x-2">
+            <Button
+              type="button"
+              variant={isSignIn ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setIsSignIn(true)}
+              className={isSignIn ? "" : "text-muted-foreground"}
+            >
+              Sign In
+            </Button>
+            <span className="text-muted-foreground">or</span>
+            <Button
+              type="button"
+              variant={!isSignIn ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setIsSignIn(false)}
+              className={!isSignIn ? "" : "text-muted-foreground"}
+            >
+              Register
+            </Button>
+          </div>
+          
+          <form onSubmit={handleEmailAuth} className="space-y-3">
             <div className="space-y-1">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -158,6 +251,19 @@ export default function LoginPage() {
                 required
                 disabled={loading}
               />
+              {isSignIn && (
+                <div className="text-right">
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0 text-xs"
+                    onClick={handleForgotPassword}
+                  >
+                    Forgot your password?
+                  </Button>
+                </div>
+              )}
             </div>
             <Button
               type="submit"
@@ -165,7 +271,7 @@ export default function LoginPage() {
               className="w-full"
               size="lg"
             >
-              {loading ? "Signing in..." : "Sign in"}
+              {loading ? (isSignIn ? "Signing in..." : "Creating account...") : (isSignIn ? "Sign in" : "Create Account")}
             </Button>
           </form>
           
@@ -189,6 +295,13 @@ export default function LoginPage() {
           >
             {loading ? "Signing in..." : "Sign in with Google"}
           </Button>
+          
+          <p className="text-xs text-muted-foreground text-center pt-4">
+            {isSignIn 
+              ? "Admin access is required. Contact the site administrator if you need an account."
+              : "After creating your account, contact the site administrator to be added to the admin list."
+            }
+          </p>
         </CardContent>
       </Card>
     </div>
