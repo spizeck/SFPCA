@@ -1,4 +1,8 @@
+"use client"
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { motion } from "framer-motion";
+import { fadeInUpVariants, scaleInVariants, defaultTransition, shouldReduceMotion } from "@/lib/animations";
 
 interface DonationSectionProps {
   data: {
@@ -9,26 +13,63 @@ interface DonationSectionProps {
 }
 
 export function DonationSection({ data }: DonationSectionProps) {
+  const animationProps = shouldReduceMotion() ? {
+    initial: {},
+    whileInView: undefined,
+    viewport: undefined,
+    transition: {},
+  } : {
+    initial: "initial",
+    whileInView: "whileInView",
+    viewport: { once: true, margin: "-100px" },
+    transition: defaultTransition,
+  };
+
   return (
-    <section id="donation" className="py-16 md:py-24 bg-muted">
+    <motion.section 
+      id="donation" 
+      className="py-16 md:py-24 bg-muted"
+      variants={fadeInUpVariants}
+      {...animationProps}
+    >
       <div className="container mx-auto px-4">
-        <div className="max-w-3xl mx-auto">
+        <motion.div 
+          className="max-w-3xl mx-auto"
+          variants={scaleInVariants}
+          {...animationProps}
+        >
           <Card>
             <CardHeader className="text-center">
-              <CardTitle className="text-3xl">{data.title}</CardTitle>
-              <CardDescription className="text-base mt-4">
+              <motion.h2 
+                className="text-3xl font-bold text-foreground"
+                variants={fadeInUpVariants}
+                {...animationProps}
+              >
+                {data.title}
+              </motion.h2>
+              <motion.p 
+                className="text-base text-muted-foreground mt-4"
+                variants={fadeInUpVariants}
+                {...animationProps}
+                transition={{ ...defaultTransition, delay: 0.2 }}
+              >
                 {data.content}
-              </CardDescription>
+              </motion.p>
             </CardHeader>
             <CardContent>
-              <div className="bg-secondary/50 p-6 rounded-lg">
+              <motion.div 
+                className="bg-secondary/50 p-6 rounded-lg"
+                variants={fadeInUpVariants}
+                {...animationProps}
+                transition={{ ...defaultTransition, delay: 0.4 }}
+              >
                 <h3 className="font-semibold text-lg mb-3 text-foreground">Payment Methods</h3>
                 <p className="text-muted-foreground whitespace-pre-line">{data.paymentMethods}</p>
-              </div>
+              </motion.div>
             </CardContent>
           </Card>
-        </div>
+        </motion.div>
       </div>
-    </section>
+    </motion.section>
   );
 }

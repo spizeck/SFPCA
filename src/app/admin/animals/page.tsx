@@ -39,10 +39,15 @@ export default function AnimalsManager() {
   const loadAnimals = async () => {
     try {
       const querySnapshot = await getDocs(collection(db, "animals"));
-      const animalsData = querySnapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      })) as Animal[];
+      const animalsData = querySnapshot.docs.map((doc) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          createdAt: data.createdAt?.toDate().toISOString(),
+          updatedAt: data.updatedAt?.toDate().toISOString(),
+        } as Animal;
+      });
       setAnimals(animalsData);
     } catch (error) {
       console.error("Error loading animals:", error);

@@ -7,8 +7,8 @@ export interface Animal {
   description: string;
   status: "available" | "pending" | "adopted";
   photos: string[];
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface HomepageSection {

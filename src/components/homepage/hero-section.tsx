@@ -1,5 +1,9 @@
+"use client"
+
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import { motion, Transition } from "framer-motion";
+import { fadeInUpVariants, scaleInVariants, shouldReduceMotion } from "@/lib/animations";
 
 interface HeroSectionProps {
   data: {
@@ -11,8 +15,21 @@ interface HeroSectionProps {
 }
 
 export function HeroSection({ data }: HeroSectionProps) {
+  const animationProps = shouldReduceMotion() ? {
+    initial: {},
+    animate: {},
+    transition: {},
+  } : {
+    initial: { opacity: 0 },
+    animate: { opacity: 1 },
+    transition: { duration: 1, ease: "easeInOut" } as Transition,
+  };
+
   return (
-    <section className="relative h-screen overflow-hidden">
+    <motion.section 
+      className="relative h-screen overflow-hidden"
+      {...animationProps}
+    >
       {/* Background Video */}
       <video
         autoPlay
@@ -30,22 +47,37 @@ export function HeroSection({ data }: HeroSectionProps) {
       {/* Hero Content - now with relative positioning to sit above video */}
       <div className="relative z-10 container mx-auto px-4 h-full flex items-center justify-center">
         <div className="max-w-3xl mx-auto text-center">
-          <h1 className="text-4xl md:text-6xl font-bold text-white mb-6 drop-shadow-lg">
+          <motion.h1 
+            className="text-4xl md:text-6xl font-bold text-white mb-6 drop-shadow-lg"
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, ease: "easeInOut", delay: 0.2 } as Transition}
+          >
             {data.title}
-          </h1>
-          <p className="text-xl md:text-2xl text-white/90 mb-8 drop-shadow-md">
+          </motion.h1>
+          <motion.p 
+            className="text-xl md:text-2xl text-white/90 mb-8 drop-shadow-md"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, ease: "easeInOut", delay: 0.5 } as Transition}
+          >
             {data.subtitle}
-          </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+          </motion.p>
+          <motion.div 
+            className="flex flex-col sm:flex-row gap-4 justify-center"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, ease: "easeInOut", delay: 0.8 } as Transition}
+          >
             <Button size="lg" asChild className="shadow-xl">
               <Link href="#animals">{data.ctaPrimary}</Link>
             </Button>
             <Button size="lg" variant="outline" asChild className="bg-white/10 backdrop-blur-sm text-white border-white/30 hover:bg-white/20 shadow-xl">
               <Link href="#donation">{data.ctaSecondary}</Link>
             </Button>
-          </div>
+          </motion.div>
         </div>
       </div>
-    </section>
+    </motion.section>
   );
 }

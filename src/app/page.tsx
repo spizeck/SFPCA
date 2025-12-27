@@ -9,7 +9,6 @@ import { DonationSection } from "@/components/homepage/donation-section";
 import { ContactSection } from "@/components/homepage/contact-section";
 import { Footer } from "@/components/homepage/footer";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { FadeIn } from "@/components/ui/fade-in";
 
 async function getHomepageData(): Promise<Homepage | null> {
   try {
@@ -50,10 +49,15 @@ async function getAvailableAnimals(): Promise<Animal[]> {
     );
     const querySnapshot = await getDocs(q);
     
-    return querySnapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as Animal[];
+    return querySnapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        ...data,
+        createdAt: data.createdAt?.toDate().toISOString(),
+        updatedAt: data.updatedAt?.toDate().toISOString(),
+      } as Animal;
+    });
   } catch (error) {
     console.error("Error fetching animals:", error);
     return [];
@@ -82,21 +86,11 @@ export default async function HomePage() {
     <main className="min-h-screen scroll-smooth">
       <ThemeToggle />
       <HeroSection data={homepage.hero} />
-      <FadeIn>
-        <AboutSection data={homepage.about} />
-      </FadeIn>
-      <FadeIn delay={100}>
-        <ServicesSection data={homepage.services} />
-      </FadeIn>
-      <FadeIn delay={200}>
-        <AnimalsSection animals={animals} />
-      </FadeIn>
-      <FadeIn delay={300}>
-        <DonationSection data={homepage.donation} />
-      </FadeIn>
-      <FadeIn delay={400}>
-        <ContactSection contact={settings.contact} />
-      </FadeIn>
+      <AboutSection data={homepage.about} />
+      <ServicesSection data={homepage.services} />
+      <AnimalsSection animals={animals} />
+      <DonationSection data={homepage.donation} />
+      <ContactSection contact={settings.contact} />
       <Footer social={settings.social} />
     </main>
   );
