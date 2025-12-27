@@ -66,3 +66,6 @@ firebase-debug.*.log
 # Temporary files
 *.tmp
 *.temp
+
+# Firebase
+*-firebase-adminsdk-*.json

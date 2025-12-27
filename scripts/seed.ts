@@ -2,16 +2,25 @@ import { initializeApp, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import * as fs from "fs";
 import * as path from "path";
+import { config } from "dotenv";
 
-const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
+// Load environment variables from .env.local
+config({ path: ".env.local" });
 
-if (!serviceAccount) {
-  console.error("Please set FIREBASE_SERVICE_ACCOUNT_PATH environment variable");
+// Use environment variables instead of service account file
+const serviceAccount = {
+  projectId: process.env.FIREBASE_ADMIN_PROJECT_ID,
+  clientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL,
+  privateKey: process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+};
+
+if (!serviceAccount.projectId || !serviceAccount.clientEmail || !serviceAccount.privateKey) {
+  console.error("Please set FIREBASE_ADMIN_PROJECT_ID, FIREBASE_ADMIN_CLIENT_EMAIL, and FIREBASE_ADMIN_PRIVATE_KEY environment variables");
   process.exit(1);
 }
 
 const app = initializeApp({
-  credential: cert(JSON.parse(fs.readFileSync(serviceAccount, "utf8"))),
+  credential: cert(serviceAccount),
 });
 
 const db = getFirestore(app);
