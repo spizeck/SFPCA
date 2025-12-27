@@ -9,6 +9,7 @@ import { DonationSection } from "@/components/homepage/donation-section";
 import { ContactSection } from "@/components/homepage/contact-section";
 import { Footer } from "@/components/homepage/footer";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { FadeIn } from "@/components/ui/fade-in";
 
 async function getHomepageData(): Promise<Homepage | null> {
   try {
@@ -78,14 +79,24 @@ export default async function HomePage() {
   }
 
   return (
-    <main className="min-h-screen">
+    <main className="min-h-screen scroll-smooth">
       <ThemeToggle />
       <HeroSection data={homepage.hero} />
-      <AboutSection data={homepage.about} />
-      <ServicesSection data={homepage.services} />
-      <AnimalsSection animals={animals} />
-      <DonationSection data={homepage.donation} />
-      <ContactSection contact={settings.contact} />
+      <FadeIn>
+        <AboutSection data={homepage.about} />
+      </FadeIn>
+      <FadeIn delay={100}>
+        <ServicesSection data={homepage.services} />
+      </FadeIn>
+      <FadeIn delay={200}>
+        <AnimalsSection animals={animals} />
+      </FadeIn>
+      <FadeIn delay={300}>
+        <DonationSection data={homepage.donation} />
+      </FadeIn>
+      <FadeIn delay={400}>
+        <ContactSection contact={settings.contact} />
+      </FadeIn>
       <Footer social={settings.social} />
     </main>
   );
