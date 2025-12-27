@@ -13,9 +13,9 @@ interface ContactSectionProps {
 
 export function ContactSection({ contact }: ContactSectionProps) {
   return (
-    <section id="contact" className="py-16 md:py-24 bg-white">
+    <section id="contact" className="py-16 md:py-24 bg-background">
       <div className="container mx-auto px-4">
-        <h2 className="text-3xl md:text-4xl font-bold text-center text-gray-900 mb-12">
+        <h2 className="text-3xl md:text-4xl font-bold text-center text-foreground mb-12">
           Contact Us
         </h2>
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-5xl mx-auto">
@@ -27,7 +27,7 @@ export function ContactSection({ contact }: ContactSectionProps) {
               </div>
             </CardHeader>
             <CardContent>
-              <a href={`tel:${contact.phone}`} className="text-gray-700 hover:text-primary">
+              <a href={`tel:${contact.phone}`} className="text-foreground hover:text-primary">
                 {contact.phone}
               </a>
             </CardContent>
@@ -41,7 +41,7 @@ export function ContactSection({ contact }: ContactSectionProps) {
               </div>
             </CardHeader>
             <CardContent>
-              <a href={`mailto:${contact.email}`} className="text-gray-700 hover:text-primary break-all">
+              <a href={`mailto:${contact.email}`} className="text-foreground hover:text-primary break-all">
                 {contact.email}
               </a>
             </CardContent>
@@ -59,7 +59,7 @@ export function ContactSection({ contact }: ContactSectionProps) {
                 href={`https://wa.me/${contact.whatsapp.replace(/\D/g, "")}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-gray-700 hover:text-primary"
+                className="text-foreground hover:text-primary"
               >
                 {contact.whatsapp}
               </a>
@@ -74,7 +74,7 @@ export function ContactSection({ contact }: ContactSectionProps) {
               </div>
             </CardHeader>
             <CardContent>
-              <p className="text-gray-700">{contact.address}</p>
+              <p className="text-foreground">{contact.address}</p>
             </CardContent>
           </Card>
 
@@ -86,7 +86,7 @@ export function ContactSection({ contact }: ContactSectionProps) {
               </div>
             </CardHeader>
             <CardContent>
-              <p className="text-gray-700 whitespace-pre-line">{contact.hours}</p>
+              <p className="text-foreground whitespace-pre-line">{contact.hours}</p>
             </CardContent>
           </Card>
         </div>

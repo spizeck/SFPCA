@@ -8,6 +8,7 @@ import { AnimalsSection } from "@/components/homepage/animals-section";
 import { DonationSection } from "@/components/homepage/donation-section";
 import { ContactSection } from "@/components/homepage/contact-section";
 import { Footer } from "@/components/homepage/footer";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 async function getHomepageData(): Promise<Homepage | null> {
   try {
@@ -78,6 +79,7 @@ export default async function HomePage() {
 
   return (
     <main className="min-h-screen">
+      <ThemeToggle />
       <HeroSection data={homepage.hero} />
       <AboutSection data={homepage.about} />
       <ServicesSection data={homepage.services} />

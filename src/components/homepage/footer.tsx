@@ -10,11 +10,11 @@ interface FooterProps {
 
 export function Footer({ social }: FooterProps) {
   return (
-    <footer className="bg-gray-900 text-white py-12">
+    <footer className="bg-foreground text-background py-12">
       <div className="container mx-auto px-4">
         <div className="flex flex-col items-center gap-6">
           <h3 className="text-2xl font-bold">SFPCA</h3>
-          <p className="text-gray-400 text-center max-w-md">
+          <p className="text-muted-foreground text-center max-w-md">
             Saba Foundation for Preventing Cruelty to Animals
           </p>
           <div className="flex gap-6">
@@ -52,7 +52,7 @@ export function Footer({ social }: FooterProps) {
               </a>
             )}
           </div>
-          <div className="text-sm text-gray-500 text-center">
+          <div className="text-sm text-muted-foreground text-center">
             <p>&copy; {new Date().getFullYear()} SFPCA. All rights reserved.</p>
           </div>
         </div>
