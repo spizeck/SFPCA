@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
@@ -26,9 +27,9 @@ export default function LoginPage() {
   // Don't render until mounted to prevent hydration mismatch
   if (!mounted) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+      <div className="min-h-screen flex items-center justify-center bg-background px-4">
         <div className="w-full max-w-md">
-          <div className="h-32 bg-gray-200 rounded-lg animate-pulse"></div>
+          <div className="h-32 bg-muted rounded-lg animate-pulse"></div>
         </div>
       </div>
     );
@@ -125,7 +126,8 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-background px-4 relative">
+      <ThemeToggle />
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl">SFPCA Admin</CardTitle>

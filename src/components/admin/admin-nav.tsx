@@ -23,7 +23,7 @@ export function AdminNav() {
   };
 
   return (
-    <nav className="bg-white border-b">
+    <nav className="bg-card border-b">
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-16">
           <div className="flex items-center gap-8">
@@ -41,8 +41,8 @@ export function AdminNav() {
                     className={cn(
                       "flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors",
                       isActive
-                        ? "bg-primary text-white"
-                        : "text-gray-700 hover:bg-gray-100"
+                        ? "bg-primary text-primary-foreground"
+                        : "text-foreground hover:bg-accent"
                     )}
                   >
                     <Icon className="h-4 w-4" />

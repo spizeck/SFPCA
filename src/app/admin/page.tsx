@@ -66,13 +66,13 @@ export default function AdminDashboard() {
           <CardTitle>Quick Tips</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-muted-foreground">
             • Changes to the homepage and settings are reflected immediately on the public site
           </p>
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-muted-foreground">
             • Only animals marked as "available" will appear on the public homepage
           </p>
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-muted-foreground">
             • Use the "View Site" button in the navigation to preview your changes
           </p>
         </CardContent>
