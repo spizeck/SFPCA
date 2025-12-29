@@ -1,19 +1,18 @@
 # Firebase Cloud Functions
 
-This directory contains Firebase Cloud Functions that automate deployment tasks for the SFPCA website.
+This directory contains Firebase Cloud Functions that trigger Vercel rebuilds when Firestore data is updated.
 
 ## Functions
 
-### 1. onFirestoreWrite
+### 1. onFirestoreChange
 - **Trigger**: Any document write/update/delete in Firestore
-- **Actions**:
-  - Triggers a rebuild on Vercel
-  - Merges the `dev` branch to `main` on GitHub
+- **Action**: Triggers a rebuild on Vercel
+- **Smart Detection**: Skips rebuild if no actual data change occurred
 
-### 2. triggerDeployment
+### 2. triggerRebuild
 - **Trigger**: HTTP request
-- **URL**: `https://[region]-[project-id].cloudfunctions.net/triggerDeployment`
-- **Actions**: Same as onFirestoreWrite but can be triggered manually
+- **URL**: `https://[region]-[project-id].cloudfunctions.net/triggerRebuild`
+- **Action**: Manually triggers a Vercel rebuild
 
 ## Setup
 
@@ -36,51 +35,46 @@ Edit `.env` with your actual values:
 # Vercel Configuration
 VERCEL_TOKEN=your_vercel_token_here
 VERCEL_PROJECT_ID=your_vercel_project_id_here
-
-# GitHub Configuration
-GITHUB_TOKEN=your_github_token_here
 ```
 
 #### Getting Your Credentials
 
 **Vercel Token:**
-1. Go to [Vercel Account Settings](https://vercel.com/account/tokens)
+1. Go to [Vercel Account Settings → Tokens](https://vercel.com/account/tokens)
 2. Create a new token
 3. Copy the token
 
 **Vercel Project ID:**
 1. Go to your project's dashboard on Vercel
 2. Go to Settings → General
-3. Copy the Project ID
-
-**GitHub Token:**
-1. Go to [GitHub Settings → Developer settings → Personal access tokens](https://github.com/settings/tokens)
-2. Generate new token (classic)
-3. Select `repo` permissions
-4. Copy the token
+3. Copy the Project ID (it starts with `prj_`)
 
 ### 3. Deploy Functions
 ```bash
 firebase deploy --only functions
 ```
 
+Or use the deployment script:
+```bash
+npm run deploy:functions
+```
+
 ## Usage
 
 ### Automatic Trigger
-The functions will automatically trigger whenever any document in Firestore is created, updated, or deleted.
+The function will automatically trigger a Vercel rebuild whenever any document in Firestore is created, updated, or deleted (with actual data changes).
 
 ### Manual Trigger
-You can manually trigger the deployment by making a GET request to the triggerDeployment function:
+You can manually trigger a rebuild by making a GET request to the triggerRebuild function:
 ```bash
-curl https://[region]-[project-id].cloudfunctions.net/triggerDeployment
+curl https://[region]-[project-id].cloudfunctions.net/triggerRebuild
 ```
 
 ## Security Notes
 
 - Never commit your `.env` file to version control
-- Keep your tokens secure and rotate them regularly
-- The GitHub token needs `repo` permissions to create and merge pull requests
-- Consider using a separate GitHub account with limited permissions for automation
+- Keep your Vercel token secure and rotate it regularly
+- The function only needs Vercel permissions - no GitHub access required
 
 ## Troubleshooting
 
@@ -91,10 +85,9 @@ curl https://[region]-[project-id].cloudfunctions.net/triggerDeployment
    - Ensure the Vercel token has the necessary permissions
    - Check the function logs: `firebase functions:log`
 
-2. **GitHub merge failing**
-   - Verify GITHUB_TOKEN is correct and has `repo` permissions
-   - Check if there are merge conflicts preventing the merge
-   - Ensure the GitHub repository allows automated merges
+2. **Too many rebuilds**
+   - The function includes smart detection to skip rebuilds when data hasn't actually changed
+   - Check logs to see if "No actual data change detected" messages appear
 
 3. **Function deployment errors**
    - Run `npm install` in the functions directory
@@ -107,5 +100,5 @@ curl https://[region]-[project-id].cloudfunctions.net/triggerDeployment
 firebase functions:log
 
 # View logs for a specific function
-firebase functions:log --only onFirestoreWrite
+firebase functions:log --only onFirestoreChange
 ```

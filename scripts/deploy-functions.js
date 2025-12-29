@@ -25,14 +25,13 @@ function checkEnvFile() {
     log('\nPlease create a .env file with the following variables:', 'yellow');
     log('  VERCEL_TOKEN=your_vercel_token_here', 'cyan');
     log('  VERCEL_PROJECT_ID=your_vercel_project_id_here', 'cyan');
-    log('  GITHUB_TOKEN=your_github_token_here', 'cyan');
     log('\nSee functions/README.md for detailed instructions.', 'yellow');
     process.exit(1);
   }
 
   // Check if all required variables are set
   const envContent = fs.readFileSync(envPath, 'utf8');
-  const requiredVars = ['VERCEL_TOKEN', 'VERCEL_PROJECT_ID', 'GITHUB_TOKEN'];
+  const requiredVars = ['VERCEL_TOKEN', 'VERCEL_PROJECT_ID'];
   
   for (const varName of requiredVars) {
     if (!envContent.includes(`${varName}=`) || envContent.includes(`${varName}=your_`)) {
