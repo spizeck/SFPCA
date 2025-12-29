@@ -9,7 +9,8 @@
     "lint": "next lint",
     "lint:fix": "next lint --fix",
     "type-check": "tsc --noEmit",
-    "seed": "tsx scripts/seed.ts"
+    "seed": "tsx scripts/seed.ts",
+    "deploy:functions": "node scripts/deploy-functions.js"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.3",
