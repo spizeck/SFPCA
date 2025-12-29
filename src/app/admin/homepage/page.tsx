@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Homepage } from "@/lib/types";
+import { TeamManager } from "@/components/admin/team-manager";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -19,12 +20,15 @@ export default function HomepageEditor() {
     hero: {
       title: "",
       subtitle: "",
-      ctaPrimary: "",
-      ctaSecondary: "",
     },
     about: {
       title: "",
       content: "",
+    },
+    whoWeAre: {
+      title: "",
+      subtitle: "",
+      team: [],
     },
     services: {
       title: "",
@@ -33,6 +37,13 @@ export default function HomepageEditor() {
         { title: "", description: "" },
         { title: "", description: "" },
       ],
+    },
+    whereWeAre: {
+      title: "",
+      subtitle: "",
+      address: "",
+      mapEmbedUrl: "",
+      hours: "",
     },
     donation: {
       title: "",
@@ -70,7 +81,8 @@ export default function HomepageEditor() {
       
       toast({
         title: "Success",
-        description: "Homepage content saved successfully",
+        description: "Homepage content saved successfully. Changes will appear on the live site within 1-2 minutes.",
+        duration: 5000,
       });
     } catch (error) {
       console.error("Error saving homepage data:", error);
@@ -119,24 +131,6 @@ export default function HomepageEditor() {
               onChange={(e) => setData({ ...data, hero: { ...data.hero, subtitle: e.target.value } })}
             />
           </div>
-          <div className="grid md:grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="hero-cta1">Primary Button Text</Label>
-              <Input
-                id="hero-cta1"
-                value={data.hero.ctaPrimary}
-                onChange={(e) => setData({ ...data, hero: { ...data.hero, ctaPrimary: e.target.value } })}
-              />
-            </div>
-            <div>
-              <Label htmlFor="hero-cta2">Secondary Button Text</Label>
-              <Input
-                id="hero-cta2"
-                value={data.hero.ctaSecondary}
-                onChange={(e) => setData({ ...data, hero: { ...data.hero, ctaSecondary: e.target.value } })}
-              />
-            </div>
-          </div>
         </CardContent>
       </Card>
 
@@ -163,6 +157,36 @@ export default function HomepageEditor() {
               onChange={(e) => setData({ ...data, about: { ...data.about, content: e.target.value } })}
             />
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Who We Are Section</CardTitle>
+          <CardDescription>Manage your team members</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div>
+            <Label htmlFor="who-title">Section Title</Label>
+            <Input
+              id="who-title"
+              value={data.whoWeAre?.title || ""}
+              onChange={(e) => setData({ ...data, whoWeAre: { ...data.whoWeAre, title: e.target.value, subtitle: data.whoWeAre?.subtitle || "", team: data.whoWeAre?.team || [] } })}
+            />
+          </div>
+          <div>
+            <Label htmlFor="who-subtitle">Section Subtitle</Label>
+            <Textarea
+              id="who-subtitle"
+              value={data.whoWeAre?.subtitle || ""}
+              onChange={(e) => setData({ ...data, whoWeAre: { ...data.whoWeAre, title: data.whoWeAre?.title || "", subtitle: e.target.value, team: data.whoWeAre?.team || [] } })}
+            />
+          </div>
+          
+          <TeamManager
+            team={data.whoWeAre?.team || []}
+            onChange={(team) => setData({ ...data, whoWeAre: { ...data.whoWeAre, title: data.whoWeAre?.title || "", subtitle: data.whoWeAre?.subtitle || "", team } })}
+          />
         </CardContent>
       </Card>
 
@@ -209,6 +233,63 @@ export default function HomepageEditor() {
               </div>
             </div>
           ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Where We Are Section</CardTitle>
+          <CardDescription>Your location and contact information</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <Label htmlFor="where-title">Section Title</Label>
+            <Input
+              id="where-title"
+              value={data.whereWeAre?.title || ""}
+              onChange={(e) => setData({ ...data, whereWeAre: { title: e.target.value, subtitle: data.whereWeAre?.subtitle || "", address: data.whereWeAre?.address || "", mapEmbedUrl: data.whereWeAre?.mapEmbedUrl || "", hours: data.whereWeAre?.hours || "" } })}
+            />
+          </div>
+          <div>
+            <Label htmlFor="where-subtitle">Section Subtitle</Label>
+            <Textarea
+              id="where-subtitle"
+              value={data.whereWeAre?.subtitle || ""}
+              onChange={(e) => setData({ ...data, whereWeAre: { title: data.whereWeAre?.title || "", subtitle: e.target.value, address: data.whereWeAre?.address || "", mapEmbedUrl: data.whereWeAre?.mapEmbedUrl || "", hours: data.whereWeAre?.hours || "" } })}
+            />
+          </div>
+          <div>
+            <Label htmlFor="where-address">Address</Label>
+            <Textarea
+              id="where-address"
+              rows={3}
+              value={data.whereWeAre?.address || ""}
+              onChange={(e) => setData({ ...data, whereWeAre: { title: data.whereWeAre?.title || "", subtitle: data.whereWeAre?.subtitle || "", address: e.target.value, mapEmbedUrl: data.whereWeAre?.mapEmbedUrl || "", hours: data.whereWeAre?.hours || "" } })}
+              placeholder="Enter your full address"
+            />
+          </div>
+          <div>
+            <Label htmlFor="where-map">Google Maps Embed URL</Label>
+            <Input
+              id="where-map"
+              value={data.whereWeAre?.mapEmbedUrl || ""}
+              onChange={(e) => setData({ ...data, whereWeAre: { title: data.whereWeAre?.title || "", subtitle: data.whereWeAre?.subtitle || "", address: data.whereWeAre?.address || "", mapEmbedUrl: e.target.value, hours: data.whereWeAre?.hours || "" } })}
+              placeholder="https://www.google.com/maps/embed?..."
+            />
+            <p className="text-sm text-muted-foreground mt-1">
+              Get this from Google Maps: Share → Embed a map → Copy HTML
+            </p>
+          </div>
+          <div>
+            <Label htmlFor="where-hours">Opening Hours</Label>
+            <Textarea
+              id="where-hours"
+              rows={4}
+              value={data.whereWeAre?.hours || ""}
+              onChange={(e) => setData({ ...data, whereWeAre: { title: data.whereWeAre?.title || "", subtitle: data.whereWeAre?.subtitle || "", address: data.whereWeAre?.address || "", mapEmbedUrl: data.whereWeAre?.mapEmbedUrl || "", hours: e.target.value } })}
+              placeholder="Monday - Friday: 9:00 AM - 6:00 PM&#10;Saturday: 10:00 AM - 4:00 PM&#10;Sunday: Closed"
+            />
+          </div>
         </CardContent>
       </Card>
 

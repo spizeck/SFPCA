@@ -22,12 +22,20 @@ export interface Homepage {
   hero: {
     title: string;
     subtitle: string;
-    ctaPrimary: string;
-    ctaSecondary: string;
   };
   about: {
     title: string;
     content: string;
+  };
+  whoWeAre?: {
+    title: string;
+    subtitle: string;
+    team: Array<{
+      name: string;
+      role: string;
+      bio: string;
+      photo?: string;
+    }>;
   };
   services: {
     title: string;
@@ -35,6 +43,13 @@ export interface Homepage {
       title: string;
       description: string;
     }>;
+  };
+  whereWeAre?: {
+    title: string;
+    subtitle: string;
+    address: string;
+    mapEmbedUrl: string;
+    hours: string;
   };
   donation: {
     title: string;
@@ -56,6 +71,8 @@ export interface SiteSettings {
     instagram?: string;
     twitter?: string;
   };
+  mapEmbedUrl?: string;
+  locationCode?: string;
 }
 
 export interface AdminUser {

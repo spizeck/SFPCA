@@ -9,8 +9,6 @@ interface HeroSectionProps {
   data: {
     title: string;
     subtitle: string;
-    ctaPrimary: string;
-    ctaSecondary: string;
   };
 }
 
@@ -70,10 +68,10 @@ export function HeroSection({ data }: HeroSectionProps) {
             transition={{ duration: 0.6, ease: "easeInOut", delay: 0.8 } as Transition}
           >
             <Button size="lg" asChild className="shadow-xl">
-              <Link href="#animals">{data.ctaPrimary}</Link>
+              <Link href="#services">Our Services</Link>
             </Button>
             <Button size="lg" variant="outline" asChild className="bg-white/10 backdrop-blur-sm text-white border-white/30 hover:bg-white/20 shadow-xl">
-              <Link href="#donation">{data.ctaSecondary}</Link>
+              <Link href="/animal-registration">Register Your Pet</Link>
             </Button>
           </motion.div>
         </div>

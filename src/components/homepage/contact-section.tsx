@@ -13,9 +13,10 @@ interface ContactSectionProps {
     address: string;
     hours: string;
   };
+  mapEmbedUrl?: string;
 }
 
-export function ContactSection({ contact }: ContactSectionProps) {
+export function ContactSection({ contact, mapEmbedUrl }: ContactSectionProps) {
   const animationProps = shouldReduceMotion() ? {
     initial: {},
     whileInView: undefined,
@@ -77,7 +78,7 @@ export function ContactSection({ contact }: ContactSectionProps) {
   return (
     <motion.section 
       id="contact" 
-      className="py-16 md:py-24 bg-background"
+      className="py-16 md:py-24 bg-muted"
       variants={fadeInUpVariants}
       {...animationProps}
     >
@@ -89,6 +90,40 @@ export function ContactSection({ contact }: ContactSectionProps) {
         >
           Contact Us
         </motion.h2>
+        
+        {/* Google Map */}
+        {mapEmbedUrl ? (
+          <motion.div 
+            className="mb-12 rounded-lg overflow-hidden shadow-lg"
+            variants={fadeInUpVariants}
+            {...animationProps}
+          >
+            <iframe
+              src={mapEmbedUrl}
+              width="100%"
+              height="400"
+              style={{ border: 0 }}
+              allowFullScreen
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+              className="w-full"
+            />
+          </motion.div>
+        ) : (
+          <motion.div 
+            className="mb-12 rounded-lg bg-muted border-2 border-dashed border-muted-foreground/20 flex items-center justify-center"
+            style={{ height: "400px" }}
+            variants={fadeInUpVariants}
+            {...animationProps}
+          >
+            <div className="text-center">
+              <MapPin className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <p className="text-muted-foreground">Map will be displayed here</p>
+              <p className="text-sm text-muted-foreground mt-2">Configure location in admin settings</p>
+            </div>
+          </motion.div>
+        )}
+        
         <motion.div 
           className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-5xl mx-auto"
           variants={staggerContainer}

@@ -28,7 +28,7 @@ export function DonationSection({ data }: DonationSectionProps) {
   return (
     <motion.section 
       id="donation" 
-      className="py-16 md:py-24 bg-muted"
+      className="py-16 md:py-24 bg-background"
       variants={fadeInUpVariants}
       {...animationProps}
     >

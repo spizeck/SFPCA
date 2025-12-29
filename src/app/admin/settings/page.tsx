@@ -29,6 +29,8 @@ export default function SettingsPage() {
       instagram: "",
       twitter: "",
     },
+    mapEmbedUrl: "",
+    locationCode: "",
   });
 
   useEffect(() => {
@@ -146,6 +148,60 @@ export default function SettingsPage() {
               placeholder="Monday - Friday: 9:00 AM - 5:00 PM&#10;Saturday: 10:00 AM - 2:00 PM&#10;Sunday: Closed"
             />
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Location Settings</CardTitle>
+          <CardDescription>Configure your location using Google Plus Code or embed URL</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <Label htmlFor="locationCode">Google Plus Code</Label>
+            <Input
+              id="locationCode"
+              value={data.locationCode || ""}
+              onChange={(e) => {
+                const code = e.target.value;
+                const embedUrl = code ? `https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d0!2d0!3d0!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0!2s${encodeURIComponent(code)}!5e0!3m2!1sen!2sus!4v1` : "";
+                setData({ ...data, locationCode: code, mapEmbedUrl: embedUrl });
+              }}
+              placeholder="e.g., 7QG8+3M Saba"
+            />
+            <p className="text-sm text-muted-foreground mt-1">
+              Enter a Google Plus Code (e.g., "7QG8+3M Saba") to auto-generate the map embed URL
+            </p>
+          </div>
+          <div>
+            <Label htmlFor="mapEmbedUrl">Map Embed URL (Optional)</Label>
+            <Textarea
+              id="mapEmbedUrl"
+              rows={3}
+              value={data.mapEmbedUrl || ""}
+              onChange={(e) => setData({ ...data, mapEmbedUrl: e.target.value })}
+              placeholder="https://www.google.com/maps/embed?..."
+            />
+            <p className="text-sm text-muted-foreground mt-1">
+              Or paste a custom Google Maps embed URL. Leave empty to use the Plus Code.
+            </p>
+          </div>
+          {data.mapEmbedUrl && (
+            <div className="mt-4">
+              <Label>Map Preview</Label>
+              <div className="mt-2 rounded-lg overflow-hidden border">
+                <iframe
+                  src={data.mapEmbedUrl}
+                  width="100%"
+                  height="300"
+                  style={{ border: 0 }}
+                  allowFullScreen
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                />
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
