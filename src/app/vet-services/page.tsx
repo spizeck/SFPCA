@@ -1,6 +1,6 @@
 import { getDoc, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { VetServices } from "@/components/vet-services/vet-services-page";
+import { VeterinaryServices } from "@/components/veterinary-services/veterinary-services-page";
 import { SiteSettings } from "@/lib/types";
 
 async function getSiteSettings(): Promise<SiteSettings | null> {
@@ -23,7 +23,7 @@ export default async function VetServicesPage() {
 
   return (
     <main className="min-h-screen">
-      <VetServices />
+      <VeterinaryServices />
     </main>
   );
 }
