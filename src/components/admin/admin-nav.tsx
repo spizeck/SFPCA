@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Home, FileText, PawPrint, Settings, LogOut, Menu, ClipboardList } from "lucide-react";
+import { Home, FileText, PawPrint, Settings, LogOut, Menu, ClipboardList, Stethoscope, Heart, HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AdminThemeToggle } from "@/components/admin-theme-toggle";
 import { useState } from "react";
@@ -11,8 +11,11 @@ import { useState } from "react";
 const navItems = [
   { href: "/admin", label: "Dashboard", icon: Home },
   { href: "/admin/homepage", label: "Homepage", icon: FileText },
+  { href: "/admin/veterinary-services", label: "Vet Services", icon: Stethoscope },
+  { href: "/admin/animal-adoptions", label: "Adoptions", icon: Heart },
+  { href: "/admin/animal-registration", label: "Registration", icon: ClipboardList },
+  { href: "/admin/faq", label: "FAQ", icon: HelpCircle },
   { href: "/admin/animals", label: "Animals", icon: PawPrint },
-  { href: "/admin/registrations", label: "Registrations", icon: ClipboardList },
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ];
 
@@ -30,11 +33,11 @@ export function AdminNav() {
     <nav className="bg-card border-b">
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-16">
-          <div className="flex items-center gap-8">
-            <Link href="/admin" className="text-xl font-bold text-primary whitespace-nowrap">
+          <div className="flex items-center gap-4 overflow-hidden">
+            <Link href="/admin" className="text-xl font-bold text-primary whitespace-nowrap flex-shrink-0">
               SFPCA Admin
             </Link>
-            <div className="hidden lg:flex gap-4">
+            <div className="hidden md:flex gap-1 overflow-x-auto">
               {navItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = pathname === item.href;
@@ -43,15 +46,15 @@ export function AdminNav() {
                     key={item.href}
                     href={item.href}
                     className={cn(
-                      "flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors",
+                      "flex items-center gap-1 px-2 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap",
                       isActive
                         ? "bg-primary text-primary-foreground"
                         : "text-foreground hover:bg-accent"
                     )}
+                    title={item.label}
                   >
-                    <Icon className="h-4 w-4" />
+                    <Icon className="h-4 w-4 flex-shrink-0" />
                     <span className="hidden xl:inline">{item.label}</span>
-                    <span className="xl:hidden">{item.label.slice(0, 3)}</span>
                   </Link>
                 );
               })}
@@ -74,7 +77,7 @@ export function AdminNav() {
             <Button
               variant="ghost"
               size="sm"
-              className="lg:hidden"
+              className="md:hidden"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             >
               <Menu className="h-4 w-4" />
@@ -82,7 +85,7 @@ export function AdminNav() {
           </div>
         </div>
         {mobileMenuOpen && (
-          <div className="lg:hidden border-t bg-card">
+          <div className="md:hidden border-t bg-card">
             <div className="px-2 pt-2 pb-3 space-y-1">
               {navItems.map((item) => {
                 const Icon = item.icon;

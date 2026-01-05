@@ -6,7 +6,7 @@ import { motion } from "framer-motion";
 import { fadeInUpVariants, staggerContainer, defaultTransition, shouldReduceMotion } from "@/lib/animations";
 
 interface ContactSectionProps {
-  contact: {
+  contact?: {
     phone: string;
     email: string;
     whatsapp: string;
@@ -14,9 +14,22 @@ interface ContactSectionProps {
     hours: string;
   };
   mapEmbedUrl?: string;
+  whereWeAre?: {
+    title: string;
+    subtitle: string;
+    address: string;
+    mapEmbedUrl: string;
+    hours: string;
+  };
 }
 
-export function ContactSection({ contact, mapEmbedUrl }: ContactSectionProps) {
+export function ContactSection({ contact, mapEmbedUrl, whereWeAre }: ContactSectionProps) {
+  // Use whereWeAre data if provided, otherwise use contact/settings data
+  const sectionTitle = whereWeAre?.title || "Contact Us";
+  const sectionSubtitle = whereWeAre?.subtitle || "";
+  const sectionAddress = whereWeAre?.address || contact?.address || "";
+  const sectionHours = whereWeAre?.hours || contact?.hours || "";
+  const sectionMapEmbedUrl = whereWeAre?.mapEmbedUrl || mapEmbedUrl || "";
   const animationProps = shouldReduceMotion() ? {
     initial: {},
     whileInView: undefined,
@@ -33,25 +46,25 @@ export function ContactSection({ contact, mapEmbedUrl }: ContactSectionProps) {
     {
       icon: <Phone className="h-6 w-6 text-primary" />,
       title: "Phone",
-      content: (
+      content: contact ? (
         <a href={`tel:${contact.phone}`} className="text-foreground hover:text-primary">
           {contact.phone}
         </a>
-      ),
+      ) : null,
     },
     {
       icon: <Mail className="h-6 w-6 text-primary" />,
       title: "Email",
-      content: (
+      content: contact ? (
         <a href={`mailto:${contact.email}`} className="text-foreground hover:text-primary break-all">
           {contact.email}
         </a>
-      ),
+      ) : null,
     },
     {
       icon: <MessageCircle className="h-6 w-6 text-primary" />,
       title: "WhatsApp",
-      content: (
+      content: contact ? (
         <a
           href={`https://wa.me/${contact.whatsapp.replace(/\D/g, "")}`}
           target="_blank"
@@ -60,20 +73,20 @@ export function ContactSection({ contact, mapEmbedUrl }: ContactSectionProps) {
         >
           {contact.whatsapp}
         </a>
-      ),
+      ) : null,
     },
     {
       icon: <MapPin className="h-6 w-6 text-primary" />,
       title: "Address",
-      content: <p className="text-foreground">{contact.address}</p>,
+      content: <p className="text-foreground">{sectionAddress}</p>,
     },
     {
       icon: <Clock className="h-6 w-6 text-primary" />,
       title: "Hours",
-      content: <p className="text-foreground whitespace-pre-line">{contact.hours}</p>,
+      content: <p className="text-foreground whitespace-pre-line">{sectionHours}</p>,
       wide: true,
     },
-  ];
+  ].filter(card => card.content !== null);
 
   return (
     <motion.section 
@@ -84,22 +97,31 @@ export function ContactSection({ contact, mapEmbedUrl }: ContactSectionProps) {
     >
       <div className="container mx-auto px-4">
         <motion.h2 
-          className="text-3xl md:text-4xl font-bold text-center text-foreground mb-12"
+          className="text-3xl md:text-4xl font-bold text-center text-foreground mb-4"
           variants={fadeInUpVariants}
           {...animationProps}
         >
-          Contact Us
+          {sectionTitle}
         </motion.h2>
+        {sectionSubtitle && (
+          <motion.p 
+            className="text-xl text-muted-foreground text-center mb-12"
+            variants={fadeInUpVariants}
+            {...animationProps}
+          >
+            {sectionSubtitle}
+          </motion.p>
+        )}
         
         {/* Google Map */}
-        {mapEmbedUrl ? (
+        {sectionMapEmbedUrl ? (
           <motion.div 
             className="mb-12 rounded-lg overflow-hidden shadow-lg"
             variants={fadeInUpVariants}
             {...animationProps}
           >
             <iframe
-              src={mapEmbedUrl}
+              src={sectionMapEmbedUrl}
               width="100%"
               height="400"
               style={{ border: 0 }}

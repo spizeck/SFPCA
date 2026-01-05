@@ -69,7 +69,11 @@ export default async function HomePage() {
       <DonationSection data={homepage.donation} />
       <WhoWeAreSection data={homepage.whoWeAre} />
       <FaqSection />
-      <ContactSection contact={settings.contact} mapEmbedUrl={settings.mapEmbedUrl} />
+      <ContactSection 
+        contact={settings.contact} 
+        mapEmbedUrl={settings.mapEmbedUrl}
+        whereWeAre={homepage.whereWeAre}
+      />
       <Footer social={settings.social} />
     </main>
   );

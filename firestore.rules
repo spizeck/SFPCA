@@ -26,6 +26,37 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
     
+    // FAQ - public read, admin write
+    match /faq/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Veterinary Services - public read, admin write
+    match /vetServices/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Animal Adoptions - public read, admin write
+    match /animalAdoptions/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Animal Registration - public read, admin write
+    match /animalRegistration/{document=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Registrations - admin can read/write, users can create their own
+    match /registrations/{registrationId} {
+      allow read: if isAdmin();
+      allow create: if request.auth != null;
+      allow update, delete: if isAdmin();
+    }
+    
     // Admins collection - only admins can read/write
     match /admins/{email} {
       allow read, write: if isAdmin();
