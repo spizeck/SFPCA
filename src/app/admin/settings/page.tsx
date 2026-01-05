@@ -164,8 +164,13 @@ export default function SettingsPage() {
               value={data.locationCode || ""}
               onChange={(e) => {
                 const code = e.target.value;
-                const embedUrl = code ? `https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d0!2d0!3d0!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0!2s${encodeURIComponent(code)}!5e0!3m2!1sen!2sus!4v1` : "";
-                setData({ ...data, locationCode: code, mapEmbedUrl: embedUrl });
+                if (code) {
+                  // Create a proper Google Maps embed URL for Plus Code
+                  const embedUrl = `https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3651.877!2d-63.244!3d17.628!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s${encodeURIComponent(code)}!2sSaba!5e0!3m2!1sen!2sus!4v1`;
+                  setData({ ...data, locationCode: code, mapEmbedUrl: embedUrl });
+                } else {
+                  setData({ ...data, locationCode: code, mapEmbedUrl: "" });
+                }
               }}
               placeholder="e.g., 7QG8+3M Saba"
             />

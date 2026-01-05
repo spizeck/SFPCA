@@ -76,27 +76,31 @@ export function ServicesSection({ data }: ServicesSectionProps) {
                 delay: index * 0.1,
               }}
             >
-              <Card className="text-center h-full hover:shadow-lg transition-shadow">
+              <Card className="text-center h-full hover:shadow-lg transition-shadow flex flex-col">
                 <CardHeader>
                   <div className="flex justify-center mb-4">
                     {iconMap[index] || <Heart className="h-10 w-10 text-primary" />}
                   </div>
                   <CardTitle>{service.title}</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <CardDescription className="text-base">
-                    {service.description}
-                  </CardDescription>
-                  <Button variant="outline" className="w-full" asChild>
-                    <Link href={
-                      service.title === "Veterinary Services" ? "/vet-services" :
-                      service.title === "Animal Adoptions" ? "/animal-adoptions" :
-                      "/animal-registration"
-                    }>
-                      Learn More
-                      <ArrowRight className="ml-2 h-4 w-4" />
-                    </Link>
-                  </Button>
+                <CardContent className="space-y-4 flex-1 flex flex-col justify-between">
+                  <div>
+                    <CardDescription className="text-base">
+                      {service.description}
+                    </CardDescription>
+                  </div>
+                  <div className="mt-auto">
+                    <Button variant="outline" className="w-full" asChild>
+                      <Link href={
+                        service.title === "Veterinary Services" ? "/vet-services" :
+                        service.title === "Animal Adoptions" ? "/animal-adoptions" :
+                        "/animal-registration"
+                      }>
+                        Learn More
+                        <ArrowRight className="ml-2 h-4 w-4" />
+                      </Link>
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             </motion.div>
