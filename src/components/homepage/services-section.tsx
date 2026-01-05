@@ -91,11 +91,16 @@ export function ServicesSection({ data }: ServicesSectionProps) {
                   </div>
                   <div className="mt-auto">
                     <Button variant="outline" className="w-full" asChild>
-                      <Link href={
-                        service.title === "Veterinary Services" ? "/vet-services" :
-                        service.title === "Animal Adoptions" ? "/animal-adoptions" :
-                        "/animal-registration"
-                      }>
+                      <Link href={(() => {
+                        const title = service.title.toLowerCase();
+                        if (title.includes("veterinary") || title.includes("vet")) return "/vet-services";
+                        if (title.includes("adoption")) return "/animal-adoptions";
+                        if (title.includes("registration")) return "/animal-registration";
+                        // Default fallback based on index
+                        if (index === 0) return "/vet-services";
+                        if (index === 1) return "/animal-adoptions";
+                        return "/animal-registration";
+                      })()}>
                         Learn More
                         <ArrowRight className="ml-2 h-4 w-4" />
                       </Link>
