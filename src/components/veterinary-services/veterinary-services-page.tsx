@@ -44,23 +44,46 @@ const services = [
   },
 ];
 
+const data = {
+  heroTitle: "Veterinary Services",
+  heroDescription: "Professional and affordable veterinary care for your beloved pets",
+};
+
 export function VeterinaryServices() {
   return (
     <div className="min-h-screen bg-background">
-      {/* Hero Section */}
-      <section className="py-20 bg-primary text-primary-foreground">
-        <div className="container mx-auto px-4">
+      {/* Hero Section with Full Page Video Background */}
+      <section className="relative min-h-screen overflow-hidden flex items-center justify-center">
+        {/* Video Background */}
+        <div className="absolute inset-0 z-0">
+          <video
+            autoPlay
+            loop
+            muted
+            playsInline
+            className="w-full h-full object-cover"
+            poster="/images/vet-services-poster.jpg"
+          >
+            <source src="/videos/vetdog.mp4" type="video/mp4" />
+            Your browser does not support the video tag.
+          </video>
+          {/* Dark overlay for text readability */}
+          <div className="absolute inset-0 bg-black/50" />
+        </div>
+        
+        {/* Content */}
+        <div className="relative z-10 container mx-auto px-4">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
             className="text-center max-w-4xl mx-auto"
           >
-            <h1 className="text-4xl md:text-6xl font-bold mb-6">
-              Veterinary Services
+            <h1 className="text-4xl md:text-6xl font-bold mb-6 text-white">
+              {data.heroTitle}
             </h1>
-            <p className="text-xl md:text-2xl mb-8">
-              Professional and affordable veterinary care for your beloved pets
+            <p className="text-xl md:text-2xl mb-8 text-white/90">
+              {data.heroDescription}
             </p>
             <Button size="lg" variant="secondary" asChild>
               <Link href="#services">View Our Services</Link>

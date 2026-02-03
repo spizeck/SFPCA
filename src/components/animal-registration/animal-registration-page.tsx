@@ -84,38 +84,59 @@ export function AnimalRegistration() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Hero Section */}
-      <section className="py-20 bg-primary text-primary-foreground">
-        <div className="container mx-auto px-4">
+      {/* Hero Section with Full Page Video Background */}
+      <section className="relative min-h-screen overflow-hidden flex items-center justify-center">
+        {/* Video Background */}
+        <div className="absolute inset-0 z-0">
+          <video
+            autoPlay
+            loop
+            muted
+            playsInline
+            className="w-full h-full object-cover"
+            poster="/images/registration-poster.jpg"
+          >
+            <source src="/videos/catbag.mp4" type="video/mp4" />
+            Your browser does not support the video tag.
+          </video>
+          {/* Dark overlay for text readability */}
+          <div className="absolute inset-0 bg-black/50" />
+        </div>
+        
+        {/* Content */}
+        <div className="relative z-10 container mx-auto px-4">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
             className="text-center max-w-4xl mx-auto"
           >
-            <h1 className="text-4xl md:text-6xl font-bold mb-6">
+            <h1 className="text-4xl md:text-6xl font-bold mb-6 text-white">
               Animal Registration
             </h1>
-            <p className="text-xl md:text-2xl mb-8">
+            <p className="text-xl md:text-2xl mb-8 text-white/90">
               Register your pet with SABA. Annual registration required for all animals.
             </p>
-            <div className="bg-primary-foreground/20 rounded-lg p-6 max-w-2xl mx-auto">
-              <h3 className="text-xl font-semibold mb-2">Registration Fees</h3>
+            <div className="bg-white/10 backdrop-blur-sm rounded-lg p-6 max-w-2xl mx-auto">
+              <h3 className="text-xl font-semibold mb-2 text-white">Registration Fees</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
                 <div className="bg-white/10 rounded p-3">
-                  <p className="font-semibold">Spayed/Neutered: $10</p>
+                  <p className="font-semibold text-white">Spayed/Neutered: $10</p>
                 </div>
                 <div className="bg-white/10 rounded p-3">
-                  <p className="font-semibold">Not Fixed: $100</p>
+                  <p className="font-semibold text-white">Not Fixed: $100</p>
                 </div>
               </div>
             </div>
+            <Button size="lg" variant="secondary" className="mt-8" asChild>
+              <a href="#form">Start Registration</a>
+            </Button>
           </motion.div>
         </div>
       </section>
 
       {/* Registration Form */}
-      <section className="py-20">
+      <section id="form" className="py-20">
         <div className="container mx-auto px-4 max-w-2xl">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
