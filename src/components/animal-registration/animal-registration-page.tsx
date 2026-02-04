@@ -155,6 +155,7 @@ export function AnimalRegistration() {
         <div className="absolute inset-0 z-0">
           <OptimizedVideo
             src="/videos/catbag.mp4"
+            webmSrc="/videos/catbag.webm"
             className="w-full h-full object-cover -z-10"
           />
           {/* Dark overlay for text readability */}

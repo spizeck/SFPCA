@@ -42,6 +42,7 @@ export function AnimalAdoptions() {
         <div className="absolute inset-0 z-0">
           <OptimizedVideo
             src="/videos/adoption.mp4"
+            webmSrc="/videos/adoption.webm"
             className="w-full h-full object-cover -z-10"
           />
           {/* Dark overlay for text readability */}

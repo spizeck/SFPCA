@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 
 interface OptimizedVideoProps {
   src: string;
+  webmSrc?: string;
   poster?: string;
   className?: string;
   autoPlay?: boolean;
@@ -14,6 +15,7 @@ interface OptimizedVideoProps {
 
 export function OptimizedVideo({
   src,
+  webmSrc,
   poster,
   className = "",
   autoPlay = true,
@@ -67,6 +69,7 @@ export function OptimizedVideo({
         onLoadedData={handleLoadedData}
         preload={isInView ? "metadata" : "none"}
       >
+        {webmSrc && <source src={webmSrc} type="video/webm" />}
         <source src={src} type="video/mp4" />
         Your browser does not support the video tag.
       </video>

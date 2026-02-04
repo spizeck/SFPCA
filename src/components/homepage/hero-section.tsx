@@ -33,6 +33,7 @@ export function HeroSection({ data }: HeroSectionProps) {
       <div className="absolute inset-0 z-0">
         <OptimizedVideo
           src="/videos/herocat.mp4"
+          webmSrc="/videos/herocat.webm"
           className="w-full h-full object-cover -z-10"
         />
       </div>
