@@ -44,17 +44,10 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
     
-    // Animal Registration - public read, admin write
-    match /animalRegistration/{document=**} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-    
-    // Registrations - admin can read/write, users can create their own
-    match /registrations/{registrationId} {
-      allow read: if isAdmin();
+    // Animal Registrations - public can create, admin can read/write
+    match /animalRegistrations/{registrationId} {
       allow create: if request.auth != null;
-      allow update, delete: if isAdmin();
+      allow read, update, delete: if isAdmin();
     }
     
     // Admins collection - only admins can read/write

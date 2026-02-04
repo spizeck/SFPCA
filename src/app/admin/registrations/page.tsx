@@ -6,22 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-
-interface AnimalRegistration {
-  id: string;
-  ownerName: string;
-  ownerAddress: string;
-  ownerPhone: string;
-  ownerEmail: string;
-  animalName: string;
-  animalType: string;
-  animalSex: string;
-  isFixed: boolean;
-  fee: number;
-  paymentReceiptUrl: string;
-  isVerified: boolean;
-  submittedAt: string;
-}
+import { AnimalRegistration } from "@/lib/types";
+import { Eye, CheckCircle, Download } from "lucide-react";
+import { collection, getDocs, doc, updateDoc, query, orderBy } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
 export default function RegistrationsPage() {
   const [registrations, setRegistrations] = useState<AnimalRegistration[]>([]);
@@ -33,49 +21,54 @@ export default function RegistrationsPage() {
   }, []);
 
   const loadRegistrations = async () => {
-    // Mock data for now - replace with Firebase fetch
-    const mockData: AnimalRegistration[] = [
-      {
-        id: "1",
-        ownerName: "John Doe",
-        ownerAddress: "123 Main St, Saba",
-        ownerPhone: "555-1234",
-        ownerEmail: "john@example.com",
-        animalName: "Buddy",
-        animalType: "Dog",
-        animalSex: "Male",
-        isFixed: true,
-        fee: 10,
-        paymentReceiptUrl: "/receipts/buddy.pdf",
-        isVerified: false,
-        submittedAt: "2024-12-28",
-      },
-      {
-        id: "2",
-        ownerName: "Jane Smith",
-        ownerAddress: "456 Oak Ave, Saba",
-        ownerPhone: "555-5678",
-        ownerEmail: "jane@example.com",
-        animalName: "Whiskers",
-        animalType: "Cat",
-        animalSex: "Female",
-        isFixed: false,
-        fee: 100,
-        paymentReceiptUrl: "/receipts/whiskers.pdf",
-        isVerified: true,
-        submittedAt: "2024-12-27",
-      },
-    ];
-    
-    setRegistrations(mockData);
-    setLoading(false);
+    try {
+      const registrationsQuery = query(
+        collection(db, "animalRegistrations"),
+        orderBy("createdAt", "desc")
+      );
+      
+      const querySnapshot = await getDocs(registrationsQuery);
+      const registrationsData: AnimalRegistration[] = [];
+      
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        registrationsData.push({
+          id: doc.id,
+          ownerInfo: data.ownerInfo,
+          animals: data.animals,
+          paymentReceipt: data.paymentReceipt,
+          totalFee: data.totalFee,
+          status: data.status,
+          createdAt: data.createdAt,
+          updatedAt: data.updatedAt,
+        });
+      });
+      
+      setRegistrations(registrationsData);
+    } catch (error) {
+      console.error("Error loading registrations:", error);
+      toast({
+        title: "Error",
+        description: "Failed to load registrations from database.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleVerify = async (id: string) => {
     try {
       // Update in Firebase
+      const registrationRef = doc(db, "animalRegistrations", id);
+      await updateDoc(registrationRef, {
+        status: "approved",
+        updatedAt: new Date().toISOString(),
+      });
+      
+      // Update local state
       setRegistrations(registrations.map(reg => 
-        reg.id === id ? { ...reg, isVerified: true } : reg
+        reg.id === id ? { ...reg, status: "approved" as const } : reg
       ));
       
       toast({
@@ -83,6 +76,7 @@ export default function RegistrationsPage() {
         description: "The animal registration has been verified successfully.",
       });
     } catch (error) {
+      console.error("Error verifying registration:", error);
       toast({
         title: "Error",
         description: "Failed to verify registration.",
@@ -91,8 +85,21 @@ export default function RegistrationsPage() {
     }
   };
 
-  const handleViewReceipt = (url: string) => {
-    window.open(url, "_blank");
+  const handleViewReceipt = (url?: string) => {
+    if (url) {
+      window.open(url, "_blank");
+    } else {
+      toast({
+        title: "No Receipt",
+        description: "No payment receipt was uploaded for this registration.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleViewDetails = (registration: AnimalRegistration) => {
+    // You could open a modal or navigate to a detail page
+    console.log("View details:", registration);
   };
 
   if (loading) {
@@ -120,7 +127,7 @@ export default function RegistrationsPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {registrations.filter(r => !r.isVerified).length}
+                {registrations.filter(r => r.status === "pending").length}
               </div>
             </CardContent>
           </Card>
@@ -130,7 +137,7 @@ export default function RegistrationsPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                ${registrations.reduce((sum, r) => sum + r.fee, 0)}
+                ${registrations.reduce((sum, r) => sum + r.totalFee, 0)}
               </div>
             </CardContent>
           </Card>
@@ -147,9 +154,8 @@ export default function RegistrationsPage() {
                 <TableRow>
                   <TableHead>Date</TableHead>
                   <TableHead>Owner</TableHead>
-                  <TableHead>Animal</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Fee</TableHead>
+                  <TableHead>Animals</TableHead>
+                  <TableHead>Total Fee</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
@@ -157,26 +163,29 @@ export default function RegistrationsPage() {
               <TableBody>
                 {registrations.map((registration) => (
                   <TableRow key={registration.id}>
-                    <TableCell>{registration.submittedAt}</TableCell>
+                    <TableCell>{registration.createdAt}</TableCell>
                     <TableCell>
                       <div>
-                        <div className="font-medium">{registration.ownerName}</div>
-                        <div className="text-sm text-muted-foreground">{registration.ownerPhone}</div>
+                        <div className="font-medium">{registration.ownerInfo.name}</div>
+                        <div className="text-sm text-muted-foreground">{registration.ownerInfo.phone}</div>
                       </div>
                     </TableCell>
-                    <TableCell>{registration.animalName}</TableCell>
                     <TableCell>
-                      <div>
-                        <div>{registration.animalType}</div>
-                        <div className="text-sm text-muted-foreground">
-                          {registration.animalSex} • {registration.isFixed ? "Fixed" : "Not Fixed"}
-                        </div>
+                      <div className="space-y-1">
+                        {registration.animals.map((animal, index) => (
+                          <div key={index} className="text-sm">
+                            <div className="font-medium">{animal.name}</div>
+                            <div className="text-muted-foreground">
+                              {animal.type} • {animal.sex} • {animal.isFixed === "yes" ? "Fixed" : "Not Fixed"}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </TableCell>
-                    <TableCell>${registration.fee}</TableCell>
+                    <TableCell>${registration.totalFee}</TableCell>
                     <TableCell>
-                      <Badge variant={registration.isVerified ? "default" : "secondary"}>
-                        {registration.isVerified ? "Verified" : "Pending"}
+                      <Badge variant={registration.status === "approved" ? "default" : "secondary"}>
+                        {registration.status === "approved" ? "Verified" : "Pending"}
                       </Badge>
                     </TableCell>
                     <TableCell>
@@ -184,16 +193,25 @@ export default function RegistrationsPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => handleViewReceipt(registration.paymentReceiptUrl)}
+                          onClick={() => handleViewDetails(registration)}
                         >
-                          View Receipt
+                          <Eye className="h-4 w-4" />
                         </Button>
-                        {!registration.isVerified && (
+                        {registration.paymentReceipt && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleViewReceipt(registration.paymentReceipt)}
+                          >
+                            <Download className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {registration.status === "pending" && (
                           <Button
                             size="sm"
                             onClick={() => handleVerify(registration.id)}
                           >
-                            Verify
+                            <CheckCircle className="h-4 w-4" />
                           </Button>
                         )}
                       </div>

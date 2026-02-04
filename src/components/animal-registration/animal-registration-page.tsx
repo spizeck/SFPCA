@@ -10,6 +10,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
+import { Plus, Trash2 } from "lucide-react";
+import { AnimalRegistrationData } from "@/lib/types";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
 export function AnimalRegistration() {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -20,27 +24,90 @@ export function AnimalRegistration() {
     ownerAddress: "",
     ownerPhone: "",
     ownerEmail: "",
-    animalName: "",
-    animalType: "",
-    animalSex: "",
-    isFixed: "",
+    animals: [
+      {
+        name: "",
+        type: "",
+        sex: "",
+        isFixed: "",
+      } as AnimalRegistrationData,
+    ],
     paymentReceipt: null as File | null,
   });
+
+  const calculateTotalFee = () => {
+    return formData.animals.reduce((total, animal) => {
+      return total + (animal.isFixed === "yes" ? 10 : 100);
+    }, 0);
+  };
+
+  const addAnimal = () => {
+    setFormData({
+      ...formData,
+      animals: [
+        ...formData.animals,
+        {
+          name: "",
+          type: "",
+          sex: "",
+          isFixed: "",
+        } as AnimalRegistrationData,
+      ],
+    });
+  };
+
+  const removeAnimal = (index: number) => {
+    if (formData.animals.length > 1) {
+      setFormData({
+        ...formData,
+        animals: formData.animals.filter((_, i) => i !== index),
+      });
+    }
+  };
+
+  const updateAnimal = (index: number, field: keyof AnimalRegistrationData, value: string) => {
+    const updatedAnimals = [...formData.animals];
+    updatedAnimals[index] = { ...updatedAnimals[index], [field]: value };
+    setFormData({ ...formData, animals: updatedAnimals });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
 
     try {
-      // Calculate registration fee
-      const fee = formData.isFixed === "yes" ? 10 : 100;
+      const totalFee = calculateTotalFee();
       
-      // Here you would upload to Firebase Storage and save to Firestore
-      console.log("Submitting registration:", { ...formData, fee });
+      // Prepare data for Firestore
+      const registrationData = {
+        ownerInfo: {
+          name: formData.ownerName,
+          address: formData.ownerAddress,
+          phone: formData.ownerPhone,
+          email: formData.ownerEmail,
+        },
+        animals: formData.animals,
+        paymentReceipt: null, // Will be updated if file is uploaded
+        totalFee,
+        status: "pending",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      
+      // Save to Firestore
+      const docRef = await addDoc(collection(db, "animalRegistrations"), registrationData);
+      
+      // TODO: Upload payment receipt to Firebase Storage if provided
+      if (formData.paymentReceipt) {
+        // File upload logic would go here
+        console.log("Payment receipt to upload:", formData.paymentReceipt);
+      }
+      
+      console.log("Registration saved with ID:", docRef.id);
       
       toast({
         title: "Registration Submitted",
-        description: `Your registration has been submitted. The fee is $${fee}. Please allow 24-48 hours for verification.`,
+        description: `Your registration for ${formData.animals.length} animal(s) has been submitted. The total fee is $${totalFee}. Please allow 24-48 hours for verification.`,
       });
       
       // Reset form
@@ -49,13 +116,18 @@ export function AnimalRegistration() {
         ownerAddress: "",
         ownerPhone: "",
         ownerEmail: "",
-        animalName: "",
-        animalType: "",
-        animalSex: "",
-        isFixed: "",
+        animals: [
+          {
+            name: "",
+            type: "",
+            sex: "",
+            isFixed: "",
+          } as AnimalRegistrationData,
+        ],
         paymentReceipt: null as File | null,
       });
     } catch (error) {
+      console.error("Error submitting registration:", error);
       toast({
         title: "Error",
         description: "Failed to submit registration. Please try again.",
@@ -72,15 +144,7 @@ export function AnimalRegistration() {
     }
   };
 
-  const handleSexChange = (value: string) => {
-    setFormData({ ...formData, animalSex: value });
-  };
-
-  const handleFixedChange = (value: string) => {
-    setFormData({ ...formData, isFixed: value });
-  };
-
-  const fee = formData.isFixed === "yes" ? 10 : 100;
+  const totalFee = calculateTotalFee();
 
   return (
     <div className="min-h-screen bg-background">
@@ -199,65 +263,120 @@ export function AnimalRegistration() {
                   </div>
 
                   {/* Animal Information */}
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-semibold">Animal Information</h3>
-                    <div>
-                      <Label htmlFor="animalName">Animal's Name *</Label>
-                      <Input
-                        id="animalName"
-                        value={formData.animalName}
-                        onChange={(e) => setFormData({ ...formData, animalName: e.target.value })}
-                        required
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="animalType">Type of Animal *</Label>
-                      <Input
-                        id="animalType"
-                        placeholder="e.g., Dog, Cat, etc."
-                        value={formData.animalType}
-                        onChange={(e) => setFormData({ ...formData, animalType: e.target.value })}
-                        required
-                      />
-                    </div>
-                    <div>
-                      <Label>Sex *</Label>
-                      <RadioGroup
-                        value={formData.animalSex}
-                        onValueChange={handleSexChange}
-                        className="flex gap-4 mt-2"
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-lg font-semibold">Animal Information</h3>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={addAnimal}
+                        className="flex items-center gap-2"
                       >
-                        <div className="flex items-center space-x-2">
-                          <RadioGroupItem value="male" id="male" />
-                          <Label htmlFor="male">Male</Label>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <RadioGroupItem value="female" id="female" />
-                          <Label htmlFor="female">Female</Label>
-                        </div>
-                      </RadioGroup>
+                        <Plus className="h-4 w-4" />
+                        Add Another Animal
+                      </Button>
                     </div>
-                    <div>
-                      <Label>Is the animal spayed/neutered? *</Label>
-                      <RadioGroup
-                        value={formData.isFixed}
-                        onValueChange={handleFixedChange}
-                        className="flex gap-4 mt-2"
-                      >
-                        <div className="flex items-center space-x-2">
-                          <RadioGroupItem value="yes" id="yes" />
-                          <Label htmlFor="yes">Yes</Label>
+                    
+                    {formData.animals.map((animal, index) => (
+                      <Card key={index} className="p-4">
+                        <div className="flex items-center justify-between mb-4">
+                          <h4 className="font-medium">Animal {index + 1}</h4>
+                          {formData.animals.length > 1 && (
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => removeAnimal(index)}
+                              className="flex items-center gap-2"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Remove
+                            </Button>
+                          )}
                         </div>
-                        <div className="flex items-center space-x-2">
-                          <RadioGroupItem value="no" id="no" />
-                          <Label htmlFor="no">No</Label>
+                        
+                        <div className="space-y-4">
+                          <div>
+                            <Label htmlFor={`animalName-${index}`}>Animal's Name *</Label>
+                            <Input
+                              id={`animalName-${index}`}
+                              value={animal.name}
+                              onChange={(e) => updateAnimal(index, 'name', e.target.value)}
+                              required
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor={`animalType-${index}`}>Type of Animal *</Label>
+                            <Input
+                              id={`animalType-${index}`}
+                              placeholder="e.g., Dog, Cat, etc."
+                              value={animal.type}
+                              onChange={(e) => updateAnimal(index, 'type', e.target.value)}
+                              required
+                            />
+                          </div>
+                          <div>
+                            <Label>Sex *</Label>
+                            <RadioGroup
+                              value={animal.sex}
+                              onValueChange={(value) => updateAnimal(index, 'sex', value)}
+                              className="flex gap-4 mt-2"
+                            >
+                              <div className="flex items-center space-x-2">
+                                <RadioGroupItem value="male" id={`male-${index}`} />
+                                <Label htmlFor={`male-${index}`}>Male</Label>
+                              </div>
+                              <div className="flex items-center space-x-2">
+                                <RadioGroupItem value="female" id={`female-${index}`} />
+                                <Label htmlFor={`female-${index}`}>Female</Label>
+                              </div>
+                            </RadioGroup>
+                          </div>
+                          <div>
+                            <Label>Is the animal spayed/neutered? *</Label>
+                            <RadioGroup
+                              value={animal.isFixed}
+                              onValueChange={(value) => updateAnimal(index, 'isFixed', value)}
+                              className="flex gap-4 mt-2"
+                            >
+                              <div className="flex items-center space-x-2">
+                                <RadioGroupItem value="yes" id={`yes-${index}`} />
+                                <Label htmlFor={`yes-${index}`}>Yes</Label>
+                              </div>
+                              <div className="flex items-center space-x-2">
+                                <RadioGroupItem value="no" id={`no-${index}`} />
+                                <Label htmlFor={`no-${index}`}>No</Label>
+                              </div>
+                            </RadioGroup>
+                            {animal.isFixed && (
+                              <p className="text-sm text-muted-foreground mt-2">
+                                Registration fee: <span className="font-semibold text-primary">
+                                  ${animal.isFixed === "yes" ? 10 : 100}
+                                </span>
+                              </p>
+                            )}
+                          </div>
                         </div>
-                      </RadioGroup>
-                      {formData.isFixed && (
-                        <p className="text-sm text-muted-foreground mt-2">
-                          Registration fee: <span className="font-semibold text-primary">${fee}</span>
-                        </p>
-                      )}
+                      </Card>
+                    ))}
+                    
+                    <div className="bg-muted p-4 rounded-lg">
+                      <h4 className="font-semibold mb-2">Fee Summary</h4>
+                      <div className="space-y-1">
+                        {formData.animals.map((animal, index) => (
+                          <div key={index} className="flex justify-between text-sm">
+                            <span>Animal {index + 1} ({animal.name || 'Unnamed'})</span>
+                            <span>${animal.isFixed === "yes" ? 10 : 100}</span>
+                          </div>
+                        ))}
+                        <div className="border-t pt-2 mt-2">
+                          <div className="flex justify-between font-semibold">
+                            <span>Total Fee:</span>
+                            <span className="text-primary">${totalFee}</span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
@@ -265,17 +384,16 @@ export function AnimalRegistration() {
                   <div className="space-y-4">
                     <h3 className="text-lg font-semibold">Payment Information</h3>
                     <div>
-                      <Label htmlFor="paymentReceipt">Upload Payment Receipt *</Label>
+                      <Label htmlFor="paymentReceipt">Upload Payment Receipt (Optional)</Label>
                       <Input
                         id="paymentReceipt"
                         type="file"
                         accept="image/*,.pdf"
                         onChange={handleFileChange}
                         className="mt-2"
-                        required
                       />
                       <p className="text-sm text-muted-foreground mt-1">
-                        Please upload a copy of your payment receipt. Accepted formats: JPG, PNG, PDF
+                        Optionally upload a copy of your payment receipt. Accepted formats: JPG, PNG, PDF
                       </p>
                     </div>
                   </div>
@@ -291,7 +409,7 @@ export function AnimalRegistration() {
                   </div>
 
                   <Button type="submit" className="w-full" disabled={isSubmitting}>
-                    {isSubmitting ? "Submitting..." : `Submit Registration - $${fee}`}
+                    {isSubmitting ? "Submitting..." : `Submit Registration - $${totalFee}`}
                   </Button>
                 </form>
               </CardContent>

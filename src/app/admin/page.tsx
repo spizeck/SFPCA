@@ -1,14 +1,14 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { FileText, PawPrint, Settings } from "lucide-react";
+import { FileText, PawPrint, Settings, ClipboardList } from "lucide-react";
 
 export default function AdminDashboard() {
   return (
     <div className="max-w-4xl mx-auto">
       <h1 className="text-3xl font-bold mb-8">Admin Dashboard</h1>
       
-      <div className="grid md:grid-cols-3 gap-6">
+      <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
         <Card>
           <CardHeader>
             <div className="flex items-center gap-3 mb-2">
@@ -39,6 +39,23 @@ export default function AdminDashboard() {
           <CardContent>
             <Button asChild className="w-full">
               <Link href="/admin/animals">Manage Animals</Link>
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-3 mb-2">
+              <ClipboardList className="h-8 w-8 text-primary" />
+              <CardTitle>Registrations</CardTitle>
+            </div>
+            <CardDescription>
+              View and verify animal registrations, manage payment receipts
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild className="w-full">
+              <Link href="/admin/registrations">View Registrations</Link>
             </Button>
           </CardContent>
         </Card>

@@ -8,8 +8,8 @@ import { AdminThemeToggle } from "@/components/admin-theme-toggle";
 export function Breadcrumbs() {
   const pathname = usePathname();
   
-  // Don't show breadcrumbs on homepage
-  if (pathname === "/") return null;
+  // Don't show breadcrumbs on homepage or admin routes
+  if (pathname === "/" || pathname.startsWith("/admin")) return null;
 
   const pathSegments = pathname.split("/").filter(Boolean);
   

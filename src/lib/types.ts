@@ -80,3 +80,26 @@ export interface AdminUser {
   role: "admin" | "editor";
   createdAt: Date;
 }
+
+export interface AnimalRegistrationData {
+  name: string;
+  type: string;
+  sex: "male" | "female" | "";
+  isFixed: "yes" | "no" | "";
+}
+
+export interface AnimalRegistration {
+  id: string;
+  ownerInfo: {
+    name: string;
+    address: string;
+    phone: string;
+    email: string;
+  };
+  animals: AnimalRegistrationData[];
+  paymentReceipt?: string; // Firebase Storage URL
+  totalFee: number;
+  status: "pending" | "approved" | "rejected";
+  createdAt: string;
+  updatedAt: string;
+}
