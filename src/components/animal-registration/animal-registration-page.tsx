@@ -14,6 +14,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { AnimalRegistrationData } from "@/lib/types";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { OptimizedVideo } from "@/components/ui/optimized-video";
 
 export function AnimalRegistration() {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -152,17 +153,10 @@ export function AnimalRegistration() {
       <section className="relative min-h-screen overflow-hidden flex items-center justify-center">
         {/* Video Background */}
         <div className="absolute inset-0 z-0">
-          <video
-            autoPlay
-            loop
-            muted
-            playsInline
-            className="w-full h-full object-cover"
-            poster="/images/registration-poster.jpg"
-          >
-            <source src="/videos/catbag.mp4" type="video/mp4" />
-            Your browser does not support the video tag.
-          </video>
+          <OptimizedVideo
+            src="/videos/catbag.mp4"
+            className="w-full h-full object-cover -z-10"
+          />
           {/* Dark overlay for text readability */}
           <div className="absolute inset-0 bg-black/50" />
         </div>

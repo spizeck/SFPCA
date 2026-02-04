@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { OptimizedVideo } from "@/components/ui/optimized-video";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
@@ -39,17 +40,10 @@ export function AnimalAdoptions() {
       <section className="relative min-h-screen overflow-hidden flex items-center justify-center">
         {/* Video Background */}
         <div className="absolute inset-0 z-0">
-          <video
-            autoPlay
-            loop
-            muted
-            playsInline
-            className="w-full h-full object-cover"
-            poster="/images/adoptions-poster.jpg"
-          >
-            <source src="/videos/adoption.mp4" type="video/mp4" />
-            Your browser does not support the video tag.
-          </video>
+          <OptimizedVideo
+            src="/videos/adoption.mp4"
+            className="w-full h-full object-cover -z-10"
+          />
           {/* Dark overlay for text readability */}
           <div className="absolute inset-0 bg-black/50" />
         </div>

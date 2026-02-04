@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { OptimizedVideo } from "@/components/ui/optimized-video";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 
@@ -56,17 +57,10 @@ export function VeterinaryServices() {
       <section className="relative min-h-screen overflow-hidden flex items-center justify-center">
         {/* Video Background */}
         <div className="absolute inset-0 z-0">
-          <video
-            autoPlay
-            loop
-            muted
-            playsInline
-            className="w-full h-full object-cover"
-            poster="/images/vet-services-poster.jpg"
-          >
-            <source src="/videos/vetdog.mp4" type="video/mp4" />
-            Your browser does not support the video tag.
-          </video>
+          <OptimizedVideo
+            src="/videos/vetdog.mp4"
+            className="w-full h-full object-cover -z-10"
+          />
           {/* Dark overlay for text readability */}
           <div className="absolute inset-0 bg-black/50" />
         </div>

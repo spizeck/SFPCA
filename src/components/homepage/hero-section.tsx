@@ -1,6 +1,7 @@
 "use client"
 
 import { Button } from "@/components/ui/button";
+import { OptimizedVideo } from "@/components/ui/optimized-video";
 import Link from "next/link";
 import { motion, Transition } from "framer-motion";
 import { fadeInUpVariants, scaleInVariants, shouldReduceMotion } from "@/lib/animations";
@@ -29,15 +30,12 @@ export function HeroSection({ data }: HeroSectionProps) {
       {...animationProps}
     >
       {/* Background Video */}
-      <video
-        autoPlay
-        loop
-        muted
-        playsInline
-        className="absolute top-0 left-0 w-full h-full object-cover"
-      >
-        <source src="videos/herocat.mp4" type="video/mp4" />
-      </video>
+      <div className="absolute inset-0 z-0">
+        <OptimizedVideo
+          src="/videos/herocat.mp4"
+          className="w-full h-full object-cover -z-10"
+        />
+      </div>
       
       {/* Dark overlay for text readability */}
       <div className="absolute inset-0 bg-black/50" />
