@@ -170,7 +170,7 @@ export default function SettingsPage() {
               placeholder="e.g., 7QG8+3M Saba"
             />
             <p className="text-sm text-muted-foreground mt-1">
-              Enter a Google Plus Code (e.g., "7QG8+3M Saba") to auto-generate the map embed URL
+              Enter a Google Plus Code (e.g., &ldquo;7QG8+3M Saba&rdquo;) to auto-generate the map embed URL
             </p>
           </div>
           <div>

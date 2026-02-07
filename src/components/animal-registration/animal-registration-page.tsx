@@ -98,11 +98,6 @@ export function AnimalRegistration() {
       // Save to Firestore
       const docRef = await addDoc(collection(db, "animalRegistrations"), registrationData);
       
-      // TODO: Upload payment receipt to Firebase Storage if provided
-      if (formData.paymentReceipt) {
-        // File upload logic would go here
-      }
-      
       toast({
         title: "Registration Submitted",
         description: `Your registration for ${formData.animals.length} animal(s) has been submitted. The total fee is $${totalFee}. Please allow 24-48 hours for verification.`,
@@ -290,7 +285,7 @@ export function AnimalRegistration() {
                         
                         <div className="space-y-4">
                           <div>
-                            <Label htmlFor={`animalName-${index}`}>Animal's Name *</Label>
+                            <Label htmlFor={`animalName-${index}`}>Animal&apos;s Name *</Label>
                             <Input
                               id={`animalName-${index}`}
                               value={animal.name}
@@ -436,7 +431,7 @@ export function AnimalRegistration() {
                 <CardContent className="space-y-2">
                   <p>• Submit this form with payment receipt</p>
                   <p>• We verify your payment within 24-48 hours</p>
-                  <p>• You'll receive a registration certificate</p>
+                  <p>• You&apos;ll receive a registration certificate</p>
                   <p>• Annual renewal required</p>
                 </CardContent>
               </Card>

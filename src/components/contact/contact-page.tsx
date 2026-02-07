@@ -110,7 +110,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
               Contact Us
             </h1>
             <p className="text-xl md:text-2xl mb-8 text-white/90">
-              Get in touch with SABA. We're here to help you and the animals of Saba.
+              Get in touch with SABA. We&apos;re here to help you and the animals of Saba.
             </p>
           </motion.div>
         </div>
@@ -130,7 +130,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
               Get in Touch
             </h2>
             <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-              Reach out to us through any of these methods. We're always happy to help!
+              Reach out to us through any of these methods. We&apos;re always happy to help!
             </p>
           </motion.div>
 

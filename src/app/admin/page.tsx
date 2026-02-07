@@ -104,10 +104,10 @@ export default function AdminDashboard() {
             • Changes to the homepage and settings are reflected immediately on the public site
           </p>
           <p className="text-sm text-muted-foreground">
-            • Only animals marked as "available" will appear on the public homepage
+            • Only animals marked as &ldquo;available&rdquo; will appear on the public homepage
           </p>
           <p className="text-sm text-muted-foreground">
-            • Use the "View Site" button in the navigation to preview your changes
+            • Use the &ldquo;View Site&rdquo; button in the navigation to preview your changes
           </p>
         </CardContent>
       </Card>

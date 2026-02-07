@@ -98,7 +98,7 @@ export default function RegistrationsPage() {
   };
 
   const handleViewDetails = (registration: AnimalRegistration) => {
-    // TODO: Open a modal or navigate to a detail page
+    // Detail view not yet implemented
   };
 
   if (loading) {

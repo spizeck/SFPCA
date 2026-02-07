@@ -237,8 +237,8 @@ export default function AnimalsManager() {
                   onChange={(e) => setFormData({ ...formData, photos: e.target.value ? [e.target.value] : [] })}
                   placeholder="https://example.com/photo.jpg"
                 />
-                <p className="text-xs text-gray-500 mt-1">
-                  TODO: Add Firebase Storage integration for photo uploads
+                <p className="text-xs text-muted-foreground mt-1">
+                  Enter a direct URL to the animal photo
                 </p>
               </div>
               <Button onClick={handleSubmit} className="w-full">

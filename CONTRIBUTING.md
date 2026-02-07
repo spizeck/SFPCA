@@ -1,6 +1,6 @@
 # Contributing to SFPCA Website
 
-Thank you for your interest in contributing to the SFPCA website! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to the SFPCA website! This document provides guidelines for contributors.
 
 ## Getting Started
 
@@ -45,153 +45,63 @@ Thank you for your interest in contributing to the SFPCA website! This document 
 ### Code Style
 
 - Use TypeScript for all new code
-- Follow the existing code structure
-- Use server components by default
-- Only use `"use client"` when necessary
-- Follow shadcn/ui patterns for UI components
+- Follow the existing code structure and patterns
+- Use server components by default; only use `"use client"` when necessary
+- Use shadcn/ui components for UI elements
+- Use Lucide React for icons
+- Use Framer Motion for animations (respect `shouldReduceMotion`)
 
 ### Commit Messages
 
 Use conventional commits:
-- `feat:` for new features
-- `fix:` for bug fixes
-- `docs:` for documentation
-- `style:` for formatting
-- `refactor:` for refactoring
-- `test:` for tests
-- `chore:` for maintenance
-
-Example:
-```
-feat: add animal search functionality
-fix: resolve mobile layout issue
-```
+- `feat:` new features
+- `fix:` bug fixes
+- `docs:` documentation
+- `style:` formatting
+- `refactor:` refactoring
+- `chore:` maintenance
 
 ### Pull Requests
 
-1. Ensure your branch is up to date:
-   ```bash
-   git checkout main
-   git pull upstream main
-   git checkout your-branch
-   git rebase main
-   ```
-
-2. Run tests and linting:
+1. Ensure your branch is up to date with `main`
+2. Run checks before submitting:
    ```bash
    npm run lint
    npm run type-check
    npm run build
    ```
-
-3. Create a pull request with:
-   - Clear title and description
-   - Reference any related issues
-   - Include screenshots if UI changes
-   - Mark as ready for review
-
-## Project Structure
-
-```
-src/
-├── app/                # Next.js App Router pages
-│   ├── admin/         # Admin routes (protected)
-│   ├── api/           # API routes
-│   └── (routes)/      # Public routes
-├── components/        # React components
-│   ├── admin/         # Admin components
-│   ├── homepage/      # Homepage sections
-│   └── ui/            # shadcn/ui components
-├── lib/               # Utilities and helpers
-│   ├── firebase.ts    # Firebase client config
-│   ├── auth.ts        # Auth helpers
-│   └── types.ts       # TypeScript types
-└── hooks/             # Custom React hooks
-```
+3. Create a PR with a clear title, description, and screenshots for UI changes
 
 ## Adding Features
 
 ### New Admin Pages
 
-1. Create route in `src/app/admin/[feature]/page.tsx`
+1. Create route at `src/app/admin/[feature]/page.tsx`
 2. Add navigation link in `src/components/admin/admin-nav.tsx`
-3. Implement server-side auth check
-4. Use shadcn/ui components for UI
+3. Add Firestore security rules if needed
+4. Use shadcn/ui components for consistency
 
 ### New Public Pages
 
-1. Create route in `src/app/[page]/page.tsx`
-2. Use server components for data fetching
-3. Ensure mobile responsiveness
-4. Add to navigation if needed
+1. Create route at `src/app/[page]/page.tsx`
+2. Add SEO metadata export
+3. Add to `src/app/sitemap.ts`
+4. Ensure mobile responsiveness
 
 ### Database Changes
 
 1. Update TypeScript types in `src/lib/types.ts`
-2. Update Firestore security rules
-3. Update seed data if needed
-4. Document changes in PR
+2. Update Firestore security rules in `firestore.rules`
+3. Document the new collection in the README
 
-## Testing
+## Security
 
-### Manual Testing Checklist
+- Never commit `.env.local` or any files containing secrets
+- Validate all user inputs
+- Use Firestore security rules for data access control
+- No sensitive data in client-side code
+- Service account keys must never be committed (covered by `.gitignore`)
 
-- [ ] Feature works on desktop
-- [ ] Feature works on mobile
-- [ ] Admin authentication works
-- [ ] Form validation works
-- [ ] Error states handled
-- [ ] Loading states shown
+## License
 
-### Type Checking
-
-Run TypeScript compiler:
-```bash
-npm run type-check
-```
-
-### Linting
-
-Run ESLint:
-```bash
-npm run lint
-```
-
-## Deployment
-
-### Preview Deployments
-
-- Each PR creates a Vercel preview
-- Test on preview before merging
-
-### Production Deployment
-
-- Merge to `main` branch triggers deployment
-- Ensure environment variables are set in Vercel
-
-## Security Considerations
-
-- Never commit `.env.local`
-- Validate all inputs
-- Use Firebase security rules
-- Check permissions before data access
-- No sensitive data in client code
-
-## Getting Help
-
-- Check existing issues and PRs
-- Read the documentation
-- Ask questions in discussions
-- Contact the development team
-
-## Code of Conduct
-
-Be respectful and professional:
-- Use inclusive language
-- Provide constructive feedback
-- Help others learn
-- Follow GitHub's CoC
-
----
-
-Thank you for contributing to SFPCA! Your efforts help us care for animals in need.
+By contributing, you agree that your contributions will be licensed under the project's proprietary license. See [LICENSE](LICENSE).

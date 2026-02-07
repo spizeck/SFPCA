@@ -1,38 +1,62 @@
 # SFPCA Website
 
-A modern Next.js web application for the Saba Foundation for Preventing Cruelty to Animals (SFPCA).
+A modern web application for the **Saba Foundation for the Prevention of Cruelty to Animals (SFPCA)** — serving the island of Saba in the Caribbean Netherlands.
+
+Built with Next.js 16, TypeScript, Tailwind CSS, and Firebase.
 
 ## Features
 
-- **Public Website**: Single-page layout with hero, about, services, adoptable animals, donation info, and contact sections
-- **Admin Dashboard**: Protected admin area for managing content
-- **Homepage Editor**: Edit all homepage content including hero, about, services, and donation sections
-- **Animal Management**: Full CRUD for animal adoption listings
-- **Settings Management**: Update contact information and social media links
-- **Firebase Integration**: Authentication, Firestore database, and Storage
-- **Responsive Design**: Mobile-first design with Tailwind CSS
-- **Type-Safe**: Built with TypeScript for reliability
+### Public Website
+- **Homepage** with hero video, about section, services, adoptable animals, donations, FAQ, and contact
+- **FAQ Page** with categorized, expandable questions (dynamically managed via admin)
+- **Animal Adoptions** page with filterable listings
+- **Contact Page** with contact info, map embed, and social links
+- **Under Construction** placeholder for pages in development
+- **SEO Optimized** with Open Graph, Twitter cards, JSON-LD structured data, sitemap, and robots.txt
+- **Responsive Design** — mobile-first with Tailwind CSS
+- **Dark/Light Mode** via next-themes
+
+### Admin Dashboard (`/admin`)
+- **Homepage Editor** — edit hero, about, services, donation, and team sections
+- **Animal Management** — full CRUD for adoption listings
+- **FAQ Management** — add, edit, delete FAQs by category (syncs to homepage + FAQ page)
+- **Veterinary Services** — manage vet service content
+- **Animal Adoptions** — manage adoption page content
+- **Animal Registration** — view and verify submitted registrations
+- **Site Settings** — update contact info, social media links, map embed
+- **Team Photo Uploads** — Firebase Storage integration with loading states
+
+### Security
+- Session-based authentication with HTTP-only cookies
+- Middleware-protected admin routes
+- Firestore security rules enforce read/write permissions
+- Admin allowlist via Firestore `admins` collection
 
 ## Tech Stack
 
-- **Framework**: Next.js 15+ (App Router)
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS + shadcn/ui components
-- **Backend**: Firebase (Auth, Firestore, Storage)
-- **Deployment**: Vercel-ready
+| Layer | Technology |
+|-------|-----------|
+| Framework | Next.js 16 (App Router, Turbopack) |
+| Language | TypeScript |
+| Styling | Tailwind CSS + shadcn/ui |
+| Animation | Framer Motion |
+| Backend | Firebase (Auth, Firestore, Storage) |
+| Icons | Lucide React |
+| Deployment | Vercel |
 
 ## Getting Started
 
 ### Prerequisites
 
 - Node.js 18+ and npm
-- Firebase project with Firestore and Authentication enabled
-- Firebase service account key (for admin SDK)
+- Firebase project with Authentication, Firestore, and Storage enabled
+- Firebase service account key (for server-side admin SDK)
 
 ### Installation
 
 1. **Clone the repository**
    ```bash
+   git clone https://github.com/spizeck/SFPCA.git
    cd SFPCA
    ```
 
@@ -42,185 +66,146 @@ A modern Next.js web application for the Saba Foundation for Preventing Cruelty 
    ```
 
 3. **Set up environment variables**
-   
-   Copy `.env.example` to `.env.local`:
    ```bash
    cp .env.example .env.local
    ```
-
-   Fill in your Firebase credentials:
-   ```env
-   # Firebase Client Config
-   NEXT_PUBLIC_FIREBASE_API_KEY=your_api_key
-   NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
-   NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
-   NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
-   NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
-   NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id
-
-   # Firebase Admin (Server-side)
-   FIREBASE_ADMIN_PROJECT_ID=your_project_id
-   FIREBASE_ADMIN_CLIENT_EMAIL=firebase-adminsdk@your_project.iam.gserviceaccount.com
-   FIREBASE_ADMIN_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-
-   # Admin Allowlist
-   ADMIN_EMAILS=admin@example.com
-   ```
+   Fill in your Firebase credentials (see `.env.example` for all required variables).
 
 4. **Set up Firebase**
-
    - Enable Google Sign-In in Firebase Authentication
-   - Create Firestore database
-   - Deploy Firestore security rules:
+   - Create a Firestore database
+   - Enable Firebase Storage
+   - Deploy security rules:
      ```bash
      firebase deploy --only firestore:rules
+     firebase deploy --only storage
      ```
 
-5. **Seed initial data** (optional)
-
-   Set the path to your Firebase service account JSON file:
-   ```bash
-   export FIREBASE_SERVICE_ACCOUNT_PATH=/path/to/serviceAccountKey.json
-   npm run seed
-   ```
+5. **Add yourself as an admin**
+   
+   In the Firestore console, create a document in the `admins` collection with your email as the document ID.
 
 6. **Run the development server**
    ```bash
    npm run dev
    ```
-
-   Open [http://localhost:3000](http://localhost:3000) in your browser.
+   Open [http://localhost:3000](http://localhost:3000).
 
 ## Project Structure
 
 ```
 SFPCA/
 ├── src/
-│   ├── app/                    # Next.js App Router pages
-│   │   ├── admin/             # Admin area (protected)
-│   │   │   ├── animals/       # Animal management
-│   │   │   ├── homepage/      # Homepage editor
-│   │   │   ├── settings/      # Site settings
-│   │   │   └── page.tsx       # Admin dashboard
-│   │   ├── api/               # API routes
-│   │   │   └── auth/          # Authentication endpoints
-│   │   ├── login/             # Login page
-│   │   ├── layout.tsx         # Root layout
-│   │   ├── page.tsx           # Public homepage
-│   │   └── globals.css        # Global styles
-│   ├── components/            # React components
-│   │   ├── admin/             # Admin-specific components
-│   │   ├── homepage/          # Homepage sections
-│   │   └── ui/                # shadcn/ui components
-│   ├── lib/                   # Utilities and helpers
-│   │   ├── firebase.ts        # Firebase client config
-│   │   ├── firebase-admin.ts  # Firebase admin config
-│   │   ├── auth.ts            # Auth helpers
-│   │   ├── types.ts           # TypeScript types
-│   │   └── utils.ts           # Utility functions
-│   └── hooks/                 # Custom React hooks
-├── scripts/                   # Utility scripts
-│   ├── seed.ts               # Database seeding script
-│   └── seed-data.json        # Seed data
-├── firestore.rules           # Firestore security rules
-├── middleware.ts             # Next.js middleware (auth)
+│   ├── app/                          # Next.js App Router
+│   │   ├── admin/                    # Admin dashboard (protected)
+│   │   │   ├── animals/              # Animal management
+│   │   │   ├── animal-adoptions/     # Adoption page editor
+│   │   │   ├── animal-registration/  # Registration page editor
+│   │   │   ├── faq/                  # FAQ management
+│   │   │   ├── homepage/             # Homepage editor
+│   │   │   ├── registrations/        # View submitted registrations
+│   │   │   ├── settings/             # Site settings
+│   │   │   ├── veterinary-services/  # Vet services editor
+│   │   │   └── page.tsx              # Admin dashboard
+│   │   ├── api/auth/                 # Authentication API routes
+│   │   ├── animal-adoptions/         # Public adoptions page
+│   │   ├── contact/                  # Contact page
+│   │   ├── faq/                      # FAQ page
+│   │   ├── login/                    # Login page
+│   │   ├── under-construction/       # Placeholder page
+│   │   ├── layout.tsx                # Root layout with metadata
+│   │   ├── page.tsx                  # Public homepage
+│   │   ├── robots.ts                 # SEO robots.txt
+│   │   └── sitemap.ts               # SEO sitemap
+│   ├── components/
+│   │   ├── admin/                    # Admin components (nav, team manager)
+│   │   ├── animal-adoptions/         # Adoption page components
+│   │   ├── animal-registration/      # Registration form components
+│   │   ├── contact/                  # Contact page components
+│   │   ├── faq/                      # FAQ page components
+│   │   ├── homepage/                 # Homepage section components
+│   │   ├── ui/                       # shadcn/ui components
+│   │   └── veterinary-services/      # Vet services components
+│   ├── hooks/                        # Custom React hooks
+│   └── lib/                          # Utilities
+│       ├── firebase.ts               # Firebase client config
+│       ├── firebase-admin.ts         # Firebase admin SDK config
+│       ├── auth.ts                   # Auth helpers
+│       ├── animals.ts                # Animal data helpers
+│       ├── animations.ts             # Framer Motion utilities
+│       ├── types.ts                  # TypeScript types
+│       └── utils.ts                  # General utilities
+├── firestore.rules                   # Firestore security rules
+├── storage.rules                     # Firebase Storage security rules
+├── .env.example                      # Environment variable template
 └── package.json
 ```
 
+## Firestore Collections
+
+| Collection | Description |
+|-----------|-------------|
+| `homepage` | Homepage content (doc: `main`) — hero, about, services, donation, team |
+| `siteSettings` | Contact info, social links, map embed (doc: `global`) |
+| `animals` | Adoptable animal listings with photos, status, species |
+| `faq` | FAQ entries with category, question, answer, and display order |
+| `animalRegistrations` | Submitted animal registration forms |
+| `admins` | Admin user allowlist (email as document ID) |
+| `vetServices` | Veterinary services page content |
+| `animalAdoptions` | Animal adoptions page content |
+
 ## Admin Access
-
-### Setting Up Admin Users
-
-Admins can be configured in two ways:
-
-1. **Environment Variable** (recommended for initial setup):
-   Add emails to `ADMIN_EMAILS` in `.env.local`:
-   ```env
-   ADMIN_EMAILS=admin@example.com,editor@example.com
-   ```
-
-2. **Firestore Collection**:
-   Add documents to the `admins` collection:
-   ```javascript
-   {
-     email: "user@example.com",
-     role: "admin" | "editor",
-     createdAt: Timestamp
-   }
-   ```
-
-### Admin Roles
-
-- **Admin**: Full access including managing the admin allowlist
-- **Editor**: Can edit content but cannot manage admin users
-
-### Accessing the Admin Area
 
 1. Navigate to `/login`
 2. Sign in with Google using an authorized email
-3. You'll be redirected to `/admin` if authorized
+3. You will be redirected to `/admin` if authorized
 
-## Firestore Collections
-
-### `homepage` (doc: "main")
-Stores all homepage content including hero, about, services, and donation sections.
-
-### `siteSettings` (doc: "global")
-Stores contact information and social media links.
-
-### `animals`
-Collection of animal documents with fields:
-- `name`: string
-- `species`: "dog" | "cat" | "other"
-- `sex`: "male" | "female" | "unknown"
-- `approxAge`: string
-- `description`: string
-- `status`: "available" | "pending" | "adopted"
-- `photos`: string[] (URLs)
-- `createdAt`: timestamp
-- `updatedAt`: timestamp
-
-### `admins`
-Collection of admin user documents (email as document ID).
+To add an admin, create a document in the `admins` Firestore collection with the user's email as the document ID.
 
 ## Deployment
 
-### Vercel Deployment
+### Vercel
 
-1. Push your code to GitHub
-2. Import the project in Vercel
-3. Add environment variables in Vercel dashboard
-4. Deploy!
+1. Push code to GitHub
+2. Import the project in [Vercel](https://vercel.com)
+3. Add all environment variables from `.env.example` in the Vercel dashboard
+4. Deploy
 
-The app is optimized for Vercel with:
-- Automatic API routes
-- Edge middleware for authentication
-- Image optimization
-- Server-side rendering
+### Firebase Rules
 
-## Future Enhancements (Phase 2)
+After any changes to security rules:
+```bash
+firebase deploy --only firestore:rules
+firebase deploy --only storage
+```
 
-The following features are marked with TODO comments in the codebase:
+## Scripts
 
-- [ ] Animal registration form for public users
-- [ ] Admin queue for registration approvals
-- [ ] Firebase Storage integration for photo uploads
-- [ ] Email notifications
-- [ ] Advanced search and filtering for animals
-- [ ] Adoption application workflow
-- [ ] Volunteer management system
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start development server (Turbopack) |
+| `npm run build` | Production build |
+| `npm run start` | Start production server |
+| `npm run lint` | Run ESLint |
+| `npm run lint:fix` | Auto-fix lint issues |
+| `npm run type-check` | TypeScript type checking |
 
-## Security
+## Environment Variables
 
-- Admin routes are protected by middleware
-- Firestore security rules enforce data access
-- Session-based authentication with HTTP-only cookies
-- Admin allowlist prevents unauthorized access
+See `.env.example` for the full list. Key variables:
 
-## Contributing
-
-This is a custom project for SFPCA. For modifications or issues, please contact the development team.
+- `NEXT_PUBLIC_FIREBASE_*` — Firebase client SDK config
+- `FIREBASE_ADMIN_*` — Firebase Admin SDK (server-side)
+- `ADMIN_EMAILS` — Comma-separated admin email allowlist
+- `NEXT_PUBLIC_GA_ID` — Google Analytics measurement ID
+- `NEXT_PUBLIC_SITE_URL` — Canonical site URL
 
 ## License
 
-Proprietary - © 2025 SFPCA. All rights reserved.
+Proprietary — &copy; 2025 SFPCA. All rights reserved. See [LICENSE](LICENSE).
+
+## Contact
+
+Saba Foundation for the Prevention of Cruelty to Animals  
+Email: sfpcasaba@gmail.com  
+Phone: +599 416 7947

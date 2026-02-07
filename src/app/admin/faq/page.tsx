@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from "firebase/firestore";
+import { useState, useEffect, useCallback } from "react";
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -47,30 +47,21 @@ export default function FAQManager() {
     order: "0",
   });
 
-  useEffect(() => {
-    loadFaqs();
-  }, []);
-
-  const loadFaqs = async () => {
+  const loadFaqs = useCallback(async () => {
     try {
-      console.log("Loading FAQs from Firestore...");
       const querySnapshot = await getDocs(collection(db, "faq"));
-      console.log("Got query snapshot, docs:", querySnapshot.size);
       
       const faqsData: FAQ[] = [];
       
-      querySnapshot.forEach((doc) => {
-        console.log("Processing doc:", doc.id, doc.data());
-        const data = doc.data();
+      querySnapshot.forEach((docSnap) => {
+        const data = docSnap.data();
         
-        // Validate required fields
         if (!data.category || !data.question || !data.answer) {
-          console.warn("FAQ doc missing required fields:", doc.id, data);
           return;
         }
         
         faqsData.push({
-          id: doc.id,
+          id: docSnap.id,
           category: data.category,
           question: data.question,
           answer: data.answer,
@@ -80,9 +71,6 @@ export default function FAQManager() {
         });
       });
       
-      console.log("Processed FAQs:", faqsData);
-      
-      // Sort by order and category
       faqsData.sort((a, b) => {
         if (a.category !== b.category) {
           return a.category.localeCompare(b.category);
@@ -91,7 +79,6 @@ export default function FAQManager() {
       });
       
       setFaqs(faqsData);
-      console.log("FAQs loaded successfully:", faqsData.length);
     } catch (error) {
       console.error("Error loading FAQs:", error);
       toast({
@@ -102,12 +89,14 @@ export default function FAQManager() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
+
+  useEffect(() => {
+    loadFaqs();
+  }, [loadFaqs]);
 
   const handleSubmit = async () => {
     try {
-      console.log("Submitting FAQ:", formData);
-      
       // Validate form data
       if (!formData.category || !formData.question || !formData.answer) {
         toast({
@@ -125,10 +114,7 @@ export default function FAQManager() {
         order: parseInt(formData.order, 10) || 0,
       };
 
-      console.log("Submit data:", submitData);
-
       if (editingFaq) {
-        console.log("Updating existing FAQ:", editingFaq.id);
         const docRef = doc(db, "faq", editingFaq.id);
         await updateDoc(docRef, {
           ...submitData,
@@ -136,14 +122,12 @@ export default function FAQManager() {
         });
         toast({ title: "Success", description: "FAQ updated successfully" });
       } else {
-        console.log("Creating new FAQ");
-        const docRef = await addDoc(collection(db, "faq"), {
+        await addDoc(collection(db, "faq"), {
           ...submitData,
           order: faqs.filter(f => f.category === formData.category).length,
           createdAt: new Date(),
           updatedAt: new Date(),
         });
-        console.log("Created new FAQ with ID:", docRef.id);
         toast({ title: "Success", description: "FAQ added successfully" });
       }
       
