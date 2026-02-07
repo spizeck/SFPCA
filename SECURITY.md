@@ -12,7 +12,7 @@ If you discover a security vulnerability, please report it privately before disc
 
 ### Contact Information
 
-- Email: security@sfpca.org
+- Email: sfpcasaba@gmail.com
 - Or contact the development team through private channels
 
 ### What to Include
