@@ -101,10 +101,7 @@ export function AnimalRegistration() {
       // TODO: Upload payment receipt to Firebase Storage if provided
       if (formData.paymentReceipt) {
         // File upload logic would go here
-        console.log("Payment receipt to upload:", formData.paymentReceipt);
       }
-      
-      console.log("Registration saved with ID:", docRef.id);
       
       toast({
         title: "Registration Submitted",

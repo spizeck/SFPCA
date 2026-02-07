@@ -6,8 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "lint:fix": "next lint --fix",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
     "type-check": "tsc --noEmit",
     "seed": "tsx scripts/seed.ts",
     "deploy:functions": "node scripts/deploy-functions.js"
@@ -38,6 +38,7 @@
     "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.3",
     "@types/node": "^25.0.3",
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.2",
