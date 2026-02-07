@@ -21,7 +21,7 @@ export const metadata: Metadata = {
     template: "%s | SFPCA",
   },
   description:
-    "Dedicated to animal welfare, veterinary services, and pet adoption on the island of Saba. Register your pet, adopt an animal, or learn about our veterinary services.",
+    "Dedicated to animal welfare, veterinary services, and pet adoption on Saba. Register your pet, adopt an animal, or learn about our veterinary services.",
   keywords: [
     "SFPCA",
     "Saba",
