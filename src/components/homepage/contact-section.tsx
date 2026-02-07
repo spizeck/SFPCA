@@ -1,6 +1,7 @@
 "use client"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { OptimizedVideo } from "@/components/ui/optimized-video";
 import { Phone, Mail, MessageCircle, MapPin, Clock } from "lucide-react";
 import { motion } from "framer-motion";
 import { fadeInUpVariants, staggerContainer, defaultTransition, shouldReduceMotion } from "@/lib/animations";
@@ -44,46 +45,46 @@ export function ContactSection({ contact, mapEmbedUrl, whereWeAre }: ContactSect
 
   const contactCards = [
     {
-      icon: <Phone className="h-6 w-6 text-primary" />,
+      icon: <Phone className="h-6 w-6 text-white" />,
       title: "Phone",
       content: contact ? (
-        <a href={`tel:${contact.phone}`} className="text-foreground hover:text-primary">
+        <a href={`tel:${contact.phone}`} className="text-white hover:text-white/80">
           {contact.phone}
         </a>
       ) : null,
     },
     {
-      icon: <Mail className="h-6 w-6 text-primary" />,
+      icon: <Mail className="h-6 w-6 text-white" />,
       title: "Email",
       content: contact ? (
-        <a href={`mailto:${contact.email}`} className="text-foreground hover:text-primary break-all">
+        <a href={`mailto:${contact.email}`} className="text-white hover:text-white/80 break-all">
           {contact.email}
         </a>
       ) : null,
     },
     {
-      icon: <MessageCircle className="h-6 w-6 text-primary" />,
+      icon: <MessageCircle className="h-6 w-6 text-white" />,
       title: "WhatsApp",
       content: contact ? (
         <a
           href={`https://wa.me/${contact.whatsapp.replace(/\D/g, "")}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-foreground hover:text-primary"
+          className="text-white hover:text-white/80"
         >
           {contact.whatsapp}
         </a>
       ) : null,
     },
     {
-      icon: <MapPin className="h-6 w-6 text-primary" />,
+      icon: <MapPin className="h-6 w-6 text-white" />,
       title: "Address",
-      content: <p className="text-foreground">{sectionAddress}</p>,
+      content: <p className="text-white">{sectionAddress}</p>,
     },
     {
-      icon: <Clock className="h-6 w-6 text-primary" />,
+      icon: <Clock className="h-6 w-6 text-white" />,
       title: "Hours",
-      content: <p className="text-foreground whitespace-pre-line">{sectionHours}</p>,
+      content: <p className="text-white whitespace-pre-line">{sectionHours}</p>,
       wide: true,
     },
   ].filter(card => card.content !== null);
@@ -91,13 +92,24 @@ export function ContactSection({ contact, mapEmbedUrl, whereWeAre }: ContactSect
   return (
     <motion.section 
       id="contact" 
-      className="py-16 md:py-24 bg-muted"
+      className="relative py-16 md:py-24 bg-muted overflow-hidden"
       variants={fadeInUpVariants}
       {...animationProps}
     >
-      <div className="container mx-auto px-4">
+      {/* Background Video - Anchored to Left */}
+      <div className="absolute inset-0 z-0">
+        <OptimizedVideo
+          src="/videos/clinic.mp4"
+          webmSrc="/videos/clinic.webm"
+          className="absolute inset-0 w-full h-full object-cover object-left"
+        />
+        {/* Dark overlay for text readability */}
+        <div className="absolute inset-0 bg-black/60" />
+      </div>
+      
+      <div className="relative z-10 container mx-auto px-4">
         <motion.h2 
-          className="text-3xl md:text-4xl font-bold text-center text-foreground mb-4"
+          className="text-3xl md:text-4xl font-bold text-center text-white mb-4"
           variants={fadeInUpVariants}
           {...animationProps}
         >
@@ -105,7 +117,7 @@ export function ContactSection({ contact, mapEmbedUrl, whereWeAre }: ContactSect
         </motion.h2>
         {sectionSubtitle && (
           <motion.p 
-            className="text-xl text-muted-foreground text-center mb-12"
+            className="text-xl text-white/90 text-center mb-12"
             variants={fadeInUpVariants}
             {...animationProps}
           >
@@ -161,14 +173,14 @@ export function ContactSection({ contact, mapEmbedUrl, whereWeAre }: ContactSect
               }}
               className={card.wide ? "md:col-span-2 lg:col-span-2" : ""}
             >
-              <Card>
+              <Card className="bg-white/10 backdrop-blur-sm border-white/20">
                 <CardHeader>
                   <div className="flex items-center gap-3">
                     {card.icon}
-                    <CardTitle className="text-lg">{card.title}</CardTitle>
+                    <CardTitle className="text-lg text-white">{card.title}</CardTitle>
                   </div>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="text-white/90">
                   {card.content}
                 </CardContent>
               </Card>
