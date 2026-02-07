@@ -101,7 +101,8 @@ export function ContactSection({ contact, mapEmbedUrl, whereWeAre }: ContactSect
         <OptimizedVideo
           src="/videos/clinic.mp4"
           webmSrc="/videos/clinic.webm"
-          className="absolute inset-0 w-full h-full object-cover object-left"
+          className="absolute inset-0 w-full h-full"
+          style={{ objectPosition: 'left center' }}
         />
         {/* Dark overlay for text readability */}
         <div className="absolute inset-0 bg-black/60" />

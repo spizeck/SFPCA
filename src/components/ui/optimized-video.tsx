@@ -7,6 +7,7 @@ interface OptimizedVideoProps {
   webmSrc?: string;
   poster?: string;
   className?: string;
+  style?: React.CSSProperties;
   autoPlay?: boolean;
   muted?: boolean;
   loop?: boolean;
@@ -18,6 +19,7 @@ export function OptimizedVideo({
   webmSrc,
   poster,
   className = "",
+  style,
   autoPlay = true,
   muted = true,
   loop = true,
@@ -57,9 +59,17 @@ export function OptimizedVideo({
     <div className={`relative ${className}`}>
       <video
         ref={videoRef}
-        className={`w-full h-full object-cover transition-opacity duration-500 absolute inset-0 ${
+        className={`transition-opacity duration-500 ${
           isLoaded ? "opacity-100" : "opacity-0"
         }`}
+        style={{
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          position: 'absolute',
+          inset: 0,
+          ...style,
+        }}
         autoPlay={autoPlay && isInView}
         muted={muted}
         loop={loop}

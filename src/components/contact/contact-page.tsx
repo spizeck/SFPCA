@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { OptimizedVideo } from "@/components/ui/optimized-video";
 import { Phone, Mail, MessageCircle, MapPin, Clock, Facebook, Instagram, Twitter } from "lucide-react";
 import { fadeInUpVariants, defaultTransition, shouldReduceMotion } from "@/lib/animations";
 
@@ -83,19 +84,32 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Hero Section */}
-      <section className="py-20 bg-primary text-primary-foreground">
-        <div className="container mx-auto px-4">
+      {/* Hero Section with Video Background */}
+      <section className="relative py-20 min-h-screen flex items-center justify-center overflow-hidden">
+        {/* Background Video - Anchored to Left */}
+        <div className="absolute inset-0 z-0 overflow-hidden">
+          <OptimizedVideo
+            src="/videos/clinic.mp4"
+            webmSrc="/videos/clinic.webm"
+            className="absolute inset-0 w-full h-full"
+            style={{ objectPosition: 'left center' }}
+          />
+          {/* Dark overlay for text readability */}
+          <div className="absolute inset-0 bg-black/60" />
+        </div>
+        
+        {/* Hero Content */}
+        <div className="relative z-10 container mx-auto px-4">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
             className="text-center max-w-4xl mx-auto"
           >
-            <h1 className="text-4xl md:text-6xl font-bold mb-6">
+            <h1 className="text-4xl md:text-6xl font-bold mb-6 text-white">
               Contact Us
             </h1>
-            <p className="text-xl md:text-2xl mb-8">
+            <p className="text-xl md:text-2xl mb-8 text-white/90">
               Get in touch with SABA. We're here to help you and the animals of Saba.
             </p>
           </motion.div>
