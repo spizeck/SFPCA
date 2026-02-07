@@ -70,7 +70,7 @@ export function HeroSection({ data }: HeroSectionProps) {
               <Link href="#services">Our Services</Link>
             </Button>
             <Button size="lg" variant="outline" asChild className="bg-white/10 backdrop-blur-sm text-white border-white/30 hover:bg-white/20 shadow-xl">
-              <Link href="/animal-registration">Register Your Pet</Link>
+              <Link href="/under-construction">Register Your Pet</Link>
             </Button>
           </motion.div>
         </div>

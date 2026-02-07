@@ -17,21 +17,9 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.8,
     },
     {
-      url: `${siteUrl}/vet-services`,
-      lastModified: new Date(),
-      changeFrequency: "monthly",
-      priority: 0.8,
-    },
-    {
-      url: `${siteUrl}/animal-adoptions`,
+      url: `${siteUrl}/under-construction`,
       lastModified: new Date(),
       changeFrequency: "weekly",
-      priority: 0.9,
-    },
-    {
-      url: `${siteUrl}/animal-registration`,
-      lastModified: new Date(),
-      changeFrequency: "monthly",
       priority: 0.7,
     },
     {
