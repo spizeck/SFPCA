@@ -6,67 +6,46 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { fadeInUpVariants, shouldReduceMotion } from "@/lib/animations";
-import { doc, getDoc } from "firebase/firestore";
+import { collection, getDocs, orderBy, query } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
-interface FAQ {
+interface FAQItem {
+  id: string;
+  category: string;
   question: string;
   answer: string;
-}
-
-interface FAQData {
-  title: string;
-  subtitle: string;
-  faqs: FAQ[];
+  order: number;
 }
 
 export function FaqSection() {
   const [openItems, setOpenItems] = useState<{ [key: string]: boolean }>({});
-  const [data, setData] = useState<FAQData | null>(null);
+  const [faqs, setFaqs] = useState<FAQItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadData();
+    loadFaqs();
   }, []);
 
-  const loadData = async () => {
+  const loadFaqs = async () => {
     try {
-      const docRef = doc(db, "faq", "main");
-      const docSnap = await getDoc(docRef);
+      const q = query(collection(db, "faq"), orderBy("order"));
+      const querySnapshot = await getDocs(q);
+      const faqsData: FAQItem[] = [];
       
-      if (docSnap.exists()) {
-        setData(docSnap.data() as FAQData);
-      } else {
-        // Fallback data if no data exists
-        setData({
-          title: "Frequently Asked Questions",
-          subtitle: "Find answers to common questions about our services",
-          faqs: [
-            {
-              question: "How much does animal registration cost?",
-              answer: "Registration fees are $10 for spayed/neutered animals and $100 for unaltered animals. This is an annual fee that must be renewed each year."
-            },
-            {
-              question: "How do I surrender my pet to SABA?",
-              answer: "Please call our office first to discuss the situation. We may be able to help you keep your pet or find alternatives to surrender. If surrender is necessary, we'll schedule an appointment."
-            },
-            {
-              question: "How do I adopt an animal from SABA?",
-              answer: "Start by viewing our available animals online or visiting our shelter. Once you find a pet you're interested in, fill out an adoption application."
-            },
-            {
-              question: "What do I do if I find a stray animal?",
-              answer: "Call our animal control dispatch at 555-123-4567. Do not approach the animal if it appears aggressive or injured."
-            },
-            {
-              question: "What are your hours of operation?",
-              answer: "Shelter: Monday-Friday 9 AM-6 PM, Saturday 10 AM-4 PM, Closed Sundays. Animal Control: Available 24/7 for emergencies."
-            }
-          ],
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        faqsData.push({
+          id: doc.id,
+          category: data.category,
+          question: data.question,
+          answer: data.answer,
+          order: data.order,
         });
-      }
+      });
+      
+      setFaqs(faqsData);
     } catch (error) {
-      console.error("Error loading FAQ data:", error);
+      console.error("Error loading FAQs:", error);
     } finally {
       setLoading(false);
     }
@@ -76,9 +55,12 @@ export function FaqSection() {
     setOpenItems(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  if (loading || !data) {
+  if (loading) {
     return <div>Loading...</div>;
   }
+
+  // Show first 5 FAQs on homepage
+  const homepageFaqs = faqs.slice(0, 5);
 
   return (
     <section className="py-20 bg-background">
@@ -91,15 +73,20 @@ export function FaqSection() {
           className="text-center mb-16"
         >
           <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
-            {data.title}
+            Frequently Asked Questions
           </h2>
           <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-            {data.subtitle}
+            Find answers to common questions about our services
           </p>
+          {faqs.length > 5 && (
+            <Button asChild className="mt-4" variant="outline">
+              <a href="/faq">View All FAQs</a>
+            </Button>
+          )}
         </motion.div>
 
         <div className="max-w-3xl mx-auto space-y-4">
-          {data.faqs.map((item, index) => {
+          {homepageFaqs.map((item, index) => {
             const key = `faq-${index}`;
             const isOpen = openItems[key];
             

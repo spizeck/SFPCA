@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Home, FileText, PawPrint, Settings, LogOut, Menu, ClipboardList, Stethoscope, Heart } from "lucide-react";
+import { Home, FileText, PawPrint, Settings, LogOut, Menu, ClipboardList, Stethoscope, Heart, HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AdminThemeToggle } from "@/components/admin-theme-toggle";
 import { useState } from "react";
@@ -15,6 +15,7 @@ const navItems = [
   { href: "/admin/animal-adoptions", label: "Adoptions", icon: Heart },
   { href: "/admin/animal-registration", label: "Registration", icon: ClipboardList },
   { href: "/admin/animals", label: "Animals", icon: PawPrint },
+  { href: "/admin/faq", label: "FAQ", icon: HelpCircle },
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ];
 
