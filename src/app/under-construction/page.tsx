@@ -37,14 +37,14 @@ export default function UnderConstructionPage() {
                 <Phone className="h-5 w-5 text-primary" />
                 <div>
                   <p className="font-medium">Call us</p>
-                  <p className="text-sm text-muted-foreground">+1 599 416-3222</p>
+                  <p className="text-sm text-muted-foreground">+599 416 7947</p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
                 <Mail className="h-5 w-5 text-primary" />
                 <div>
                   <p className="font-medium">Email us</p>
-                  <p className="text-sm text-muted-foreground">info@sabafpca.com</p>
+                  <p className="text-sm text-muted-foreground">sfpcasaba@gmail.com</p>
                 </div>
               </div>
             </div>
