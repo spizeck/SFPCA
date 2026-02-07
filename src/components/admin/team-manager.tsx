@@ -53,35 +53,46 @@ export function TeamManager({ team, onChange }: TeamManagerProps) {
 
   const handlePhotoUpload = async (index: number, file: File) => {
     const memberId = team[index]?.id || `member-${index}`;
+    console.log("Starting photo upload for:", memberId, file.name);
     setUploadingId(memberId);
 
     try {
       // Create a unique filename
       const timestamp = Date.now();
       const filename = `team-photos/${memberId}-${timestamp}-${file.name}`;
+      console.log("Uploading to:", filename);
       
       // Create storage reference
       const storageRef = ref(storage, filename);
       
       // Upload file
+      console.log("Uploading file to Firebase Storage...");
       await uploadBytes(storageRef, file);
+      console.log("Upload complete, getting download URL...");
       
       // Get download URL
       const downloadUrl = await getDownloadURL(storageRef);
+      console.log("Got download URL:", downloadUrl);
       
       // Update member with the storage URL
       updateMember(index, { photo: downloadUrl });
+      console.log("Updated member with photo URL");
     } catch (error) {
       console.error("Error uploading photo:", error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      alert(`Upload failed: ${errorMessage}. Falling back to local storage.`);
+      
       // Fallback to base64 if upload fails
       const reader = new FileReader();
       reader.onload = (e) => {
         const base64Url = e.target?.result as string;
         updateMember(index, { photo: base64Url });
+        console.log("Used fallback base64 URL");
       };
       reader.readAsDataURL(file);
     } finally {
       setUploadingId(null);
+      console.log("Upload process finished");
     }
   };
 
