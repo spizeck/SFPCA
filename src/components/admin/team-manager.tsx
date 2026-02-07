@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { storage } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Upload, X, Plus } from "lucide-react";
+import { Upload, X, Plus, Loader2 } from "lucide-react";
 
 interface TeamMember {
   id?: string;
@@ -39,7 +41,7 @@ export function TeamManager({ team, onChange }: TeamManagerProps) {
     const newTeam = [...team];
     const member = newTeam[index];
     if (!member.id) {
-      member.id = Date.now().toString();
+      member.id = crypto.randomUUID();
     }
     newTeam[index] = { ...member, ...updates };
     onChange(newTeam);
@@ -50,10 +52,37 @@ export function TeamManager({ team, onChange }: TeamManagerProps) {
   };
 
   const handlePhotoUpload = async (index: number, file: File) => {
-    // TODO: Implement Firebase Storage upload
-    // For now, just create a local URL
-    const url = URL.createObjectURL(file);
-    updateMember(index, { photo: url });
+    const memberId = team[index]?.id || `member-${index}`;
+    setUploadingId(memberId);
+
+    try {
+      // Create a unique filename
+      const timestamp = Date.now();
+      const filename = `team-photos/${memberId}-${timestamp}-${file.name}`;
+      
+      // Create storage reference
+      const storageRef = ref(storage, filename);
+      
+      // Upload file
+      await uploadBytes(storageRef, file);
+      
+      // Get download URL
+      const downloadUrl = await getDownloadURL(storageRef);
+      
+      // Update member with the storage URL
+      updateMember(index, { photo: downloadUrl });
+    } catch (error) {
+      console.error("Error uploading photo:", error);
+      // Fallback to base64 if upload fails
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const base64Url = e.target?.result as string;
+        updateMember(index, { photo: base64Url });
+      };
+      reader.readAsDataURL(file);
+    } finally {
+      setUploadingId(null);
+    }
   };
 
   return (
@@ -156,9 +185,19 @@ export function TeamManager({ team, onChange }: TeamManagerProps) {
                     variant="outline"
                     size="sm"
                     onClick={() => document.getElementById(`photo-${index}`)?.click()}
+                    disabled={uploadingId === (team[index]?.id || `member-${index}`)}
                   >
-                    <Upload className="h-4 w-4 mr-2" />
-                    Upload Photo
+                    {uploadingId === (team[index]?.id || `member-${index}`) ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Uploading...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="h-4 w-4 mr-2" />
+                        Upload Photo
+                      </>
+                    )}
                   </Button>
                   <p className="text-xs text-muted-foreground mt-1">
                     JPG, PNG or GIF. Max 5MB.
