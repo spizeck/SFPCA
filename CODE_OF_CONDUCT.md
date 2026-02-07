@@ -58,7 +58,7 @@ threatening, offensive, or harmful.
 ### How to Report
 
 If you experience or witness unacceptable behavior, please contact us at:
-- Email: conduct@sfpca.org
+- Email: sfpcasaba@gmail.com
 - Private message to any project maintainer
 
 All reports will be reviewed and investigated promptly and confidentially.
