@@ -88,3 +88,33 @@ jobs:
 
       - name: Validate functions exports
         run: node -e "const f = require('./index.js'); for (const name of ['onFirestoreChange', 'triggerRebuild']) { if (!f[name]) { console.error('Missing required function export', name); process.exit(1); } }"
+
+  # Security-rules tests are neither app nor Functions code and need the
+  # Java-based emulator suite, so they get their own check. The required
+  # checks on the "Protect main" ruleset ("Next.js app", "Firebase
+  # Functions") are unchanged; "Firebase security rules" is a stable check
+  # name intended to become required after this PR merges.
+  rules:
+    name: Firebase security rules
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.CI_NODE_VERSION }}
+          cache: npm
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run security rules tests
+        run: npm run test:rules

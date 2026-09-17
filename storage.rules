@@ -1,24 +1,50 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // Images can be uploaded by authenticated users
+
+    // Signed-in user whose email address is verified. Open email/password
+    // sign-up means request.auth alone proves nothing.
+    function isVerifiedUser() {
+      return request.auth != null
+          && request.auth.token.email_verified == true;
+    }
+
+    // Canonical staff identity: a verified user whose email has a document
+    // in the Firestore admins collection.
+    function isAdmin() {
+      return isVerifiedUser()
+          && firestore.exists(/databases/(default)/documents/admins/$(request.auth.token.email));
+    }
+
+    // Uploads are image assets only (site/team/animal photos), max 5 MB.
+    // request.resource is null on delete, so deletes only need isAdmin().
+    function isImageUpload() {
+      return request.resource.size < 5 * 1024 * 1024
+          && request.resource.contentType.matches("image/.*");
+    }
+    function canWrite() {
+      return isAdmin()
+          && (request.resource == null || isImageUpload());
+    }
+
+    // Images - public read, admin-only image uploads
     match /images/{allPaths=**} {
       allow read: if true;
-      allow write: if request.auth != null;
+      allow write: if canWrite();
     }
-    
-    // Animal photos
+
+    // Animal photos - public read, admin-only image uploads
     match /animals/{animalId}/{photoId} {
       allow read: if true;
-      allow write: if request.auth != null;
+      allow write: if canWrite();
     }
-    
-    // Team photos
+
+    // Team photos - public read, admin-only image uploads
     match /team-photos/{allPaths=**} {
       allow read: if true;
-      allow write: if request.auth != null;
+      allow write: if canWrite();
     }
-    
+
     // Default deny
     match /{allPaths=**} {
       allow read, write: if false;
