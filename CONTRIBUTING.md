@@ -6,9 +6,9 @@ Thank you for your interest in contributing to the SFPCA website! This document 
 
 ### Prerequisites
 
-- Node.js 20 and npm — the version is declared in `.nvmrc` and root
+- Node.js 24 and npm — the version is declared in `.nvmrc` and root
   `package.json` `engines` (run `nvm use` / `fnm use` if your version
-  manager supports it). Firebase Functions also deploys on Node 20.
+  manager supports it). Firebase Functions also deploys on Node 24.
 - Git
 - Firebase project access (for development)
 

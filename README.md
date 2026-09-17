@@ -48,7 +48,7 @@ Built with Next.js 16, TypeScript, Tailwind CSS, and Firebase.
 
 ### Prerequisites
 
-- Node.js 20 and npm (see `.nvmrc` / `package.json` `engines`; Firebase Functions also deploys on Node 20)
+- Node.js 24 and npm (see `.nvmrc` / `package.json` `engines`; Firebase Functions also deploys on Node 24)
 - Firebase project with Authentication, Firestore, and Storage enabled
 - Firebase service account key (for server-side admin SDK)
 
