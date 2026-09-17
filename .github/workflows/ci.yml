@@ -13,12 +13,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # Node 20 is the only runtime the repository currently pins
-  # (functions/package.json "engines") and satisfies Next.js >=20.9.0.
-  # Broader runtime standardization is tracked in issue #83.
-  CI_NODE_VERSION: "20"
-
+# All jobs resolve Node from .nvmrc (the repo's canonical runtime
+# declaration). Root package.json "engines" declares the same policy for
+# npm and Vercel; functions/package.json pins the Functions deploy runtime.
 jobs:
   app:
     name: Next.js app
@@ -30,7 +27,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: ${{ env.CI_NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Install dependencies
@@ -70,7 +67,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: ${{ env.CI_NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: functions/package-lock.json
 
@@ -79,12 +76,6 @@ jobs:
 
       - name: Lint
         run: npm run lint
-        env:
-          # functions/ uses ESLint 8 + .eslintrc.js (eslint-config-google).
-          # Without this, ESLint 8.57 auto-detects the repo-root
-          # eslint.config.mjs (flat config) and fails resolving the root
-          # ESLint 9 toolchain, which is not installed in this job.
-          ESLINT_USE_FLAT_CONFIG: "false"
 
       - name: Validate functions exports
         run: node -e "const f = require('./index.js'); for (const name of ['onFirestoreChange', 'triggerRebuild']) { if (!f[name]) { console.error('Missing required function export', name); process.exit(1); } }"
@@ -104,7 +95,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: ${{ env.CI_NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Set up JDK 21
