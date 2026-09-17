@@ -75,10 +75,10 @@ If you discover a security vulnerability, please report it privately before disc
 - Audit both trees periodically:
 
   ```bash
-  npm audit            # root, full tree
-  npm audit --omit=dev # root, production only
-  cd functions && npm audit            # functions, full tree
-  cd functions && npm audit --omit=dev # functions, production only
+  npm audit                            # root, full tree
+  npm audit --omit=dev                 # root, production only
+  (cd functions && npm audit)          # functions, full tree
+  (cd functions && npm audit --omit=dev)  # functions, production only
   ```
 
 - Apply `npm audit fix` for low-risk patches only — never
@@ -97,8 +97,8 @@ If you discover a security vulnerability, please report it privately before disc
 
 ### For Administrators
 
-- [ ] Use strong, unique Google passwords
-- [ ] Enable 2FA on Google accounts
+- [ ] Use strong, unique passwords (Google or email/password accounts)
+- [ ] Enable 2FA where the provider supports it
 - [ ] Log out when finished
 - [ ] Don't share credentials
 - [ ] Report suspicious activity immediately
@@ -113,7 +113,8 @@ If you discover a security vulnerability, please report it privately before disc
 
 ## Known Limitations
 
-1. **Single Factor Auth**: Currently only uses Google OAuth (no 2FA in app)
+1. **Single Factor Auth**: No in-app 2FA (Google OAuth or verified
+   email/password; provider-level 2FA is up to the account)
 2. **Session Duration**: Sessions last 14 days (configurable)
 3. **No Audit Logs**: Admin actions are not currently logged
 
