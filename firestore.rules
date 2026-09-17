@@ -4,7 +4,7 @@ service cloud.firestore {
 
     // Signed-in user whose email address is verified. Open email/password
     // sign-up means request.auth alone proves nothing, and an unverified
-    // account could otherwise claim an admin's email address.
+    // email claim must never be trusted for administrative authorization.
     function isVerifiedUser() {
       return request.auth != null
           && request.auth.token.email_verified == true;

@@ -90,10 +90,10 @@ jobs:
         run: node -e "const f = require('./index.js'); for (const name of ['onFirestoreChange', 'triggerRebuild']) { if (!f[name]) { console.error('Missing required function export', name); process.exit(1); } }"
 
   # Security-rules tests are neither app nor Functions code and need the
-  # Java-based emulator suite, so they get their own check. The "Protect
-  # main" ruleset currently requires no status checks, so adding this check
-  # does not require a branch-protection migration; it is a stable name that
-  # can be marked required later.
+  # Java-based emulator suite, so they get their own check. The required
+  # checks on the "Protect main" ruleset ("Next.js app", "Firebase
+  # Functions") are unchanged; "Firebase security rules" is a stable check
+  # name intended to become required after this PR merges.
   rules:
     name: Firebase security rules
     runs-on: ubuntu-latest
