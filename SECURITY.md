@@ -26,9 +26,10 @@ If you discover a security vulnerability, please report it privately before disc
 
 ### Authentication & Authorization
 
-- **Google OAuth**: All admin access requires Google authentication
-- **Allowlist System**: Only pre-approved emails can access admin areas
-- **Role-Based Access**: Two roles (admin, editor) with appropriate permissions
+- **Verified Identity**: Admin access requires a verified Firebase Auth
+  email (Google OAuth or verified email/password)
+- **Allowlist System**: Only identities in the `admins` collection can
+  access admin areas and write privileged data
 - **Session Management**: HTTP-only cookies with secure configuration
 - **Middleware Protection**: All admin routes protected at the edge
 
@@ -46,6 +47,51 @@ If you discover a security vulnerability, please report it privately before disc
 - **CORS Configured**: Proper cross-origin resource sharing settings
 - **No Raw HTML**: Admin interfaces use structured fields, not raw HTML editing
 - **Dependency Updates**: Regular security updates for all dependencies
+
+## Secrets Management
+
+- **Never commit** real credentials to any file. Only `.env.example` files
+  (root and `functions/`) are committed, and they must contain placeholders
+  only.
+- `.gitignore` ignores all `.env*` files and `*-firebase-adminsdk-*.json`
+  service-account downloads. Do not weaken these patterns.
+- **Secret values** (never commit): `FIREBASE_ADMIN_PRIVATE_KEY`,
+  `FIREBASE_ADMIN_CLIENT_EMAIL`, `VERCEL_TOKEN`, `ADMIN_EMAILS` contents,
+  session cookies, and any service-account JSON.
+- **Public config, not secrets**: `NEXT_PUBLIC_FIREBASE_*` values and
+  `NEXT_PUBLIC_GA_ID` are shipped to browsers by design — they identify the
+  project but grant no access (Firestore/Storage rules enforce that).
+- Production secrets live in Vercel environment variables / Firebase
+  config, never in the repository. CI runs credential-free with clearly
+  fake placeholder values.
+- If a real credential is ever committed: rotate it immediately, then
+  coordinate history cleanup — do not force-push without team approval.
+
+## Dependency Maintenance
+
+- **Dependabot** (`.github/dependabot.yml`) opens weekly grouped PRs for
+  minor/patch updates in the root and `functions/` npm trees plus GitHub
+  Actions. Major upgrades open individually for review.
+- Audit both trees periodically:
+
+  ```bash
+  npm audit            # root, full tree
+  npm audit --omit=dev # root, production only
+  cd functions && npm audit            # functions, full tree
+  cd functions && npm audit --omit=dev # functions, production only
+  ```
+
+- Apply `npm audit fix` for low-risk patches only — never
+  `npm audit fix --force` without analyzing each major upgrade.
+- Known unresolved items are tracked in GitHub issues (e.g., the
+  `firebase-admin` 13→14 major upgrade for moderate transitive advisories).
+
+## CI Security Controls
+
+- All GitHub Actions are pinned to immutable commit SHAs.
+- Workflow permissions are least privilege (`contents: read`).
+- PR checks require no secrets; the build uses placeholder public env vars.
+- Firebase security rules are tested against the emulator suite on every PR.
 
 ## Admin Security Checklist
 
