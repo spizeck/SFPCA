@@ -6,7 +6,9 @@ Thank you for your interest in contributing to the SFPCA website! This document 
 
 ### Prerequisites
 
-- Node.js 20 and npm (required by Firebase Functions and Next.js >= 20.9)
+- Node.js 24 and npm — the version is declared in `.nvmrc` and root
+  `package.json` `engines` (run `nvm use` / `fnm use` if your version
+  manager supports it). Firebase Functions also deploys on Node 24.
 - Git
 - Firebase project access (for development)
 
@@ -82,10 +84,10 @@ Use conventional commits:
    node -e "const f = require('./index.js'); for (const name of ['onFirestoreChange', 'triggerRebuild']) { if (!f[name]) { console.error('Missing required function export', name); process.exit(1); } }"
    ```
 
-   `functions/` uses ESLint 8 with `.eslintrc.js` (eslint-config-google).
-   ESLint 8.57 can auto-detect the repo-root flat config instead; to match
-   CI exactly, run lint with `ESLINT_USE_FLAT_CONFIG=false`
-   (PowerShell: `$env:ESLINT_USE_FLAT_CONFIG = "false"`).
+   `functions/` uses ESLint 8 with `eslint-config-google` via
+   `functions/eslint.config.mjs` (a FlatCompat wrapper around
+   `.eslintrc.js`), so plain `npm run lint` works identically locally
+   and in CI — no environment variables needed.
 
    **Firestore/Storage security rules** (runs the local Firebase Emulator
    Suite; requires Java, no credentials needed):

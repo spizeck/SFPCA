@@ -2,6 +2,9 @@
   "name": "sfpca-website",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -10,7 +13,7 @@
     "lint:fix": "eslint src/ --fix",
     "type-check": "tsc --noEmit",
     "seed": "tsx scripts/seed.ts",
-    "test:rules": "firebase emulators:exec --only auth,firestore,storage --project demo-sfpca \"node --test tests/\"",
+    "test:rules": "firebase emulators:exec --only auth,firestore,storage --project demo-sfpca \"node --test \\\"tests/*.test.mjs\\\"\"",
     "deploy:functions": "node scripts/deploy-functions.js"
   },
   "dependencies": {
@@ -41,7 +44,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.3",
     "@firebase/rules-unit-testing": "^5.0.2",
-    "@types/node": "^25.2.1",
+    "@types/node": "^24.13.5",
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.2",
     "autoprefixer": "^10.4.24",
