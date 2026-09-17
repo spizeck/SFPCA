@@ -44,7 +44,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.3",
     "@firebase/rules-unit-testing": "^5.0.2",
-    "@types/node": "^20.19.43",
+    "@types/node": "^24.13.5",
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.2",
     "autoprefixer": "^10.4.24",
