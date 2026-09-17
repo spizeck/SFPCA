@@ -79,6 +79,12 @@ jobs:
 
       - name: Lint
         run: npm run lint
+        env:
+          # functions/ uses ESLint 8 + .eslintrc.js (eslint-config-google).
+          # Without this, ESLint 8.57 auto-detects the repo-root
+          # eslint.config.mjs (flat config) and fails resolving the root
+          # ESLint 9 toolchain, which is not installed in this job.
+          ESLINT_USE_FLAT_CONFIG: "false"
 
       - name: Load functions entrypoint
         run: node -e "require('./index.js')"

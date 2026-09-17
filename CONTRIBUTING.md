@@ -82,6 +82,11 @@ Use conventional commits:
    node -e "require('./index.js')"
    ```
 
+   `functions/` uses ESLint 8 with `.eslintrc.js` (eslint-config-google).
+   ESLint 8.57 can auto-detect the repo-root flat config instead; to match
+   CI exactly, run lint with `ESLINT_USE_FLAT_CONFIG=false`
+   (PowerShell: `$env:ESLINT_USE_FLAT_CONFIG = "false"`).
+
    > **Note:** `npm run build` requires the `NEXT_PUBLIC_FIREBASE_*` variables
    > from `.env.local` (or placeholders) to be set, because the Firebase client
    > SDK initializes during static generation. Real credentials are not needed
