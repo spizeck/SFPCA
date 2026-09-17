@@ -87,6 +87,12 @@ Use conventional commits:
    CI exactly, run lint with `ESLINT_USE_FLAT_CONFIG=false`
    (PowerShell: `$env:ESLINT_USE_FLAT_CONFIG = "false"`).
 
+   **Firestore/Storage security rules** (runs the local Firebase Emulator
+   Suite; requires Java, no credentials needed):
+   ```bash
+   npm run test:rules
+   ```
+
    > **Note:** `npm run build` requires the `NEXT_PUBLIC_FIREBASE_*` variables
    > from `.env.local` (or placeholders) to be set, because the Firebase client
    > SDK initializes during static generation. Real credentials are not needed

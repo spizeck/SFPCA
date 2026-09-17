@@ -1,60 +1,94 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Helper function to check if user is admin
-    function isAdmin() {
-      return request.auth != null && 
-             exists(/databases/$(database)/documents/admins/$(request.auth.token.email));
+
+    // Signed-in user whose email address is verified. Open email/password
+    // sign-up means request.auth alone proves nothing, and an unverified
+    // account could otherwise claim an admin's email address.
+    function isVerifiedUser() {
+      return request.auth != null
+          && request.auth.token.email_verified == true;
     }
-    
+
+    // Canonical staff identity: a verified user whose email has a document
+    // in the admins collection (managed via console/Admin SDK only).
+    function isAdmin() {
+      return isVerifiedUser()
+          && exists(/databases/$(database)/documents/admins/$(request.auth.token.email));
+    }
+
+    // Shape check for public animal-registration submissions.
+    function isValidRegistration() {
+      return request.resource.data.keys().hasOnly(
+              ["ownerInfo", "animals", "paymentReceipt", "totalFee",
+               "status", "createdAt", "updatedAt"])
+          && request.resource.data.status == "pending"
+          && request.resource.data.ownerInfo is map
+          && request.resource.data.ownerInfo.name is string
+          && request.resource.data.ownerInfo.address is string
+          && request.resource.data.ownerInfo.phone is string
+          && request.resource.data.ownerInfo.email is string
+          && request.resource.data.animals is list
+          && request.resource.data.animals.size() > 0
+          && request.resource.data.totalFee is number;
+    }
+
     // Homepage content - public read, admin write
     match /homepage/{document=**} {
       allow read: if true;
       allow write: if isAdmin();
     }
-    
+
     // Site settings - public read, admin write
     match /siteSettings/{document=**} {
       allow read: if true;
       allow write: if isAdmin();
     }
-    
-    // Animals - public can read available animals, admin can write
+
+    // Animals - public can read only animals listed as available;
+    // pending/adopted animals and all writes are admin-only.
     match /animals/{animalId} {
-      allow read: if true;
+      allow get, list: if resource.data.status == "available" || isAdmin();
       allow create, update, delete: if isAdmin();
     }
-    
+
     // FAQ - public read, admin write
     match /faq/{document=**} {
       allow read: if true;
       allow write: if isAdmin();
     }
-    
+
     // Veterinary Services - public read, admin write
     match /vetServices/{document=**} {
       allow read: if true;
       allow write: if isAdmin();
     }
-    
-    // Animal Adoptions - public read, admin write
+
+    // Animal Adoptions page content - public read, admin write
     match /animalAdoptions/{document=**} {
       allow read: if true;
       allow write: if isAdmin();
     }
-    
-    // Animal Registrations - public can create, admin can read/write
+
+    // Animal Registration page content - managed by admins only;
+    // nothing reads this collection publicly.
+    match /animalRegistration/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    // Animal Registrations - private owner data. The public form submits
+    // unauthenticated, so create is open but shape-validated and forced to
+    // "pending"; only admins can read or mutate submissions.
     match /animalRegistrations/{registrationId} {
-      allow create: if request.auth != null;
+      allow create: if isValidRegistration();
       allow read, update, delete: if isAdmin();
     }
-    
+
     // Admins collection - only admins can read/write
     match /admins/{email} {
       allow read, write: if isAdmin();
     }
-    
+
     // Default deny all other access
     match /{document=**} {
       allow read, write: if false;
