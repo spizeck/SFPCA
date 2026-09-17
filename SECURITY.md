@@ -83,8 +83,9 @@ If you discover a security vulnerability, please report it privately before disc
 
 - Apply `npm audit fix` for low-risk patches only — never
   `npm audit fix --force` without analyzing each major upgrade.
-- Known unresolved items are tracked in GitHub issues (e.g., the
-  `firebase-admin` 13→14 major upgrade for moderate transitive advisories).
+- Known unresolved items are tracked in GitHub issues (see #110 for the
+  moderate transitive advisories that remain upstream-blocked in the
+  `firebase-tools` dev chain and `@google-cloud/storage`'s `gaxios`/`uuid`).
 
 ## CI Security Controls
 
