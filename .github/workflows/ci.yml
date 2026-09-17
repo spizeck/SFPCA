@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Node 20 is the only runtime the repository currently pins
+  # (functions/package.json "engines") and satisfies Next.js >=20.9.0.
+  # Broader runtime standardization is tracked in issue #83.
+  CI_NODE_VERSION: "20"
+
+jobs:
+  app:
+    name: Next.js app
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.CI_NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run type-check
+
+      - name: Build
+        run: npm run build
+        env:
+          # Placeholder public Firebase config. The client SDK requires
+          # non-empty NEXT_PUBLIC_* values to initialize during static
+          # generation; Firestore reads fail closed to null fallbacks.
+          # These are not secrets and no real credentials are used.
+          NEXT_PUBLIC_FIREBASE_API_KEY: ci-placeholder-api-key
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ci-placeholder.firebaseapp.com
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ci-placeholder
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ci-placeholder.appspot.com
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "000000000000"
+          NEXT_PUBLIC_FIREBASE_APP_ID: 1:000000000000:web:ci-placeholder
+          NEXT_PUBLIC_SITE_URL: http://localhost:3000
+
+  functions:
+    name: Firebase Functions
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: functions
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.CI_NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+        env:
+          # functions/ uses ESLint 8 + .eslintrc.js (eslint-config-google).
+          # Without this, ESLint 8.57 auto-detects the repo-root
+          # eslint.config.mjs (flat config) and fails resolving the root
+          # ESLint 9 toolchain, which is not installed in this job.
+          ESLINT_USE_FLAT_CONFIG: "false"
+
+      - name: Validate functions exports
+        run: node -e "const f = require('./index.js'); for (const name of ['onFirestoreChange', 'triggerRebuild']) { if (!f[name]) { console.error('Missing required function export', name); process.exit(1); } }"
