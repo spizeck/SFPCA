@@ -79,7 +79,7 @@ Use conventional commits:
    cd functions
    npm ci
    npm run lint
-   node -e "require('./index.js')"
+   node -e "const f = require('./index.js'); for (const name of ['onFirestoreChange', 'triggerRebuild']) { if (!f[name]) { console.error('Missing required function export', name); process.exit(1); } }"
    ```
 
    `functions/` uses ESLint 8 with `.eslintrc.js` (eslint-config-google).

@@ -86,5 +86,5 @@ jobs:
           # ESLint 9 toolchain, which is not installed in this job.
           ESLINT_USE_FLAT_CONFIG: "false"
 
-      - name: Load functions entrypoint
-        run: node -e "require('./index.js')"
+      - name: Validate functions exports
+        run: node -e "const f = require('./index.js'); for (const name of ['onFirestoreChange', 'triggerRebuild']) { if (!f[name]) { console.error('Missing required function export', name); process.exit(1); } }"
