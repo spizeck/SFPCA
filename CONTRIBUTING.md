@@ -6,7 +6,7 @@ Thank you for your interest in contributing to the SFPCA website! This document 
 
 ### Prerequisites
 
-- Node.js 18+ and npm
+- Node.js 20 and npm (required by Firebase Functions and Next.js >= 20.9)
 - Git
 - Firebase project access (for development)
 
@@ -19,9 +19,9 @@ Thank you for your interest in contributing to the SFPCA website! This document 
    cd SFPCA
    ```
 
-3. Install dependencies:
+3. Install dependencies from the lockfile:
    ```bash
-   npm install
+   npm ci
    ```
 
 4. Create a feature branch:
@@ -64,12 +64,29 @@ Use conventional commits:
 ### Pull Requests
 
 1. Ensure your branch is up to date with `main`
-2. Run checks before submitting:
+2. Run the same checks CI runs (see `.github/workflows/ci.yml`) before submitting:
+
+   **Root app**
    ```bash
+   npm ci
    npm run lint
    npm run type-check
    npm run build
    ```
+
+   **Firebase Functions**
+   ```bash
+   cd functions
+   npm ci
+   npm run lint
+   node -e "require('./index.js')"
+   ```
+
+   > **Note:** `npm run build` requires the `NEXT_PUBLIC_FIREBASE_*` variables
+   > from `.env.local` (or placeholders) to be set, because the Firebase client
+   > SDK initializes during static generation. Real credentials are not needed
+   > for the build itself — CI uses placeholder values.
+
 3. Create a PR with a clear title, description, and screenshots for UI changes
 
 ## Adding Features
