@@ -126,11 +126,14 @@ Use conventional commits:
 
 ## Security
 
-- Never commit `.env.local` or any files containing secrets
+- Never commit any `.env*` file or credentials — only `.env.example`
+  placeholders are committed (see [SECURITY.md](SECURITY.md) for details)
 - Validate all user inputs
 - Use Firestore security rules for data access control
 - No sensitive data in client-side code
 - Service account keys must never be committed (covered by `.gitignore`)
+- Run `npm audit` (root and `functions/`) before adding or upgrading
+  dependencies; report vulnerabilities per [SECURITY.md](SECURITY.md)
 
 ## License
 
