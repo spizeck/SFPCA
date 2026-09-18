@@ -45,7 +45,7 @@ export function ContactSection({ contact, mapEmbedUrl, whereWeAre }: ContactSect
 
   const contactCards = [
     {
-      icon: <Phone className="h-6 w-6 text-white" />,
+      icon: <Phone className="h-6 w-6 text-white" aria-hidden="true" />,
       title: "Phone",
       content: contact ? (
         <a href={`tel:${contact.phone}`} className="text-white hover:text-white/80">
@@ -54,7 +54,7 @@ export function ContactSection({ contact, mapEmbedUrl, whereWeAre }: ContactSect
       ) : null,
     },
     {
-      icon: <Mail className="h-6 w-6 text-white" />,
+      icon: <Mail className="h-6 w-6 text-white" aria-hidden="true" />,
       title: "Email",
       content: contact ? (
         <a href={`mailto:${contact.email}`} className="text-white hover:text-white/80 break-all">
@@ -63,7 +63,7 @@ export function ContactSection({ contact, mapEmbedUrl, whereWeAre }: ContactSect
       ) : null,
     },
     {
-      icon: <MessageCircle className="h-6 w-6 text-white" />,
+      icon: <MessageCircle className="h-6 w-6 text-white" aria-hidden="true" />,
       title: "WhatsApp",
       content: contact ? (
         <a
@@ -77,12 +77,12 @@ export function ContactSection({ contact, mapEmbedUrl, whereWeAre }: ContactSect
       ) : null,
     },
     {
-      icon: <MapPin className="h-6 w-6 text-white" />,
+      icon: <MapPin className="h-6 w-6 text-white" aria-hidden="true" />,
       title: "Address",
       content: <p className="text-white">{sectionAddress}</p>,
     },
     {
-      icon: <Clock className="h-6 w-6 text-white" />,
+      icon: <Clock className="h-6 w-6 text-white" aria-hidden="true" />,
       title: "Hours",
       content: <p className="text-white whitespace-pre-line">{sectionHours}</p>,
       wide: true,
@@ -97,7 +97,7 @@ export function ContactSection({ contact, mapEmbedUrl, whereWeAre }: ContactSect
       {...animationProps}
     >
       {/* Background Video - Anchored to Left */}
-      <div className="absolute inset-0 z-0">
+      <div className="absolute inset-0 z-0 bg-black">
         <OptimizedVideo
           src="/videos/clinic.mp4"
           webmSrc="/videos/clinic.webm"
@@ -135,6 +135,7 @@ export function ContactSection({ contact, mapEmbedUrl, whereWeAre }: ContactSect
           >
             <iframe
               src={sectionMapEmbedUrl}
+              title="Map showing the SFPCA location on Saba"
               width="100%"
               height="400"
               style={{ border: 0 }}
@@ -152,7 +153,7 @@ export function ContactSection({ contact, mapEmbedUrl, whereWeAre }: ContactSect
             {...animationProps}
           >
             <div className="text-center">
-              <MapPin className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <MapPin className="h-12 w-12 text-muted-foreground mx-auto mb-4" aria-hidden="true" />
               <p className="text-muted-foreground">Map will be displayed here</p>
               <p className="text-sm text-muted-foreground mt-2">Configure location in admin settings</p>
             </div>

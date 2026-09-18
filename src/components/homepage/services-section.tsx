@@ -18,9 +18,9 @@ interface ServicesSectionProps {
 }
 
 const iconMap: Record<number, React.ReactNode> = {
-  0: <Stethoscope className="h-10 w-10 text-primary" />,
-  1: <Heart className="h-10 w-10 text-primary" />,
-  2: <ClipboardList className="h-10 w-10 text-primary" />,
+  0: <Stethoscope className="h-10 w-10 text-primary" aria-hidden="true" />,
+  1: <Heart className="h-10 w-10 text-primary" aria-hidden="true" />,
+  2: <ClipboardList className="h-10 w-10 text-primary" aria-hidden="true" />,
 };
 
 export function ServicesSection({ data }: ServicesSectionProps) {
@@ -79,7 +79,7 @@ export function ServicesSection({ data }: ServicesSectionProps) {
               <Card className="text-center h-full hover:shadow-lg transition-shadow flex flex-col">
                 <CardHeader>
                   <div className="flex justify-center mb-4">
-                    {iconMap[index] || <Heart className="h-10 w-10 text-primary" />}
+                    {iconMap[index] || <Heart className="h-10 w-10 text-primary" aria-hidden="true" />}
                   </div>
                   <CardTitle>{service.title}</CardTitle>
                 </CardHeader>
@@ -93,7 +93,7 @@ export function ServicesSection({ data }: ServicesSectionProps) {
                     <Button variant="outline" className="w-full" asChild>
                       <Link href="/under-construction">
                         Learn More
-                        <ArrowRight className="ml-2 h-4 w-4" />
+                        <ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />
                       </Link>
                     </Button>
                   </div>

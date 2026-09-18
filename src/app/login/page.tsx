@@ -6,7 +6,7 @@ import { auth } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -197,11 +197,11 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4 relative">
+    <main id="main-content" tabIndex={-1} className="min-h-screen flex items-center justify-center bg-background px-4 relative">
       <ThemeToggle />
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl">SFPCA Admin</CardTitle>
+          <h1 className="text-2xl font-semibold tracking-tight">SFPCA Admin</h1>
           <CardDescription>{isSignIn ? "Sign in to access the admin dashboard" : "Create a new account"}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -233,6 +233,7 @@ export default function LoginPage() {
               <Input
                 id="email"
                 type="email"
+                autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="Enter your email"
@@ -245,6 +246,7 @@ export default function LoginPage() {
               <Input
                 id="password"
                 type="password"
+                autoComplete={isSignIn ? "current-password" : "new-password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Enter your password"
@@ -304,6 +306,6 @@ export default function LoginPage() {
           </p>
         </CardContent>
       </Card>
-    </div>
+    </main>
   );
 }

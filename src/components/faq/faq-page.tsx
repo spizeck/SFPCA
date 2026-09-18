@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { collection, getDocs, orderBy, query } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { motion, AnimatePresence } from "framer-motion";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronUp, Phone, Mail, MapPin } from "lucide-react";
 import { fadeInUpVariants, shouldReduceMotion } from "@/lib/animations";
@@ -97,7 +97,7 @@ export function FAQ() {
       <section className="py-20 bg-primary text-primary-foreground">
         <div className="container mx-auto px-4">
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
             className="text-center"
@@ -119,7 +119,7 @@ export function FAQ() {
             {Object.entries(groupedFaqs).map(([category, categoryFaqs], categoryIndex) => (
               <motion.div
                 key={category}
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5, delay: categoryIndex * 0.1 }}
                 viewport={{ once: true }}
@@ -127,42 +127,50 @@ export function FAQ() {
                 <Card>
                   <CardHeader>
                     <div className="flex items-center gap-3">
-                      <span className="text-2xl">{categoryIcons[category] || "❓"}</span>
-                      <CardTitle className="text-2xl">{category}</CardTitle>
+                      <span className="text-2xl" aria-hidden="true">{categoryIcons[category] || "❓"}</span>
+                      <h2 className="text-2xl font-semibold tracking-tight">{category}</h2>
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     {categoryFaqs.map((faq, index) => {
                       const isOpen = openItems.includes(faq.id);
-                      
+                      const headingId = `faq-${faq.id}-heading`;
+                      const panelId = `faq-${faq.id}-panel`;
+
                       return (
                         <motion.div
                           key={faq.id}
-                          initial={{ opacity: 0, y: 10 }}
+                          initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 10 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ duration: 0.3, delay: index * 0.05 }}
                         >
                           <Card>
-                            <CardHeader
-                              className="cursor-pointer select-none"
-                              onClick={() => toggleItem(faq.id)}
-                            >
-                              <div className="flex items-center justify-between">
-                                <h3 className="text-lg font-medium text-left">
-                                  {faq.question}
-                                </h3>
-                                <Button variant="ghost" size="sm">
-                                  {isOpen ? <ChevronUp /> : <ChevronDown />}
-                                </Button>
-                              </div>
-                            </CardHeader>
+                            <h3 id={headingId}>
+                              <button
+                                type="button"
+                                className="flex w-full items-center justify-between gap-4 px-6 py-4 text-left font-medium text-lg cursor-pointer"
+                                aria-expanded={isOpen}
+                                aria-controls={panelId}
+                                onClick={() => toggleItem(faq.id)}
+                              >
+                                {faq.question}
+                                {isOpen ? (
+                                  <ChevronUp className="h-5 w-5 shrink-0" aria-hidden="true" />
+                                ) : (
+                                  <ChevronDown className="h-5 w-5 shrink-0" aria-hidden="true" />
+                                )}
+                              </button>
+                            </h3>
                             <AnimatePresence>
                               {isOpen && (
                                 <motion.div
+                                  id={panelId}
+                                  role="region"
+                                  aria-labelledby={headingId}
                                   initial={{ height: 0, opacity: 0 }}
                                   animate={{ height: "auto", opacity: 1 }}
                                   exit={{ height: 0, opacity: 0 }}
-                                  transition={{ duration: 0.3 }}
+                                  transition={{ duration: shouldReduceMotion() ? 0 : 0.3 }}
                                 >
                                   <CardContent className="pt-0">
                                     <p className="text-muted-foreground whitespace-pre-wrap">
@@ -199,14 +207,14 @@ export function FAQ() {
       <section className="py-16 bg-muted">
         <div className="container mx-auto px-4">
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
             viewport={{ once: true }}
             className="text-center"
           >
             <h2 className="text-3xl font-bold mb-4">Still Have Questions?</h2>
-            <p className="text-xl text-muted-foreground mb-8">
+            <p className="text-xl text-foreground/80 mb-8">
               We&apos;re here to help! Contact us with any other questions.
             </p>
             <div className="flex flex-col md:flex-row gap-4 justify-center">

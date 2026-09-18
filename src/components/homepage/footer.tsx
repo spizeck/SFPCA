@@ -14,7 +14,7 @@ export function Footer({ social }: FooterProps) {
       <div className="container mx-auto px-4">
         <div className="flex flex-col items-center gap-6">
           <h3 className="text-2xl font-bold">SFPCA</h3>
-          <p className="text-muted-foreground text-center max-w-md">
+          <p className="text-background/80 text-center max-w-md">
             Saba Foundation for Preventing Cruelty to Animals
           </p>
           <div className="flex gap-6">
@@ -26,7 +26,7 @@ export function Footer({ social }: FooterProps) {
                 className="hover:text-primary transition-colors"
                 aria-label="Facebook"
               >
-                <Facebook className="h-6 w-6" />
+                <Facebook className="h-6 w-6" aria-hidden="true" />
               </a>
             )}
             {social.instagram && (
@@ -37,7 +37,7 @@ export function Footer({ social }: FooterProps) {
                 className="hover:text-primary transition-colors"
                 aria-label="Instagram"
               >
-                <Instagram className="h-6 w-6" />
+                <Instagram className="h-6 w-6" aria-hidden="true" />
               </a>
             )}
             {social.twitter && (
@@ -48,11 +48,11 @@ export function Footer({ social }: FooterProps) {
                 className="hover:text-primary transition-colors"
                 aria-label="Twitter"
               >
-                <Twitter className="h-6 w-6" />
+                <Twitter className="h-6 w-6" aria-hidden="true" />
               </a>
             )}
           </div>
-          <div className="text-sm text-muted-foreground text-center">
+          <div className="text-sm text-background/80 text-center">
             <p>&copy; {new Date().getFullYear()} SFPCA. All rights reserved.</p>
           </div>
         </div>

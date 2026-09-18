@@ -48,5 +48,37 @@ export default async function globalSetup() {
     readFileSync(join(__dirname, "../../scripts/seed-data.json"), "utf8"),
   );
   await db.collection("homepage").doc("main").set(seed.homepage);
-  await db.collection("siteSettings").doc("global").set(seed.siteSettings);
+  await db.collection("siteSettings").doc("global").set({
+    ...seed.siteSettings,
+    // Fake demo embed so the map iframe renders (a11y coverage).
+    mapEmbedUrl: "https://www.google.com/maps?q=The+Bottom,+Saba&output=embed",
+  });
+
+  // Adoptable animals so the adoptions page and homepage cards render.
+  for (const animal of seed.animals ?? []) {
+    const { id, ...data } = animal;
+    const ref = id
+      ? db.collection("animals").doc(id)
+      : db.collection("animals").doc();
+    await ref.set(data);
+  }
+
+  // FAQs so the public accordion renders real items.
+  const faqs = [
+    {
+      category: "General",
+      question: "What does SFPCA do?",
+      answer: "We prevent cruelty to animals on Saba through care, registration, and adoption services.",
+      order: 1,
+    },
+    {
+      category: "Adoption Process",
+      question: "How do I adopt an animal?",
+      answer: "Contact us to start the adoption process and meet available animals.",
+      order: 2,
+    },
+  ];
+  for (const faq of faqs) {
+    await db.collection("faq").add({ ...faq, createdAt: new Date() });
+  }
 }
