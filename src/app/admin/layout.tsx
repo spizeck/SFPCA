@@ -16,7 +16,7 @@ export default async function AdminLayout({
   return (
     <div className="min-h-screen bg-background">
       <AdminNav />
-      <main className="container mx-auto px-4 py-8">{children}</main>
+      <main id="main-content" tabIndex={-1} className="container mx-auto px-4 py-8">{children}</main>
     </div>
   );
 }

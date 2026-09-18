@@ -9,7 +9,9 @@ and commands. [CONTRIBUTING.md](CONTRIBUTING.md) is the canonical
 development/testing workflow. [SECURITY.md](SECURITY.md) covers the
 security model and dependency practices.
 [AI_INSTRUCTIONS.md](AI_INSTRUCTIONS.md) gives coding agents a concise
-orientation and the architectural invariants. `functions/README.md`
+orientation and the architectural invariants.
+[ACCESSIBILITY.md](ACCESSIBILITY.md) records the public-site accessibility
+audit baseline and remaining exceptions. `functions/README.md`
 covers the Cloud Functions project.
 
 ## Features

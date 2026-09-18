@@ -60,7 +60,7 @@ export default async function HomePage() {
   }
 
   return (
-    <main className="min-h-screen scroll-smooth">
+    <main id="main-content" tabIndex={-1} className="min-h-screen scroll-smooth">
       <HashClear />
       <ThemeToggle />
       <HeroSection data={homepage.hero} />

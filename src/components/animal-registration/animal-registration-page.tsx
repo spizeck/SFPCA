@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
+import { shouldReduceMotion } from "@/lib/animations";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -144,7 +145,7 @@ export function AnimalRegistration() {
       {/* Hero Section with Full Page Video Background */}
       <section className="relative min-h-screen overflow-hidden flex items-center justify-center">
         {/* Video Background */}
-        <div className="absolute inset-0 z-0">
+        <div className="absolute inset-0 z-0 bg-black">
           <OptimizedVideo
             src="/videos/catbag.mp4"
             webmSrc="/videos/catbag.webm"
@@ -157,7 +158,7 @@ export function AnimalRegistration() {
         {/* Content */}
         <div className="relative z-10 container mx-auto px-4">
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
             className="text-center max-w-4xl mx-auto"
@@ -168,8 +169,8 @@ export function AnimalRegistration() {
             <p className="text-xl md:text-2xl mb-8 text-white/90">
               Register your pet with SABA. Annual registration required for all animals.
             </p>
-            <div className="bg-white/10 backdrop-blur-sm rounded-lg p-6 max-w-2xl mx-auto">
-              <h3 className="text-xl font-semibold mb-2 text-white">Registration Fees</h3>
+            <div className="bg-black/40 backdrop-blur-sm rounded-lg p-6 max-w-2xl mx-auto">
+              <h2 className="text-xl font-semibold mb-2 text-white">Registration Fees</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
                 <div className="bg-white/10 rounded p-3">
                   <p className="font-semibold text-white">Spayed/Neutered: $10</p>
@@ -190,14 +191,14 @@ export function AnimalRegistration() {
       <section id="form" className="py-20">
         <div className="container mx-auto px-4 max-w-2xl">
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
             viewport={{ once: true }}
           >
             <Card>
               <CardHeader>
-                <CardTitle className="text-2xl">Animal Registration Form</CardTitle>
+                <h2 className="text-2xl font-semibold tracking-tight">Animal Registration Form</h2>
                 <p className="text-muted-foreground">
                   Please fill out all required fields. Registration must be renewed annually.
                 </p>
@@ -208,18 +209,20 @@ export function AnimalRegistration() {
                   <div className="space-y-4">
                     <h3 className="text-lg font-semibold">Owner Information</h3>
                     <div>
-                      <Label htmlFor="ownerName">Full Name *</Label>
+                      <Label htmlFor="ownerName">Full Name <span aria-hidden="true">*</span></Label>
                       <Input
                         id="ownerName"
+                        autoComplete="name"
                         value={formData.ownerName}
                         onChange={(e) => setFormData({ ...formData, ownerName: e.target.value })}
                         required
                       />
                     </div>
                     <div>
-                      <Label htmlFor="ownerAddress">Address *</Label>
+                      <Label htmlFor="ownerAddress">Address <span aria-hidden="true">*</span></Label>
                       <Textarea
                         id="ownerAddress"
+                        autoComplete="street-address"
                         value={formData.ownerAddress}
                         onChange={(e) => setFormData({ ...formData, ownerAddress: e.target.value })}
                         required
@@ -227,20 +230,22 @@ export function AnimalRegistration() {
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
-                        <Label htmlFor="ownerPhone">Phone Number *</Label>
+                        <Label htmlFor="ownerPhone">Phone Number <span aria-hidden="true">*</span></Label>
                         <Input
                           id="ownerPhone"
                           type="tel"
+                          autoComplete="tel"
                           value={formData.ownerPhone}
                           onChange={(e) => setFormData({ ...formData, ownerPhone: e.target.value })}
                           required
                         />
                       </div>
                       <div>
-                        <Label htmlFor="ownerEmail">Email Address *</Label>
+                        <Label htmlFor="ownerEmail">Email Address <span aria-hidden="true">*</span></Label>
                         <Input
                           id="ownerEmail"
                           type="email"
+                          autoComplete="email"
                           value={formData.ownerEmail}
                           onChange={(e) => setFormData({ ...formData, ownerEmail: e.target.value })}
                           required
@@ -260,7 +265,7 @@ export function AnimalRegistration() {
                         onClick={addAnimal}
                         className="flex items-center gap-2"
                       >
-                        <Plus className="h-4 w-4" />
+                        <Plus className="h-4 w-4" aria-hidden="true" />
                         Add Another Animal
                       </Button>
                     </div>
@@ -277,15 +282,15 @@ export function AnimalRegistration() {
                               onClick={() => removeAnimal(index)}
                               className="flex items-center gap-2"
                             >
-                              <Trash2 className="h-4 w-4" />
-                              Remove
+                              <Trash2 className="h-4 w-4" aria-hidden="true" />
+                              Remove<span className="sr-only"> animal {index + 1}</span>
                             </Button>
                           )}
                         </div>
                         
                         <div className="space-y-4">
                           <div>
-                            <Label htmlFor={`animalName-${index}`}>Animal&apos;s Name *</Label>
+                            <Label htmlFor={`animalName-${index}`}>Animal&apos;s Name <span aria-hidden="true">*</span></Label>
                             <Input
                               id={`animalName-${index}`}
                               value={animal.name}
@@ -294,7 +299,7 @@ export function AnimalRegistration() {
                             />
                           </div>
                           <div>
-                            <Label htmlFor={`animalType-${index}`}>Type of Animal *</Label>
+                            <Label htmlFor={`animalType-${index}`}>Type of Animal <span aria-hidden="true">*</span></Label>
                             <Input
                               id={`animalType-${index}`}
                               placeholder="e.g., Dog, Cat, etc."
@@ -303,12 +308,13 @@ export function AnimalRegistration() {
                               required
                             />
                           </div>
-                          <div>
-                            <Label>Sex *</Label>
+                          <fieldset>
+                            <legend className="text-sm font-medium leading-none">Sex <span aria-hidden="true">*</span></legend>
                             <RadioGroup
                               value={animal.sex}
                               onValueChange={(value) => updateAnimal(index, 'sex', value)}
                               className="flex gap-4 mt-2"
+                              required
                             >
                               <div className="flex items-center space-x-2">
                                 <RadioGroupItem value="male" id={`male-${index}`} />
@@ -319,13 +325,14 @@ export function AnimalRegistration() {
                                 <Label htmlFor={`female-${index}`}>Female</Label>
                               </div>
                             </RadioGroup>
-                          </div>
-                          <div>
-                            <Label>Is the animal spayed/neutered? *</Label>
+                          </fieldset>
+                          <fieldset>
+                            <legend className="text-sm font-medium leading-none">Is the animal spayed/neutered? <span aria-hidden="true">*</span></legend>
                             <RadioGroup
                               value={animal.isFixed}
                               onValueChange={(value) => updateAnimal(index, 'isFixed', value)}
                               className="flex gap-4 mt-2"
+                              required
                             >
                               <div className="flex items-center space-x-2">
                                 <RadioGroupItem value="yes" id={`yes-${index}`} />
@@ -343,7 +350,7 @@ export function AnimalRegistration() {
                                 </span>
                               </p>
                             )}
-                          </div>
+                          </fieldset>
                         </div>
                       </Card>
                     ))}
@@ -378,8 +385,9 @@ export function AnimalRegistration() {
                         accept="image/*,.pdf"
                         onChange={handleFileChange}
                         className="mt-2"
+                        aria-describedby="paymentReceipt-help"
                       />
-                      <p className="text-sm text-muted-foreground mt-1">
+                      <p id="paymentReceipt-help" className="text-sm text-muted-foreground mt-1">
                         Optionally upload a copy of your payment receipt. Accepted formats: JPG, PNG, PDF
                       </p>
                     </div>
@@ -417,22 +425,26 @@ export function AnimalRegistration() {
                 <CardHeader>
                   <CardTitle>How to Pay</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-2">
-                  <p>• In person at our office</p>
-                  <p>• Via bank transfer</p>
-                  <p>• Through our online portal</p>
-                  <p>• At participating vet clinics</p>
+                <CardContent>
+                  <ul className="list-disc pl-5 space-y-2">
+                    <li>In person at our office</li>
+                    <li>Via bank transfer</li>
+                    <li>Through our online portal</li>
+                    <li>At participating vet clinics</li>
+                  </ul>
                 </CardContent>
               </Card>
               <Card>
                 <CardHeader>
                   <CardTitle>What Happens Next</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-2">
-                  <p>• Submit this form with payment receipt</p>
-                  <p>• We verify your payment within 24-48 hours</p>
-                  <p>• You&apos;ll receive a registration certificate</p>
-                  <p>• Annual renewal required</p>
+                <CardContent>
+                  <ul className="list-disc pl-5 space-y-2">
+                    <li>Submit this form with payment receipt</li>
+                    <li>We verify your payment within 24-48 hours</li>
+                    <li>You&apos;ll receive a registration certificate</li>
+                    <li>Annual renewal required</li>
+                  </ul>
                 </CardContent>
               </Card>
             </div>

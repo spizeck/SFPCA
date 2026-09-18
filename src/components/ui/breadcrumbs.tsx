@@ -28,7 +28,7 @@ export function Breadcrumbs() {
   const otherBreadcrumbs = breadcrumbs.slice(0, -1);
 
   return (
-    <nav className="py-4 px-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <nav aria-label="Breadcrumb" className="py-4 px-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container mx-auto flex items-center justify-between">
         <ol className="flex items-center space-x-2 text-sm text-muted-foreground">
           {otherBreadcrumbs.map((breadcrumb, index) => (
@@ -37,13 +37,13 @@ export function Breadcrumbs() {
                 href={breadcrumb.href}
                 className="hover:text-foreground transition-colors flex items-center"
               >
-                {index === 0 && <Home className="h-4 w-4 mr-1" />}
+                {index === 0 && <Home className="h-4 w-4 mr-1" aria-hidden="true" />}
                 {breadcrumb.label}
               </Link>
-              <ChevronRight className="h-4 w-4 mx-2 text-muted-foreground/50" />
+              <ChevronRight className="h-4 w-4 mx-2 text-muted-foreground/50" aria-hidden="true" />
             </li>
           ))}
-          <li className="text-foreground font-medium flex items-center">
+          <li className="text-foreground font-medium flex items-center" aria-current="page">
             {lastBreadcrumb.label}
           </li>
         </ol>

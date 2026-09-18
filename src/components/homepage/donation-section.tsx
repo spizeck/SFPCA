@@ -64,7 +64,7 @@ export function DonationSection({ data }: DonationSectionProps) {
                 transition={{ ...defaultTransition, delay: 0.4 }}
               >
                 <h3 className="font-semibold text-lg mb-3 text-foreground">Payment Methods</h3>
-                <p className="text-muted-foreground whitespace-pre-line">{data.paymentMethods}</p>
+                <p className="text-foreground/80 whitespace-pre-line">{data.paymentMethods}</p>
               </motion.div>
             </CardContent>
           </Card>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
+import { shouldReduceMotion } from "@/lib/animations";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { OptimizedVideo } from "@/components/ui/optimized-video";
 import { Button } from "@/components/ui/button";
@@ -39,7 +40,7 @@ export function AnimalAdoptions() {
       {/* Hero Section with Full Page Video Background */}
       <section className="relative min-h-screen overflow-hidden flex items-center justify-center">
         {/* Video Background */}
-        <div className="absolute inset-0 z-0">
+        <div className="absolute inset-0 z-0 bg-black">
           <OptimizedVideo
             src="/videos/adoption.mp4"
             webmSrc="/videos/adoption.webm"
@@ -52,7 +53,7 @@ export function AnimalAdoptions() {
         {/* Content */}
         <div className="relative z-10 container mx-auto px-4">
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
             className="text-center max-w-4xl mx-auto"
@@ -77,7 +78,7 @@ export function AnimalAdoptions() {
             <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
               Success Stories
             </h2>
-            <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
+            <p className="text-xl text-foreground/80 max-w-2xl mx-auto">
               Heartwarming stories of animals who found their forever homes
             </p>
           </div>
@@ -102,14 +103,14 @@ export function AnimalAdoptions() {
             ].map((story, index) => (
               <motion.div
                 key={index}
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5, delay: index * 0.1 }}
                 viewport={{ once: true }}
               >
                 <Card className="h-full">
                   <CardHeader className="text-center">
-                    <div className="text-6xl mb-4">{story.image}</div>
+                    <div className="text-6xl mb-4" aria-hidden="true">{story.image}</div>
                     <CardTitle>{story.name}</CardTitle>
                   </CardHeader>
                   <CardContent>
@@ -166,7 +167,7 @@ export function AnimalAdoptions() {
               {filteredAnimals.map((animal, index) => (
                 <motion.div
                   key={animal.id}
-                  initial={{ opacity: 0, y: 20 }}
+                  initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
                   whileInView={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.5, delay: index * 0.1 }}
                   viewport={{ once: true }}
@@ -216,7 +217,7 @@ export function AnimalAdoptions() {
             <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
               Partner Organizations
             </h2>
-            <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
+            <p className="text-xl text-foreground/80 max-w-2xl mx-auto">
               We work with these amazing organizations to help more animals
             </p>
           </div>
@@ -230,14 +231,14 @@ export function AnimalAdoptions() {
             ].map((partner, index) => (
               <motion.div
                 key={index}
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5, delay: index * 0.1 }}
                 viewport={{ once: true }}
                 className="text-center"
               >
                 <Card className="p-8">
-                  <div className="text-4xl mb-4">{partner.logo}</div>
+                  <div className="text-4xl mb-4" aria-hidden="true">{partner.logo}</div>
                   <h3 className="font-semibold">{partner.name}</h3>
                 </Card>
               </motion.div>
@@ -252,7 +253,7 @@ export function AnimalAdoptions() {
           <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
             Ready to Adopt?
           </h2>
-          <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto">
+          <p className="text-xl text-foreground/80 mb-8 max-w-2xl mx-auto">
             Take the first step in giving an animal a loving home. Contact us to start the adoption process.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">

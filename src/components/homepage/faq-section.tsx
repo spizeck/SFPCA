@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { fadeInUpVariants, shouldReduceMotion } from "@/lib/animations";
@@ -66,7 +66,7 @@ export function FaqSection() {
     <section className="py-20 bg-background">
       <div className="container mx-auto px-4">
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
           viewport={{ once: true }}
@@ -90,35 +90,44 @@ export function FaqSection() {
             const key = `faq-${index}`;
             const isOpen = openItems[key];
             
+            const headingId = `${key}-heading`;
+            const panelId = `${key}-panel`;
+
             return (
               <motion.div
                 key={key}
-                initial={{ opacity: 0, y: 10 }}
+                initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 10 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3, delay: index * 0.05 }}
                 viewport={{ once: true }}
               >
                 <Card>
-                  <CardHeader
-                    className="cursor-pointer select-none"
-                    onClick={() => toggleItem(key)}
-                  >
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-lg text-left">
-                        {item.question}
-                      </CardTitle>
-                      <Button variant="ghost" size="sm">
-                        {isOpen ? <ChevronUp /> : <ChevronDown />}
-                      </Button>
-                    </div>
-                  </CardHeader>
+                  <h3 id={headingId}>
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between gap-4 px-6 py-4 text-left font-semibold text-lg cursor-pointer"
+                      aria-expanded={!!isOpen}
+                      aria-controls={panelId}
+                      onClick={() => toggleItem(key)}
+                    >
+                      {item.question}
+                      {isOpen ? (
+                        <ChevronUp className="h-5 w-5 shrink-0" aria-hidden="true" />
+                      ) : (
+                        <ChevronDown className="h-5 w-5 shrink-0" aria-hidden="true" />
+                      )}
+                    </button>
+                  </h3>
                   <AnimatePresence>
                     {isOpen && (
                       <motion.div
+                        id={panelId}
+                        role="region"
+                        aria-labelledby={headingId}
                         initial={{ height: 0, opacity: 0 }}
                         animate={{ height: "auto", opacity: 1 }}
                         exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.3 }}
+                        transition={{ duration: shouldReduceMotion() ? 0 : 0.3 }}
                       >
                         <CardContent className="pt-0">
                           <p className="text-muted-foreground">

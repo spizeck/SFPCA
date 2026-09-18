@@ -38,7 +38,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
 
   const contactCards = [
     {
-      icon: <Phone className="h-6 w-6 text-primary" />,
+      icon: <Phone className="h-6 w-6 text-primary" aria-hidden="true" />,
       title: "Phone",
       content: contact ? (
         <a href={`tel:${contact.phone}`} className="text-foreground hover:text-primary">
@@ -47,7 +47,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
       ) : null,
     },
     {
-      icon: <Mail className="h-6 w-6 text-primary" />,
+      icon: <Mail className="h-6 w-6 text-primary" aria-hidden="true" />,
       title: "Email",
       content: contact ? (
         <a href={`mailto:${contact.email}`} className="text-foreground hover:text-primary break-all">
@@ -56,7 +56,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
       ) : null,
     },
     {
-      icon: <MessageCircle className="h-6 w-6 text-primary" />,
+      icon: <MessageCircle className="h-6 w-6 text-primary" aria-hidden="true" />,
       title: "WhatsApp",
       content: contact ? (
         <a
@@ -70,12 +70,12 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
       ) : null,
     },
     {
-      icon: <MapPin className="h-6 w-6 text-primary" />,
+      icon: <MapPin className="h-6 w-6 text-primary" aria-hidden="true" />,
       title: "Address",
       content: contact ? <p className="text-foreground">{contact.address}</p> : null,
     },
     {
-      icon: <Clock className="h-6 w-6 text-primary" />,
+      icon: <Clock className="h-6 w-6 text-primary" aria-hidden="true" />,
       title: "Hours",
       content: contact ? <p className="text-foreground whitespace-pre-line">{contact.hours}</p> : null,
       wide: true,
@@ -87,7 +87,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
       {/* Hero Section with Video Background */}
       <section className="relative py-20 min-h-screen flex items-center justify-center overflow-hidden">
         {/* Background Video - Anchored to Left */}
-        <div className="absolute inset-0 z-0 overflow-hidden">
+        <div className="absolute inset-0 z-0 overflow-hidden bg-black">
           <OptimizedVideo
             src="/videos/clinic.mp4"
             webmSrc="/videos/clinic.webm"
@@ -101,7 +101,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
         {/* Hero Content */}
         <div className="relative z-10 container mx-auto px-4">
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
             className="text-center max-w-4xl mx-auto"
@@ -120,7 +120,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
       <section className="py-20">
         <div className="container mx-auto px-4">
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
             viewport={{ once: true }}
@@ -138,7 +138,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
             {contactCards.map((card, index) => (
               <motion.div
                 key={card.title}
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5, delay: index * 0.1 }}
                 viewport={{ once: true }}
@@ -166,7 +166,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
         <section className="py-20 bg-muted">
           <div className="container mx-auto px-4">
             <motion.div
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
               whileInView={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6 }}
               viewport={{ once: true }}
@@ -175,13 +175,13 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
               <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
                 Find Us
               </h2>
-              <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
+              <p className="text-xl text-foreground/80 max-w-2xl mx-auto">
                 Visit our location on the beautiful island of Saba
               </p>
             </motion.div>
 
             <motion.div
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
               whileInView={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6 }}
               viewport={{ once: true }}
@@ -190,6 +190,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
               <div className="rounded-lg overflow-hidden shadow-lg">
                 <iframe
                   src={mapEmbedUrl}
+                  title="Map showing the SFPCA location on Saba"
                   width="100%"
                   height="400"
                   style={{ border: 0 }}
@@ -209,7 +210,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
         <section className="py-20">
           <div className="container mx-auto px-4">
             <motion.div
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
               whileInView={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6 }}
               viewport={{ once: true }}
@@ -227,7 +228,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
                     className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-4 transition-colors"
                     aria-label="Facebook"
                   >
-                    <Facebook className="h-6 w-6" />
+                    <Facebook className="h-6 w-6" aria-hidden="true" />
                   </a>
                 )}
                 {social.instagram && (
@@ -238,7 +239,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
                     className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-4 transition-colors"
                     aria-label="Instagram"
                   >
-                    <Instagram className="h-6 w-6" />
+                    <Instagram className="h-6 w-6" aria-hidden="true" />
                   </a>
                 )}
                 {social.twitter && (
@@ -249,7 +250,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
                     className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-4 transition-colors"
                     aria-label="Twitter"
                   >
-                    <Twitter className="h-6 w-6" />
+                    <Twitter className="h-6 w-6" aria-hidden="true" />
                   </a>
                 )}
               </div>

@@ -30,7 +30,7 @@ export function HeroSection({ data }: HeroSectionProps) {
       {...animationProps}
     >
       {/* Background Video */}
-      <div className="absolute inset-0 z-0">
+      <div className="absolute inset-0 z-0 bg-black">
         <OptimizedVideo
           src="/videos/herocat.mp4"
           webmSrc="/videos/herocat.webm"
@@ -44,25 +44,25 @@ export function HeroSection({ data }: HeroSectionProps) {
       {/* Hero Content - now with relative positioning to sit above video */}
       <div className="relative z-10 container mx-auto px-4 h-full flex items-center justify-center">
         <div className="max-w-3xl mx-auto text-center">
-          <motion.h1 
+          <motion.h1
             className="text-4xl md:text-6xl font-bold text-white mb-6 drop-shadow-lg"
-            initial={{ opacity: 0, y: 30 }}
+            initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 30 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, ease: "easeInOut", delay: 0.2 } as Transition}
           >
             {data.title}
           </motion.h1>
-          <motion.p 
+          <motion.p
             className="text-xl md:text-2xl text-white/90 mb-8 drop-shadow-md"
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, ease: "easeInOut", delay: 0.5 } as Transition}
           >
             {data.subtitle}
           </motion.p>
-          <motion.div 
+          <motion.div
             className="flex flex-col sm:flex-row gap-4 justify-center"
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, ease: "easeInOut", delay: 0.8 } as Transition}
           >

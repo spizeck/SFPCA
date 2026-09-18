@@ -24,6 +24,7 @@ interface WhoWeAreSectionProps {
 
 export function WhoWeAreSection({ data }: WhoWeAreSectionProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
   
   // Add fallback data with made up team members
   const fallbackData = {
@@ -76,14 +77,16 @@ export function WhoWeAreSection({ data }: WhoWeAreSectionProps) {
   const itemsPerSlide = 3;
   const totalSlides = Math.ceil(teamMembers.length / itemsPerSlide);
 
-  // Auto-rotate carousel
+  // Auto-rotate carousel; paused by user control or reduced-motion preference
   useEffect(() => {
+    if (isPaused || shouldReduceMotion() || totalSlides <= 1) return;
+
     const timer = setInterval(() => {
       setCurrentIndex((prev) => (prev + 1) % totalSlides);
     }, 5000); // Change every 5 seconds
 
     return () => clearInterval(timer);
-  }, [totalSlides]);
+  }, [totalSlides, isPaused]);
 
   const goToSlide = (index: number) => {
     setCurrentIndex(index);
@@ -125,29 +128,37 @@ export function WhoWeAreSection({ data }: WhoWeAreSectionProps) {
           <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
             {sectionData.title}
           </h2>
-          <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
+          <p className="text-xl text-foreground/80 max-w-2xl mx-auto">
             {sectionData.subtitle}
           </p>
         </motion.div>
 
         {/* Carousel */}
-        <div className="relative">
+        <div
+          className="relative"
+          role="group"
+          aria-roledescription="carousel"
+          aria-label={sectionData.title}
+        >
           <div className="overflow-hidden">
             <AnimatePresence mode="wait">
               <motion.div
                 key={currentIndex}
-                initial={{ opacity: 0, x: 100 }}
+                initial={shouldReduceMotion() ? { opacity: 1, x: 0 } : { opacity: 0, x: 100 }}
                 animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -100 }}
+                exit={shouldReduceMotion() ? { opacity: 1, x: 0 } : { opacity: 0, x: -100 }}
                 transition={{ duration: 0.5 }}
                 className="grid md:grid-cols-3 gap-8"
+                role="group"
+                aria-roledescription="slide"
+                aria-label={`Slide ${currentIndex + 1} of ${totalSlides}`}
               >
                 {teamMembers
                   .slice(currentIndex * itemsPerSlide, (currentIndex + 1) * itemsPerSlide)
                   .map((member, index) => (
                     <motion.div
                       key={`${currentIndex}-${index}`}
-                      initial={{ opacity: 0, y: 20 }}
+                      initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: index * 0.1 }}
                     >
@@ -201,22 +212,45 @@ export function WhoWeAreSection({ data }: WhoWeAreSectionProps) {
               size="icon"
               onClick={goToPrevious}
               className="bg-background hover:bg-accent"
+              aria-label="Previous team members"
             >
-              <ChevronLeft className="h-4 w-4" />
+              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
             </Button>
-            
+
+            {/* Pause/play control */}
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setIsPaused((p) => !p)}
+              className="bg-background hover:bg-accent"
+              aria-pressed={isPaused}
+              aria-label={isPaused ? "Resume slideshow" : "Pause slideshow"}
+            >
+              {isPaused ? (
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg>
+              ) : (
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 5h4v14H6zM14 5h4v14h-4z" /></svg>
+              )}
+            </Button>
+
             {/* Dots Indicator */}
-            <div className="flex gap-2">
+            <div className="flex gap-1" role="group" aria-label="Choose slide">
               {Array.from({ length: totalSlides }).map((_, index) => (
                 <button
                   key={index}
                   onClick={() => goToSlide(index)}
-                  className={`w-2 h-2 rounded-full transition-colors ${
-                    index === currentIndex
-                      ? "bg-primary"
-                      : "bg-muted-foreground/30 hover:bg-muted-foreground/50"
-                  }`}
-                />
+                  aria-label={`Go to slide ${index + 1} of ${totalSlides}`}
+                  aria-current={index === currentIndex ? "true" : undefined}
+                  className="group flex items-center justify-center w-6 h-6"
+                >
+                  <span
+                    className={`w-2 h-2 rounded-full transition-colors ${
+                      index === currentIndex
+                        ? "bg-primary"
+                        : "bg-muted-foreground/30 group-hover:bg-muted-foreground/50"
+                    }`}
+                  />
+                </button>
               ))}
             </div>
 
@@ -225,8 +259,9 @@ export function WhoWeAreSection({ data }: WhoWeAreSectionProps) {
               size="icon"
               onClick={goToNext}
               className="bg-background hover:bg-accent"
+              aria-label="Next team members"
             >
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="h-4 w-4" aria-hidden="true" />
             </Button>
           </div>
         </div>

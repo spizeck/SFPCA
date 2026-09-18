@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { shouldReduceMotion } from "@/lib/animations";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { OptimizedVideo } from "@/components/ui/optimized-video";
 import { Button } from "@/components/ui/button";
@@ -56,7 +57,7 @@ export function VeterinaryServices() {
       {/* Hero Section with Full Page Video Background */}
       <section className="relative min-h-screen overflow-hidden flex items-center justify-center">
         {/* Video Background */}
-        <div className="absolute inset-0 z-0">
+        <div className="absolute inset-0 z-0 bg-black">
           <OptimizedVideo
             src="/videos/vetdog.mp4"
             webmSrc="/videos/vetdog.webm"
@@ -69,7 +70,7 @@ export function VeterinaryServices() {
         {/* Content */}
         <div className="relative z-10 container mx-auto px-4">
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
             className="text-center max-w-4xl mx-auto"
@@ -103,14 +104,14 @@ export function VeterinaryServices() {
             {services.map((service, index) => (
               <motion.div
                 key={index}
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5, delay: index * 0.1 }}
                 viewport={{ once: true }}
               >
                 <Card className="h-full hover:shadow-lg transition-shadow">
                   <CardHeader>
-                    <div className="text-4xl mb-4">{service.icon}</div>
+                    <div className="text-4xl mb-4" aria-hidden="true">{service.icon}</div>
                     <CardTitle className="text-xl">{service.title}</CardTitle>
                   </CardHeader>
                   <CardContent>
@@ -134,7 +135,7 @@ export function VeterinaryServices() {
           <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
             Ready to Book an Appointment?
           </h2>
-          <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto">
+          <p className="text-xl text-foreground/80 mb-8 max-w-2xl mx-auto">
             Contact us today to schedule a visit for your pet. Our caring team is ready to help!
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">

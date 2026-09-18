@@ -34,7 +34,7 @@ export default async function AnimalRegistrationPage() {
   const settings = await getSiteSettings();
 
   return (
-    <main className="min-h-screen">
+    <main id="main-content" tabIndex={-1} className="min-h-screen">
       <AnimalRegistration />
     </main>
   );

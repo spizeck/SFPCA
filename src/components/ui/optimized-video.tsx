@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { shouldReduceMotion } from "@/lib/animations";
 
 interface OptimizedVideoProps {
   src: string;
@@ -70,7 +71,7 @@ export function OptimizedVideo({
           inset: 0,
           ...style,
         }}
-        autoPlay={autoPlay && isInView}
+        autoPlay={autoPlay && isInView && !shouldReduceMotion()}
         muted={muted}
         loop={loop}
         playsInline={playsInline}
@@ -78,16 +79,17 @@ export function OptimizedVideo({
         onLoadStart={() => setIsLoaded(false)}
         onLoadedData={handleLoadedData}
         preload={isInView ? "metadata" : "none"}
+        aria-hidden="true"
+        tabIndex={-1}
       >
         {webmSrc && <source src={webmSrc} type="video/webm" />}
         <source src={src} type="video/mp4" />
-        Your browser does not support the video tag.
       </video>
       
       {/* Loading placeholder */}
       {!isLoaded && (
         <div 
-          className="absolute inset-0 bg-muted animate-pulse"
+          className="absolute inset-0 bg-muted motion-safe:animate-pulse"
           style={{ 
             backgroundImage: poster ? `url(${poster})` : undefined,
             backgroundSize: 'cover',
