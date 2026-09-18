@@ -33,6 +33,9 @@ const adminDoc = (exists: boolean, data?: Record<string, unknown>) => ({
 
 beforeEach(() => {
   vi.unstubAllEnvs();
+  // Neutralize any ambient ADMIN_EMAILS so each test controls the
+  // allowlist explicitly.
+  vi.stubEnv("ADMIN_EMAILS", "");
   mockAdminGet.mockReset();
   mockVerifySessionCookie.mockReset();
   mockCookieGet.mockReset();
