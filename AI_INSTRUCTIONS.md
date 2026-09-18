@@ -11,7 +11,8 @@ updated when architecture changes. Human-facing docs: `README.md`
 Next.js 16 (App Router, Turbopack) + React 19 + TypeScript site for the
 Saba Foundation for the Prevention of Cruelty to Animals (SFPCA), deployed
 on Vercel with Firebase (Auth, Firestore, Storage) as the backend and
-Firebase Cloud Functions triggering Vercel rebuilds on content changes.
+Firebase Cloud Functions triggering Vercel rebuilds on every Firestore
+document write (`onDocumentWritten("*")`, including non-content writes).
 **Node 24** is canonical (`.nvmrc`, `engines`, Functions runtime, CI).
 
 ## Application surfaces
