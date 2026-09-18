@@ -4,14 +4,25 @@ A modern web application for the **Saba Foundation for the Prevention of Cruelty
 
 Built with Next.js 16, TypeScript, Tailwind CSS, and Firebase.
 
+**Documentation map:** this file covers overview, setup, architecture,
+and commands. [CONTRIBUTING.md](CONTRIBUTING.md) is the canonical
+development/testing workflow. [SECURITY.md](SECURITY.md) covers the
+security model and dependency practices.
+[AI_INSTRUCTIONS.md](AI_INSTRUCTIONS.md) gives coding agents a concise
+orientation and the architectural invariants. `functions/README.md`
+covers the Cloud Functions project.
+
 ## Features
 
 ### Public Website
 - **Homepage** with hero video, about section, services, adoptable animals, donations, FAQ, and contact
 - **FAQ Page** with categorized, expandable questions (dynamically managed via admin)
 - **Animal Adoptions** page with filterable listings
+- **Animal Registration** public intake form (submissions land in admin review)
+- **Veterinary Services** page
 - **Contact Page** with contact info, map embed, and social links
-- **Under Construction** placeholder for pages in development
+- **Under Construction** placeholder for pages in development — also the
+  production maintenance gate (see Deployment)
 - **SEO Optimized** with Open Graph, Twitter cards, JSON-LD structured data, sitemap, and robots.txt
 - **Responsive Design** — mobile-first with Tailwind CSS
 - **Dark/Light Mode** via next-themes
@@ -27,10 +38,15 @@ Built with Next.js 16, TypeScript, Tailwind CSS, and Firebase.
 - **Team Photo Uploads** — Firebase Storage integration with loading states
 
 ### Security
-- Session-based authentication with HTTP-only cookies
-- Middleware-protected admin routes
-- Firestore security rules enforce read/write permissions
-- Admin allowlist via Firestore `admins` collection
+- Email/password or Google sign-in; admin sessions are HTTP-only cookies
+  (5-day expiry) created by `/api/auth/session`
+- Verified email required at session creation and inside security rules
+- Admin authorization is enforced server-side in the `/admin` layout
+  (`requireAdmin()`); the edge proxy is only a fast unauthenticated gate
+- Firestore/Storage security rules are an independent enforcement
+  boundary (verified email + `admins` document)
+- Admin allowlist via the `admins` Firestore collection, bootstrapped by
+  the `ADMIN_EMAILS` environment variable
 
 ## Tech Stack
 
@@ -72,7 +88,7 @@ Built with Next.js 16, TypeScript, Tailwind CSS, and Firebase.
    Fill in your Firebase credentials (see `.env.example` for all required variables).
 
 4. **Set up Firebase**
-   - Enable Google Sign-In in Firebase Authentication
+   - Enable Email/Password and Google sign-in in Firebase Authentication
    - Create a Firestore database
    - Enable Firebase Storage
    - Deploy security rules:
@@ -97,7 +113,7 @@ Built with Next.js 16, TypeScript, Tailwind CSS, and Firebase.
 SFPCA/
 ├── src/
 │   ├── app/                          # Next.js App Router
-│   │   ├── admin/                    # Admin dashboard (protected)
+│   │   ├── admin/                    # Admin dashboard (protected by layout)
 │   │   │   ├── animals/              # Animal management
 │   │   │   ├── animal-adoptions/     # Adoption page editor
 │   │   │   ├── animal-registration/  # Registration page editor
@@ -107,16 +123,19 @@ SFPCA/
 │   │   │   ├── settings/             # Site settings
 │   │   │   ├── veterinary-services/  # Vet services editor
 │   │   │   └── page.tsx              # Admin dashboard
-│   │   ├── api/auth/                 # Authentication API routes
+│   │   ├── api/auth/session/         # Session cookie create/delete (only API route)
 │   │   ├── animal-adoptions/         # Public adoptions page
+│   │   ├── animal-registration/      # Public registration intake form
 │   │   ├── contact/                  # Contact page
 │   │   ├── faq/                      # FAQ page
 │   │   ├── login/                    # Login page
-│   │   ├── under-construction/       # Placeholder page
+│   │   ├── under-construction/       # Placeholder / maintenance gate page
+│   │   ├── vet-services/             # Public veterinary services page
 │   │   ├── layout.tsx                # Root layout with metadata
 │   │   ├── page.tsx                  # Public homepage
 │   │   ├── robots.ts                 # SEO robots.txt
 │   │   └── sitemap.ts               # SEO sitemap
+│   ├── proxy.ts                      # Edge request gate (maintenance + /admin cookie check)
 │   ├── components/
 │   │   ├── admin/                    # Admin components (nav, team manager)
 │   │   ├── animal-adoptions/         # Adoption page components
@@ -135,6 +154,14 @@ SFPCA/
 │       ├── animations.ts             # Framer Motion utilities
 │       ├── types.ts                  # TypeScript types
 │       └── utils.ts                  # General utilities
+├── tests/                            # Test suites (see Testing)
+│   ├── *.test.ts(x)                  # Vitest unit/component tests
+│   ├── *.test.mjs                    # Emulator security-rules tests
+│   └── e2e/                          # Playwright browser smoke tests
+├── functions/                        # Firebase Cloud Functions (Vercel rebuild triggers)
+├── scripts/                          # seed.ts + seed-data.json, deploy helpers
+├── .github/workflows/ci.yml          # CI quality gates
+├── playwright.config.ts              # E2E config (emulator-backed)
 ├── firestore.rules                   # Firestore security rules
 ├── storage.rules                     # Firebase Storage security rules
 ├── .env.example                      # Environment variable template
@@ -149,7 +176,8 @@ SFPCA/
 | `siteSettings` | Contact info, social links, map embed (doc: `global`) |
 | `animals` | Adoptable animal listings with photos, status, species |
 | `faq` | FAQ entries with category, question, answer, and display order |
-| `animalRegistrations` | Submitted animal registration forms |
+| `animalRegistration` | Registration **page content** (admin-managed, singular) |
+| `animalRegistrations` | Submitted registration forms (public create → `pending`, plural) |
 | `admins` | Admin user allowlist (email as document ID) |
 | `vetServices` | Veterinary services page content |
 | `animalAdoptions` | Animal adoptions page content |
@@ -157,10 +185,16 @@ SFPCA/
 ## Admin Access
 
 1. Navigate to `/login`
-2. Sign in with Google using an authorized email
+2. Sign in with email/password or Google using an authorized,
+   email-verified account
 3. You will be redirected to `/admin` if authorized
 
-To add an admin, create a document in the `admins` Firestore collection with the user's email as the document ID.
+Authorization requires a verified email **and** either an
+`admins/<email>` Firestore document or an entry in the `ADMIN_EMAILS`
+environment variable (the session route copies env-listed users into the
+`admins` collection on first login). To add an admin, create a document
+in the `admins` collection with the user's email as the document ID, or
+add the email to `ADMIN_EMAILS`.
 
 ## Deployment
 
@@ -196,6 +230,22 @@ firebase deploy --only firestore:rules
 firebase deploy --only storage
 ```
 
+### Firebase Functions
+
+`functions/` contains two Cloud Functions that keep the deployed site in
+sync with Firestore content:
+
+- `onFirestoreChange` — any real document write triggers a Vercel rebuild
+  via a deploy hook (skips no-op writes)
+- `triggerRebuild` — HTTP endpoint that triggers a rebuild manually
+
+They need `VERCEL_TOKEN` and `VERCEL_PROJECT_ID` in `functions/.env`
+(see `functions/README.md`). Deploy with:
+
+```bash
+npm run deploy:functions   # or: cd functions && firebase deploy --only functions
+```
+
 ## Scripts
 
 | Command | Description |
@@ -206,16 +256,52 @@ firebase deploy --only storage
 | `npm run lint` | Run ESLint |
 | `npm run lint:fix` | Auto-fix lint issues |
 | `npm run type-check` | TypeScript type checking |
+| `npm test` | Vitest unit/component tests (CI-safe) |
+| `npm run test:watch` | Vitest in watch mode |
+| `npm run test:maintenance` | Focused maintenance-gate tests |
+| `npm run test:rules` | Firestore/Storage rules tests (emulators, needs Java) |
+| `npm run test:e2e` | Playwright browser smoke tests (emulators, needs Java) |
+| `npm run test:e2e:headed` | E2E suite with a visible browser |
+| `npm run seed` | Seed Firestore with `scripts/seed-data.json` |
+| `npm run deploy:functions` | Deploy Firebase Functions with env checks |
+
+## Testing
+
+Four layers, kept separate on purpose — see CONTRIBUTING.md for details:
+
+- **Vitest** (`npm test`) — unit/component tests in `tests/*.test.ts(x)`;
+  no credentials or emulators needed
+- **Security rules** (`npm run test:rules`) — Firestore/Storage rules
+  against the Firebase emulator suite (`tests/*.test.mjs`)
+- **E2E smoke** (`npm run test:e2e`) — Playwright Chromium journeys in
+  `tests/e2e/` against Auth/Firestore emulators; orchestrates everything
+  itself, never touches production
+- **Maintenance tests** — folded into the Vitest suite; also runnable
+  alone via `npm run test:maintenance`
+
+## CI
+
+`.github/workflows/ci.yml` runs four jobs on every PR and push to `main`:
+`Next.js app` (lint, type-check, unit tests, build), `Firebase
+Functions` (lint, export validation), `Firebase security rules`
+(emulator tests), and `E2E smoke` (Playwright). All run on Node 24 from
+`.nvmrc`; no production secrets are used.
 
 ## Environment Variables
 
-See `.env.example` for the full list. Key variables:
+`.env.example` (root) and `functions/.env.example` are the canonical,
+placeholder-only variable lists. Categories:
 
-- `NEXT_PUBLIC_FIREBASE_*` — Firebase client SDK config
-- `FIREBASE_ADMIN_*` — Firebase Admin SDK (server-side)
-- `ADMIN_EMAILS` — Comma-separated admin email allowlist
-- `NEXT_PUBLIC_GA_ID` — Google Analytics measurement ID
-- `NEXT_PUBLIC_SITE_URL` — Canonical site URL
+- **Public config** (shipped to the browser, not secrets):
+  `NEXT_PUBLIC_FIREBASE_*`, `NEXT_PUBLIC_GA_ID`, `NEXT_PUBLIC_SITE_URL`
+- **Server-only secrets** (never commit): `FIREBASE_ADMIN_*`,
+  `ADMIN_EMAILS`, `VERCEL_TOKEN`, `VERCEL_PROJECT_ID`
+- **Behavior flags** (server-only): `SITE_MAINTENANCE_MODE` (production
+  gate, see Deployment); `NEXT_PUBLIC_USE_FIREBASE_EMULATOR` is set only
+  by the E2E harness — never set it for real deployments
+
+Google Analytics loads when `NEXT_PUBLIC_GA_ID` is set; there is
+currently no consent-management layer.
 
 ## License
 
