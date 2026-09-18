@@ -98,6 +98,7 @@ test("Next.js framework assets are not gated", () => {
 test("required static assets are not gated", () => {
   for (const path of [
     "/favicon.ico",
+    "/favicon.svg",
     "/favicon-16x16.png",
     "/apple-touch-icon.png",
     "/android-chrome-192x192.png",

@@ -22,7 +22,6 @@ function isAuthApiPath(pathname: string): boolean {
 const MAINTENANCE_EXEMPT_PATHS = new Set([
   "/under-construction",
   "/login",
-  "/favicon.ico",
   "/site.webmanifest",
   "/robots.txt",
   "/sitemap.xml",
@@ -33,7 +32,7 @@ const MAINTENANCE_EXEMPT_PATHS = new Set([
 const MAINTENANCE_EXEMPT_PREFIXES = [
   "/_next/",
   "/videos/",
-  "/favicon-",
+  "/favicon",
   "/apple-touch-icon",
   "/android-chrome",
 ];
