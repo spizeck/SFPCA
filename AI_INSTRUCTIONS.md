@@ -1,202 +1,110 @@
 # AI Instructions – SFPCA Website & Admin
 
-## Project Overview
-This repository is a **Next.js 16** application for the  
-**Saba Foundation for the Prevention of Cruelty to Animals (SFPCA)**.
+Orientation for coding agents working in this repository. This file states
+what is true **now** — verify against code when in doubt, and keep it
+updated when architecture changes. Human-facing docs: `README.md`
+(overview/setup), `CONTRIBUTING.md` (workflow/tests), `SECURITY.md`
+(security model).
 
-The project consists of:
-- A **public-facing single-page website**
-- A protected **/admin area** for non-technical editors
-- A foundation for future workflows such as:
-  - Animal registrations
-  - Adoption applications
-  - Admin review queues
-  - Payments and receipts (future phase)
+## What this is
 
-The codebase should prioritize **clarity, stability, and ease of maintenance**.
+Next.js 16 (App Router, Turbopack) + React 19 + TypeScript site for the
+Saba Foundation for the Prevention of Cruelty to Animals (SFPCA), deployed
+on Vercel with Firebase (Auth, Firestore, Storage) as the backend and
+Firebase Cloud Functions triggering Vercel rebuilds on content changes.
+**Node 24** is canonical (`.nvmrc`, `engines`, Functions runtime, CI).
 
----
+## Application surfaces
 
-## Core Tech Stack (Hard Requirements)
-- **Next.js 16.x**
-- **React 19 (stable)**
-- **App Router only** (`app/` directory)
-- **TypeScript**
-- **Tailwind CSS**
-- **shadcn/ui**
-- **Firebase**
-  - Auth (Google sign-in)
-  - Firestore
-  - Storage
-- Deployment target: **Vercel**
+- **Public pages**: `/`, `/contact`, `/faq`, `/animal-adoptions`,
+  `/animal-registration`, `/vet-services`, `/under-construction`
+- **Auth**: `/login` (email/password sign-in, sign-up, reset + Google
+  popup); `POST|DELETE /api/auth/session` is the only API route
+- **Admin** (`/admin`, protected): dashboard, `homepage`, `animals`,
+  `animal-adoptions`, `animal-registration`, `registrations`, `faq`,
+  `veterinary-services`, `settings`
+- **Production gate**: `SITE_MAINTENANCE_MODE=true` (Vercel Production
+  only) redirects all public paths to `/under-construction`; `/login`,
+  `/admin`, `/api/auth`, and static assets stay reachable
 
----
+## Architectural invariants — do not casually violate
 
-## Next.js 16 Rules (Very Important)
-- Use **Server Components by default**
-- Use `"use client"` **only** when required:
-  - Forms
-  - Auth state
-  - File uploads
-  - Interactive admin UI
-- **DO NOT** use:
-  - `pages/`
-  - `getServerSideProps`
-  - `getStaticProps`
-  - legacy API routes unless explicitly justified
-- Prefer **Server Actions** for mutations (Firestore writes).
-- Use modern `fetch` caching patterns:
-  - `cache: 'no-store'` for admin data
-  - `revalidate` for public content where appropriate
-- Use **route groups** to separate public/admin concerns.
+- **Server-side authorization is authoritative.** `requireAdmin()` in
+  `src/app/admin/layout.tsx` verifies the session cookie (revocation
+  checked) AND re-checks the `admins` collection. The edge proxy
+  (`src/proxy.ts`) only checks cookie presence as a fast gate — a session
+  cookie alone does not grant admin.
+- **`admins/<email>` documents are the staff identity.** Document ID is
+  the email address. `ADMIN_EMAILS` is a bootstrap env allowlist; the
+  session route reconciles env-listed users into `admins/` docs so the
+  security rules see them.
+- **Verified email is required** at session creation and inside
+  Firestore/Storage rules. Never trust an unverified email claim.
+- **Security rules are an independent boundary.** Client-side hiding is
+  not authorization; rules enforce verified-email + `admins` doc
+  independently of the app.
+- **Firestore is the content authority.** Page content, site settings,
+  animals, FAQs, and registrations live in Firestore. Do not duplicate
+  business/content data into source; `scripts/seed-data.json` is the
+  fixture for local/test seeding.
+- **Tests never touch production.** Vitest mocks boundaries; rules tests
+  and Playwright E2E run against Firebase emulators only. Client
+  emulator connection is gated by `NEXT_PUBLIC_USE_FIREBASE_EMULATOR`
+  (set only by the E2E harness); the Admin SDK skips `cert()` only when
+  emulator host env vars are set.
+- **Maintenance mode is explicit.** `SITE_MAINTENANCE_MODE` is
+  server-side only (never `NEXT_PUBLIC_*`) and is never inferred from
+  `NODE_ENV`, branch names, or hostnames.
 
----
+## Auth/session flow (actual)
 
-## Routing Structure
+`/login` signs in (email/password or Google) → browser posts the ID token
+to `/api/auth/session` → server verifies the token, requires
+`email_verified` and `isAdmin()` (env allowlist or `admins` doc) → issues
+a 5-day HTTP-only session cookie. `/admin` layout re-verifies cookie +
+admin status on every request.
 
-### Public
-- `/` – Single-page landing site
-- `/adopt` – Optional later (full list of adoptable animals)
-- `/login` – Admin login
+## Data model (collections, from `firestore.rules`/`src/lib/types.ts`)
 
-### Admin (Protected)
-- `/admin`
-- `/admin/homepage`
-- `/admin/animals`
-- `/admin/settings`
+- `homepage/main`, `siteSettings/global`, `faq`, `vetServices`,
+  `animalAdoptions` — public read, admin write
+- `animals` — public reads only `status == "available"`; admin read/write
+- `animalRegistrations` — public **create** (unauthenticated,
+  shape-validated, forced `status="pending"`); admin read/update/delete
+- `animalRegistration` — *different collection*: admin-only page-content
+  doc. Singular vs plural matters — do not confuse them
+- `admins` — admin-only read/write
+- Storage: `images/`, `animals/`, `team-photos/` public read; admin-only
+  image uploads (<5 MB, `image/*`); default deny elsewhere
 
-All `/admin` routes must:
-- Require authentication
-- Verify allowlist/role before rendering
-- Redirect unauthorized users safely
+## Code conventions
 
----
+- App Router only; Server Components by default, `"use client"` only
+  where interactivity requires it. There is exactly one Server Actions
+  file (`src/app/admin/homepage/actions.ts`); most Firestore writes go
+  through the client SDK under rules enforcement — follow the pattern
+  of the file you are editing
+- `src/lib` holds Firebase init (`firebase.ts` client,
+  `firebase-admin.ts` server), auth helpers (`auth.ts`), maintenance
+  predicates (`maintenance.ts`), and shared types (`types.ts`).
+  There are no `src/services` or `src/types` directories
+- shadcn/ui + Tailwind + Framer Motion (respect `shouldReduceMotion`)
 
-## UI / UX Principles
-- Use **shadcn/ui components** consistently
-- Favor simple, predictable layouts
-- Optimize for **non-technical editors**
-- Avoid raw HTML editing in admin
-- Prefer structured fields over free-form blobs
-- Mobile-friendly admin UI is required
+## Testing (commands in `package.json`)
 
----
+- `npm test` — Vitest unit/component (`tests/*.test.ts(x)`)
+- `npm run test:rules` — Firestore/Storage rules via emulators
+  (`tests/*.test.mjs`, needs Java)
+- `npm run test:e2e` — Playwright Chromium smoke suite (`tests/e2e/`),
+  orchestrates emulators + dev server + fixtures itself (needs Java)
+- CI jobs: `Next.js app`, `Firebase Functions`, `Firebase security
+  rules`, `E2E smoke`
 
-## Content Strategy
-### Use structured fields for:
-- Hero title & subtitle
-- CTAs (label + link)
-- Short descriptions
-- Services lists
-- Contact info
-- Donation info
+## When editing
 
-### Markdown policy:
-- Markdown is **NOT** used for homepage sections
-- Markdown may be introduced later for:
-  - Policies
-  - FAQs
-  - Long-form informational pages
-- Do not assume Markdown everywhere
-
----
-
-## Firestore Data Model (Canonical)
-
-### `siteSettings/global`
-- orgName
-- phone
-- whatsapp
-- email
-- address
-- hours
-- socialLinks
-
-### `homepage/main`
-- heroTitle
-- heroSubtitle
-- ctas[]
-- services[]
-- donationText
-- updatedAt
-
-### `animals/{id}`
-- name
-- species: `"dog" | "cat" | "other"`
-- sex: `"male" | "female" | "unknown"`
-- approxAge (string)
-- description
-- status: `"available" | "pending" | "adopted"`
-- photos: string[] (Storage URLs)
-- createdAt
-- updatedAt
-
-### `users/{uid}` (or `admins/{uid}`)
-- email
-- displayName
-- role: `"admin" | "editor"`
-
----
-
-## Permissions & Roles
-- Public users:
-  - Read-only access to homepage content
-  - Read-only access to animals with `status === "available"`
-- Editors:
-  - Edit homepage content
-  - Manage animals
-- Admins:
-  - All editor permissions
-  - Manage user allowlist
-  - Edit site settings
-
-All permissions must be enforced server-side.
-
----
-
-## Firebase Rules Guidance
-- Reads for public content allowed
-- Writes restricted to authenticated, allowlisted users
-- Never trust client-only role checks
-- Firebase Admin SDK must run server-side only
-
----
-
-## Code Organization Guidelines
-- `src/app` – routes and layouts
-- `src/components` – reusable UI components
-- `src/lib` – Firebase init, auth helpers
-- `src/services` – Firestore data access logic
-- `src/types` – shared TypeScript types
-- Keep files small and focused
-
----
-
-## Design Philosophy
-- Prefer boring, understandable code
-- Avoid over-abstraction
-- No premature optimization
-- No experimental-only APIs
-- Prioritize maintainability over cleverness
-
----
-
-## Phase 2 (Future – Do Not Implement Yet)
-- `/register` public form (animal registration intake)
-- Admin registration review queue
-- Registration number assignment
-- Stripe payments
-- Receipt generation
-- Export/print utilities
-
-Add TODO comments where relevant, but do not build these yet.
-
----
-
-## Final Instruction to AI
-When making decisions:
-- Choose the **simplest working solution**
-- Assume editors are not technical
-- Assume this project will be maintained for years
-- Avoid introducing unnecessary libraries
-- Follow Next.js 16 best practices strictly
+- Keep `AI_INSTRUCTIONS.md`, `README.md`, `CONTRIBUTING.md`, and
+  `SECURITY.md` truthful when you change architecture — docs drift is a
+  known problem in this repo
+- Never commit credentials; `.env.example` files are the canonical
+  variable lists (placeholders only)
+- Small, boring, maintainable changes; assume non-technical admin users

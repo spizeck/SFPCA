@@ -28,10 +28,15 @@ If you discover a security vulnerability, please report it privately before disc
 
 - **Verified Identity**: Admin access requires a verified Firebase Auth
   email (Google OAuth or verified email/password)
-- **Allowlist System**: Only identities in the `admins` collection can
-  access admin areas and write privileged data
-- **Session Management**: HTTP-only cookies with secure configuration
-- **Middleware Protection**: All admin routes protected at the edge
+- **Allowlist System**: Only identities in the `admins` collection (or
+  the `ADMIN_EMAILS` bootstrap env, reconciled into `admins` at session
+  creation) can access admin areas and write privileged data
+- **Session Management**: HTTP-only session cookies (5-day expiry),
+  `secure` in production, revocation-checked on every verification
+- **Layered Protection**: The edge proxy redirects `/admin` requests
+  without a session cookie to `/login`; the authoritative check is
+  server-side `requireAdmin()` in the admin layout, which re-verifies
+  the cookie and the `admins` collection on every request
 
 ### Data Protection
 
@@ -116,7 +121,8 @@ If you discover a security vulnerability, please report it privately before disc
 
 1. **Single Factor Auth**: No in-app 2FA (Google OAuth or verified
    email/password; provider-level 2FA is up to the account)
-2. **Session Duration**: Sessions last 14 days (configurable)
+2. **Session Duration**: Sessions last 5 days (set in
+   `src/app/api/auth/session/route.ts`)
 3. **No Audit Logs**: Admin actions are not currently logged
 
 ## Future Security Enhancements
