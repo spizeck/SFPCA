@@ -21,7 +21,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.7",
     "@eslint/js": "^8.57.1",
-    "eslint": "^8.15.0",
+    "eslint": "^10.10.0",
     "eslint-config-google": "^0.14.0"
   },
   "private": true
