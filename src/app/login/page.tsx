@@ -52,18 +52,20 @@ export default function LoginPage() {
         body: JSON.stringify({ idToken }),
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data.authorized) {
-          router.push("/admin");
-        } else {
-          toast({
-            title: "Access Denied",
-            description: "This account is not authorized for admin access. Please contact the site administrator to have your account added to the admin list.",
-            variant: "destructive",
-          });
-          await auth.signOut();
-        }
+      const data = await response.json().catch(() => null);
+
+      if (response.ok && data?.authorized) {
+        router.push("/admin");
+      } else if (response.status === 403) {
+        // The server refused to issue a session (non-admin or unverified
+        // account). Drop the client-side Firebase session too so it
+        // can't linger after a denied login.
+        toast({
+          title: "Access Denied",
+          description: "This account is not authorized for admin access. Please contact the site administrator to have your account added to the admin list.",
+          variant: "destructive",
+        });
+        await auth.signOut();
       } else {
         throw new Error("Failed to create session");
       }
@@ -95,18 +97,20 @@ export default function LoginPage() {
         body: JSON.stringify({ idToken }),
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data.authorized) {
-          router.push("/admin");
-        } else {
-          toast({
-            title: "Access Denied",
-            description: "This account is not authorized for admin access. Please contact the site administrator to have your account added to the admin list.",
-            variant: "destructive",
-          });
-          await auth.signOut();
-        }
+      const data = await response.json().catch(() => null);
+
+      if (response.ok && data?.authorized) {
+        router.push("/admin");
+      } else if (response.status === 403) {
+        // The server refused to issue a session (non-admin or unverified
+        // account). Drop the client-side Firebase session too so it
+        // can't linger after a denied login.
+        toast({
+          title: "Access Denied",
+          description: "This account is not authorized for admin access. Please contact the site administrator to have your account added to the admin list.",
+          variant: "destructive",
+        });
+        await auth.signOut();
       } else {
         throw new Error("Failed to create session");
       }

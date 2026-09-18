@@ -18,9 +18,22 @@ export async function getCurrentUser() {
 }
 
 export async function isAdmin(email: string): Promise<{ isAdmin: boolean; role?: "admin" | "editor" }> {
-  const envAdmins = process.env.ADMIN_EMAILS?.split(",").map((e) => e.trim()) || [];
-  
-  if (envAdmins.includes(email)) {
+  if (!email) {
+    return { isAdmin: false };
+  }
+
+  // The env allowlist is a bootstrap mechanism only (see the session route,
+  // which reconciles listed users into admins/ docs). Match it
+  // case-insensitively so mis-cased configuration can't lock out a real
+  // admin; the Firestore doc lookup below stays exact-match because the
+  // security rules key on the exact token email.
+  const normalizedEmail = email.trim().toLowerCase();
+  const envAdmins = (process.env.ADMIN_EMAILS || "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (envAdmins.includes(normalizedEmail)) {
     return { isAdmin: true, role: "admin" };
   }
 

@@ -126,8 +126,17 @@ test("admin can write public content", async () => {
 test("animalRegistration page content is admin-only", async () => {
   await assertFails(publicDb().collection("animalRegistration").doc("main").get());
   await assertFails(userDb().collection("animalRegistration").doc("main").get());
+  await assertFails(
+    publicDb().collection("animalRegistration").doc("main").set({ hacked: true }),
+  );
+  await assertFails(
+    userDb().collection("animalRegistration").doc("main").set({ hacked: true }),
+  );
   await assertSucceeds(
     adminDb().collection("animalRegistration").doc("main").get(),
+  );
+  await assertSucceeds(
+    adminDb().collection("animalRegistration").doc("main").set({ content: "y" }),
   );
 });
 

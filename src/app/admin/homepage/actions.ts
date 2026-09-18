@@ -21,6 +21,15 @@ export async function saveHomepageData(data: Homepage) {
 }
 
 export async function loadHomepageData() {
+  // The data is publicly readable, but every server action under /admin
+  // self-authorizes so the boundary stays uniform and can't be weakened
+  // by a future action copied from this one.
+  const { authorized } = await requireAdmin();
+
+  if (!authorized) {
+    throw new Error("Unauthorized");
+  }
+
   try {
     const docSnap = await adminDb().collection("homepage").doc("main").get();
     

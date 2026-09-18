@@ -3,7 +3,40 @@ import { adminAuth, adminDb } from "@/lib/firebase-admin";
 import { isAdmin } from "@/lib/auth";
 import { cookies } from "next/headers";
 
+// Cross-origin POSTs could plant a session cookie in a victim's browser
+// (login CSRF) and cross-site DELETEs could force a logout. Browsers
+// always send Origin on fetch/form mutations, so reject when it is
+// present and doesn't match the request host; absent Origin means a
+// non-browser client, which carries no ambient authority to abuse.
+function isSameOrigin(request: NextRequest): boolean {
+  const origin = request.headers.get("origin");
+  if (!origin) {
+    return true;
+  }
+  try {
+    return new URL(origin).origin === request.nextUrl.origin;
+  } catch {
+    return false;
+  }
+}
+
+// Shared attributes so the cookie written at login and cleared at
+// logout always match; SameSite=Lax is set explicitly rather than
+// relying on the browser default.
+function sessionCookieAttributes() {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax" as const,
+    path: "/",
+  };
+}
+
 export async function POST(request: NextRequest) {
+  if (!isSameOrigin(request)) {
+    return NextResponse.json({ authorized: false }, { status: 403 });
+  }
+
   try {
     const { idToken } = await request.json();
 
@@ -36,10 +69,8 @@ export async function POST(request: NextRequest) {
 
     const cookieStore = await cookies();
     cookieStore.set("session", sessionCookie, {
+      ...sessionCookieAttributes(),
       maxAge: expiresIn,
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
     });
 
     return NextResponse.json({ authorized: true, role });
@@ -49,8 +80,12 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function DELETE() {
+export async function DELETE(request: NextRequest) {
+  if (!isSameOrigin(request)) {
+    return NextResponse.json({ success: false }, { status: 403 });
+  }
+
   const cookieStore = await cookies();
-  cookieStore.delete("session");
+  cookieStore.set("session", "", { ...sessionCookieAttributes(), maxAge: 0 });
   return NextResponse.json({ success: true });
 }

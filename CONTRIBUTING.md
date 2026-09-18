@@ -150,6 +150,33 @@ Use conventional commits:
 3. Add Firestore security rules if needed
 4. Use shadcn/ui components for consistency
 
+#### Admin authorization conventions
+
+- **Routes**: `src/app/admin/layout.tsx` calls `requireAdmin()` on every
+  render, so every `src/app/admin/**` page is covered automatically —
+  do not add per-page checks, and do not rely on `AdminNav` visibility
+  (routes like `/admin/registrations` are not in the nav but are still
+  protected).
+- **Server actions / API routes**: every `use server` export and route
+  handler that mutates or exposes privileged data must call
+  `requireAdmin()` itself — server actions are directly HTTP-callable.
+- **Direct client Firebase operations**: admin components may read/write
+  Firestore and Storage via the client SDK; the security boundary for
+  those calls is `firestore.rules` / `storage.rules` (verified email +
+  `admins/<email>` doc). Never treat UI state as authorization.
+- **Staff identity**: `admins/<email>` documents (exact token email as
+  ID) are canonical; `ADMIN_EMAILS` is a bootstrap allowlist reconciled
+  into `admins/` at session creation, matched case-insensitively.
+  `role` is stored on the doc but no code distinguishes roles today —
+  authorization is binary admin/non-admin.
+- **Sessions**: 5-day `httpOnly` + `sameSite=Lax` + `secure` (prod)
+  cookies, revocation-checked on each request; logout clears the cookie
+  only. `/api/auth/session` rejects cross-origin mutations.
+- **Testing auth**: never touch production — use the emulators (rules
+  tests via `npm run test:rules`, E2E via `npm run test:e2e`) or Vitest
+  mocks for server-only helpers (`tests/auth.test.ts`,
+  `tests/session-route.test.ts`, `tests/admin-actions.test.ts`).
+
 ### New Public Pages
 
 1. Create route at `src/app/[page]/page.tsx`
