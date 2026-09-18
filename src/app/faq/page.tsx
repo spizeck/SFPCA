@@ -3,17 +3,14 @@ import { getDoc, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { FAQ } from "@/components/faq/faq-page";
 import { SiteSettings } from "@/lib/types";
+import { pageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
+  path: "/faq",
   title: "Frequently Asked Questions",
   description:
     "Find answers to common questions about SFPCA on Saba — pet adoption, animal registration, veterinary services, volunteering, and donations.",
-  openGraph: {
-    title: "FAQ | SFPCA",
-    description:
-      "Find answers to common questions about SFPCA — pet adoption, registration, veterinary services, and more.",
-  },
-};
+});
 
 async function getSiteSettings(): Promise<SiteSettings | null> {
   try {

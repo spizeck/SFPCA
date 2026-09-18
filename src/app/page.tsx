@@ -1,6 +1,8 @@
+import type { Metadata } from "next";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Homepage, SiteSettings } from "@/lib/types";
+import { pageMetadata, SITE_DESCRIPTION } from "@/lib/seo";
 import { HeroSection } from "@/components/homepage/hero-section";
 import { AboutSection } from "@/components/homepage/about-section";
 import { ServicesSection } from "@/components/homepage/services-section";
@@ -11,6 +13,12 @@ import { ContactSection } from "@/components/homepage/contact-section";
 import { Footer } from "@/components/homepage/footer";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { HashClear } from "@/components/hash-clear";
+
+// No title: the homepage keeps the root default full organization name.
+export const metadata: Metadata = pageMetadata({
+  path: "/",
+  description: SITE_DESCRIPTION,
+});
 
 async function getHomepageData(): Promise<Homepage | null> {
   try {

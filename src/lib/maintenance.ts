@@ -25,6 +25,10 @@ const MAINTENANCE_EXEMPT_PATHS = new Set([
   "/site.webmanifest",
   "/robots.txt",
   "/sitemap.xml",
+  // Generated share images must stay reachable so the Under Construction
+  // page's own social metadata resolves while the gate is up.
+  "/opengraph-image",
+  "/twitter-image",
 ]);
 
 // Prefixes for framework/static infrastructure required to render the

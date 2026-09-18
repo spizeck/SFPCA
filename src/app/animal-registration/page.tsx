@@ -3,17 +3,14 @@ import { getDoc, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { AnimalRegistration } from "@/components/animal-registration/animal-registration-page";
 import { SiteSettings } from "@/lib/types";
+import { pageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
+  path: "/animal-registration",
   title: "Animal Registration",
   description:
     "Register your pet with SFPCA on Saba. Annual registration is required for all animals. Spayed/neutered pets qualify for reduced fees.",
-  openGraph: {
-    title: "Animal Registration | SFPCA",
-    description:
-      "Register your pet with SFPCA on Saba. Annual registration required for all animals.",
-  },
-};
+});
 
 async function getSiteSettings(): Promise<SiteSettings | null> {
   try {
