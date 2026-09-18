@@ -24,10 +24,13 @@ function isRebuildAuthorized(req) {
   if (!REBUILD_TRIGGER_TOKEN) {
     return false;
   }
-  const provided = req.get("authorization") || "";
-  const expected = `Bearer ${REBUILD_TRIGGER_TOKEN}`;
+  const provided = Buffer.from(req.get("authorization") || "");
+  const expected = Buffer.from(`Bearer ${REBUILD_TRIGGER_TOKEN}`);
+  // Compare buffer (byte) lengths: timingSafeEqual throws on unequal
+  // buffers, and string length differs from byte length for multibyte
+  // characters.
   return provided.length === expected.length &&
-      crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+      crypto.timingSafeEqual(provided, expected);
 }
 
 /**

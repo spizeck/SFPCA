@@ -14,7 +14,7 @@ function isSameOrigin(request: NextRequest): boolean {
     return true;
   }
   try {
-    return new URL(origin).host === request.nextUrl.host;
+    return new URL(origin).origin === request.nextUrl.origin;
   } catch {
     return false;
   }
