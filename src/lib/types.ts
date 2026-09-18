@@ -1,3 +1,5 @@
+import { AnimalStatus } from "./animal-lifecycle";
+
 export interface Animal {
   id: string;
   name: string;
@@ -5,7 +7,7 @@ export interface Animal {
   sex: "male" | "female" | "unknown";
   approxAge: string;
   description: string;
-  status: "available" | "pending" | "adopted";
+  status: AnimalStatus;
   photos: string[];
   createdAt: string;
   updatedAt: string;

@@ -8,11 +8,15 @@ function getAdminApp() {
   if (getApps().length === 0) {
     // Emulator hosts signal a local/E2E run: no credentials are needed or
     // used, and a demo-* project ID can never reach production services.
+    // The client-side project ID takes precedence here — ID tokens issued
+    // by the Auth emulator carry that project as their audience, so the
+    // Admin SDK must verify them against the same project even when a
+    // real FIREBASE_ADMIN_PROJECT_ID exists in .env.local.
     if (process.env.FIRESTORE_EMULATOR_HOST || process.env.FIREBASE_AUTH_EMULATOR_HOST) {
       adminApp = initializeApp({
         projectId:
-          process.env.FIREBASE_ADMIN_PROJECT_ID ??
-          process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+          process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ??
+          process.env.FIREBASE_ADMIN_PROJECT_ID,
       });
     } else {
       adminApp = initializeApp({

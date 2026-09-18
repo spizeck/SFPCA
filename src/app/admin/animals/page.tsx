@@ -4,6 +4,14 @@ import { useState, useEffect } from "react";
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Animal } from "@/lib/types";
+import {
+  ANIMAL_STATUSES,
+  ANIMAL_STATUS_LABELS,
+  AnimalStatus,
+  getAnimalStatusVisibilityHint,
+  isAnimalStatus,
+} from "@/lib/animal-lifecycle";
+import { AnimalStatusBadge } from "@/components/admin/animal-status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -28,7 +36,9 @@ export default function AnimalsManager() {
     sex: "unknown" as "male" | "female" | "unknown",
     approxAge: "",
     description: "",
-    status: "available" as "available" | "pending" | "adopted",
+    // Empty string means "no valid status chosen" — used when editing an
+    // animal whose stored status is unrecognized so staff must pick one.
+    status: "available" as AnimalStatus | "",
     photos: [] as string[],
   });
 
@@ -62,6 +72,17 @@ export default function AnimalsManager() {
   };
 
   const handleSubmit = async () => {
+    // Never write an unrecognized status: unknown values fail closed
+    // publicly but would corrupt the admin lifecycle view.
+    if (!isAnimalStatus(formData.status)) {
+      toast({
+        title: "Choose a status",
+        description: "Select a valid animal status before saving.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       if (editingAnimal) {
         const docRef = doc(db, "animals", editingAnimal.id);
@@ -100,14 +121,19 @@ export default function AnimalsManager() {
       sex: animal.sex,
       approxAge: animal.approxAge,
       description: animal.description,
-      status: animal.status,
+      status: isAnimalStatus(animal.status) ? animal.status : "",
       photos: animal.photos || [],
     });
     setDialogOpen(true);
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this animal?")) return;
+    if (!confirm(
+      "Permanently delete this animal record? This cannot be undone.\n\n" +
+      "If the animal was adopted or is temporarily unavailable, choose a " +
+      "different status instead — that hides it from the public site while " +
+      "keeping the record."
+    )) return;
     
     try {
       await deleteDoc(doc(db, "animals", id));
@@ -174,7 +200,7 @@ export default function AnimalsManager() {
                 <div>
                   <Label htmlFor="species">Species</Label>
                   <Select value={formData.species} onValueChange={(value: any) => setFormData({ ...formData, species: value })}>
-                    <SelectTrigger>
+                    <SelectTrigger id="species">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -187,7 +213,7 @@ export default function AnimalsManager() {
                 <div>
                   <Label htmlFor="sex">Sex</Label>
                   <Select value={formData.sex} onValueChange={(value: any) => setFormData({ ...formData, sex: value })}>
-                    <SelectTrigger>
+                    <SelectTrigger id="sex">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -219,15 +245,20 @@ export default function AnimalsManager() {
               <div>
                 <Label htmlFor="status">Status</Label>
                 <Select value={formData.status} onValueChange={(value: any) => setFormData({ ...formData, status: value })}>
-                  <SelectTrigger>
-                    <SelectValue />
+                  <SelectTrigger id="status">
+                    <SelectValue placeholder="Choose a status" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="available">Available</SelectItem>
-                    <SelectItem value="pending">Pending</SelectItem>
-                    <SelectItem value="adopted">Adopted</SelectItem>
+                    {ANIMAL_STATUSES.map((status) => (
+                      <SelectItem key={status} value={status}>
+                        {ANIMAL_STATUS_LABELS[status]}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {getAnimalStatusVisibilityHint(formData.status)}
+                </p>
               </div>
               <div>
                 <Label htmlFor="photos">Photo URL (optional)</Label>
@@ -281,19 +312,23 @@ export default function AnimalsManager() {
                     <TableCell className="capitalize">{animal.sex}</TableCell>
                     <TableCell>{animal.approxAge}</TableCell>
                     <TableCell>
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                        animal.status === "available" ? "bg-green-100 text-green-800" :
-                        animal.status === "pending" ? "bg-yellow-100 text-yellow-800" :
-                        "bg-gray-100 text-gray-800"
-                      }`}>
-                        {animal.status}
-                      </span>
+                      <AnimalStatusBadge status={animal.status} />
                     </TableCell>
                     <TableCell className="text-right space-x-2">
-                      <Button variant="ghost" size="sm" onClick={() => handleEdit(animal)}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Edit ${animal.name}`}
+                        onClick={() => handleEdit(animal)}
+                      >
                         <Pencil className="h-4 w-4" />
                       </Button>
-                      <Button variant="ghost" size="sm" onClick={() => handleDelete(animal.id)}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Delete ${animal.name}`}
+                        onClick={() => handleDelete(animal.id)}
+                      >
                         <Trash2 className="h-4 w-4 text-red-500" />
                       </Button>
                     </TableCell>

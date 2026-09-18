@@ -59,6 +59,19 @@ before(async () => {
     await db.collection("animals").doc("adopt-1").set({
       name: "Luna", status: "adopted", photos: [],
     });
+    // Malformed/legacy documents: unknown and missing status values must
+    // fail closed — never publicly readable.
+    await db.collection("animals").doc("unknown-1").set({
+      name: "Rex", status: "quarantined", photos: [],
+    });
+    await db.collection("animals").doc("nostatus-1").set({
+      name: "Ghost", photos: [],
+    });
+    // Dedicated doc for admin transition writes so read tests above are
+    // unaffected by mutations.
+    await db.collection("animals").doc("trans-1").set({
+      name: "Scout", status: "pending", photos: [],
+    });
     await db.collection("animalRegistrations").doc("reg-1").set(validRegistration);
 
     const storage = context.storage();
@@ -151,6 +164,17 @@ test("public cannot read a pending or adopted animal", async () => {
   await assertFails(publicDb().collection("animals").doc("adopt-1").get());
 });
 
+test("public cannot read an animal with an unknown or missing status", async () => {
+  await assertFails(publicDb().collection("animals").doc("unknown-1").get());
+  await assertFails(publicDb().collection("animals").doc("nostatus-1").get());
+});
+
+test("authenticated non-admin cannot read non-public animals either", async () => {
+  for (const docId of ["pend-1", "adopt-1", "unknown-1", "nostatus-1"]) {
+    await assertFails(userDb().collection("animals").doc(docId).get());
+  }
+});
+
 test("public can query animals filtered to status == available", async () => {
   await assertSucceeds(
     publicDb().collection("animals").where("status", "==", "available").get(),
@@ -159,6 +183,20 @@ test("public can query animals filtered to status == available", async () => {
 
 test("public cannot list animals without the availability filter", async () => {
   await assertFails(publicDb().collection("animals").get());
+});
+
+test("public queries that could return non-public animals are denied", async () => {
+  // Rules must prove every returned doc is public; queries that could
+  // match pending/adopted/unknown statuses fail rather than leaking.
+  await assertFails(
+    publicDb().collection("animals").where("status", "!=", "available").get(),
+  );
+  await assertFails(
+    publicDb()
+      .collection("animals")
+      .where("status", "in", ["available", "pending"])
+      .get(),
+  );
 });
 
 test("admin can list all animals", async () => {
@@ -184,6 +222,32 @@ test("admin can create, update, and delete animals", async () => {
     adminDb().collection("animals").doc("avail-1").update({ status: "adopted" }),
   );
   await assertSucceeds(adminDb().collection("animals").doc("new-1").delete());
+});
+
+test("admin lifecycle transitions between supported statuses succeed", async () => {
+  // pending -> available -> adopted -> available: no state is terminal,
+  // staff can correct mistakes.
+  await assertSucceeds(
+    adminDb().collection("animals").doc("trans-1").update({ status: "available" }),
+  );
+  await assertSucceeds(
+    adminDb().collection("animals").doc("trans-1").update({ status: "adopted" }),
+  );
+  await assertSucceeds(
+    adminDb().collection("animals").doc("trans-1").update({ status: "available" }),
+  );
+});
+
+test("admin cannot write an unsupported or missing animal status", async () => {
+  await assertFails(
+    adminDb().collection("animals").doc("bad-1").set({ status: "stray" }),
+  );
+  await assertFails(
+    adminDb().collection("animals").doc("bad-2").set({ name: "NoStatus" }),
+  );
+  await assertFails(
+    adminDb().collection("animals").doc("pend-1").update({ status: "gone" }),
+  );
 });
 
 // ---------- Private registration data ----------

@@ -177,7 +177,7 @@ SFPCA/
 |-----------|-------------|
 | `homepage` | Homepage content (doc: `main`) — hero, about, services, donation, team |
 | `siteSettings` | Contact info, social links, map embed (doc: `global`) |
-| `animals` | Adoptable animal listings with photos, status, species |
+| `animals` | Animal listings — `status` controls public visibility (canonical lifecycle: `src/lib/animal-lifecycle.ts`) |
 | `faq` | FAQ entries with category, question, answer, and display order |
 | `animalRegistration` | Registration **page content** (admin-managed, singular) |
 | `animalRegistrations` | Submitted registration forms (public create → `pending`, plural) |

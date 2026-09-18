@@ -45,11 +45,23 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Canonical animal lifecycle (mirrors src/lib/animal-lifecycle.ts):
+    // "available" is the only publicly visible status; "pending" and
+    // "adopted" are retained but admin-only. The read check fails closed —
+    // a missing or unrecognized status is never publicly readable.
+    function isSupportedAnimalStatus() {
+      return request.resource.data.status
+          in ["available", "pending", "adopted"];
+    }
+
     // Animals - public can read only animals listed as available;
-    // pending/adopted animals and all writes are admin-only.
+    // pending/adopted animals and all writes are admin-only. Writes must
+    // carry a supported status so a typo can never create an
+    // unclassifiable record.
     match /animals/{animalId} {
       allow get, list: if resource.data.status == "available" || isAdmin();
-      allow create, update, delete: if isAdmin();
+      allow create, update: if isAdmin() && isSupportedAnimalStatus();
+      allow delete: if isAdmin();
     }
 
     // FAQ - public read, admin write
