@@ -10,6 +10,10 @@ import { join } from "node:path";
 
 export const E2E_ADMIN_EMAIL = "e2e-admin@example.com";
 export const E2E_ADMIN_PASSWORD = "e2e-test-only-password";
+// Synthetic verified user with NO admins/ doc: proves that a successful
+// Firebase sign-in alone cannot establish an admin session or enter /admin.
+export const E2E_USER_EMAIL = "e2e-user@example.com";
+export const E2E_USER_PASSWORD = "e2e-test-only-password";
 
 const app = initializeApp({ projectId: "demo-sfpca" });
 const auth = getAuth(app);
@@ -19,19 +23,20 @@ export default async function globalSetup() {
   // Synthetic admin user in the Auth emulator. emailVerified is required:
   // the app's session endpoint (and Firestore/Storage rules) reject
   // unverified identities, matching the production boundary.
-  try {
-    await auth.createUser({
-      email: E2E_ADMIN_EMAIL,
-      password: E2E_ADMIN_PASSWORD,
-      emailVerified: true,
-    });
-  } catch (error: unknown) {
-    const code = (error as { code?: string }).code;
-    if (code !== "auth/email-already-exists") throw error;
-    await auth.updateUser((await auth.getUserByEmail(E2E_ADMIN_EMAIL)).uid, {
-      password: E2E_ADMIN_PASSWORD,
-      emailVerified: true,
-    });
+  for (const [email, password] of [
+    [E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD],
+    [E2E_USER_EMAIL, E2E_USER_PASSWORD],
+  ] as const) {
+    try {
+      await auth.createUser({ email, password, emailVerified: true });
+    } catch (error: unknown) {
+      const code = (error as { code?: string }).code;
+      if (code !== "auth/email-already-exists") throw error;
+      await auth.updateUser((await auth.getUserByEmail(email)).uid, {
+        password,
+        emailVerified: true,
+      });
+    }
   }
 
   // Authorization state in the Firestore emulator: the admins document

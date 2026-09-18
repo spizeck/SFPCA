@@ -1,6 +1,7 @@
 const functions = require("firebase-functions/v2");
 const admin = require("firebase-admin");
 const axios = require("axios");
+const crypto = require("crypto");
 
 admin.initializeApp();
 
@@ -8,7 +9,26 @@ admin.initializeApp();
 const {
   VERCEL_TOKEN,
   VERCEL_PROJECT_ID,
+  REBUILD_TRIGGER_TOKEN,
 } = process.env;
+
+/**
+ * The manual rebuild endpoint performs a privileged operation, so it
+ * requires a shared secret: `Authorization: Bearer <REBUILD_TRIGGER_TOKEN>`.
+ * When the token is not configured the endpoint refuses every request
+ * (fails closed). Compared in constant time.
+ * @param {object} req The HTTP request.
+ * @return {boolean} Whether the request is authorized.
+ */
+function isRebuildAuthorized(req) {
+  if (!REBUILD_TRIGGER_TOKEN) {
+    return false;
+  }
+  const provided = req.get("authorization") || "";
+  const expected = `Bearer ${REBUILD_TRIGGER_TOKEN}`;
+  return provided.length === expected.length &&
+      crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+}
 
 /**
  * Triggers a Vercel rebuild via the configured deploy hook.
@@ -72,8 +92,17 @@ async function handleFirestoreChange(event) {
 exports.onFirestoreChange =
     functions.firestore.onDocumentWritten("*", handleFirestoreChange);
 
-// Manual trigger function
+// Manual trigger function. Bearer-token gated: the function URL alone
+// must not be enough to trigger rebuilds.
 exports.triggerRebuild = functions.https.onRequest(async (req, res) => {
+  if (!isRebuildAuthorized(req)) {
+    res.status(403).json({
+      success: false,
+      error: "Forbidden",
+    });
+    return;
+  }
+
   try {
     console.log("Manual rebuild triggered via HTTP");
 

@@ -30,13 +30,32 @@ If you discover a security vulnerability, please report it privately before disc
   email (Google OAuth or verified email/password)
 - **Allowlist System**: Only identities in the `admins` collection (or
   the `ADMIN_EMAILS` bootstrap env, reconciled into `admins` at session
-  creation) can access admin areas and write privileged data
+  creation) can access admin areas and write privileged data. The env
+  allowlist is matched case-insensitively; the `admins` document ID is
+  the exact token email (the security rules key on it verbatim)
 - **Session Management**: HTTP-only session cookies (5-day expiry),
-  `secure` in production, revocation-checked on every verification
+  `secure` in production, `sameSite=Lax`, revocation-checked on every
+  verification. Logout clears the cookie with matching attributes; it
+  does not revoke the underlying Firebase session — the 5-day cookie
+  expiry is the bound
+- **CSRF posture**: The session endpoint rejects mutating requests whose
+  `Origin` header doesn't match the request host, so cross-site POSTs
+  can't plant a session and cross-site DELETEs can't force a logout.
+  Next.js Server Actions enforce their own origin checks
 - **Layered Protection**: The edge proxy redirects `/admin` requests
   without a session cookie to `/login`; the authoritative check is
   server-side `requireAdmin()` in the admin layout, which re-verifies
   the cookie and the `admins` collection on every request
+- **Privileged server actions**: Every `use server` export self-checks
+  `requireAdmin()` — the admin UI being unreachable by non-admins is
+  never treated as the boundary
+- **Roles**: `admins/<email>` docs carry a `role` field (`admin` /
+  `editor`, env-bootstrapped admins get `admin`). No code path currently
+  distinguishes roles — authorization is binary admin/non-admin
+- **Functions**: `triggerRebuild` (manual HTTP rebuild) requires
+  `Authorization: Bearer <REBUILD_TRIGGER_TOKEN>` and refuses all
+  requests when the token is unconfigured. `onFirestoreChange` is
+  event-driven and needs no request authorization
 
 ### Data Protection
 

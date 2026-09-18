@@ -13,6 +13,9 @@ This directory contains Firebase Cloud Functions that trigger Vercel rebuilds wh
 - **Trigger**: HTTP request
 - **URL**: `https://[region]-[project-id].cloudfunctions.net/triggerRebuild`
 - **Action**: Manually triggers a Vercel rebuild
+- **Authorization**: requires `Authorization: Bearer <REBUILD_TRIGGER_TOKEN>`.
+  When `REBUILD_TRIGGER_TOKEN` is not configured the endpoint refuses all
+  requests (fails closed).
 
 ## Setup
 
@@ -35,6 +38,8 @@ Edit `.env` with your actual values:
 # Vercel Configuration
 VERCEL_TOKEN=your_vercel_token_here
 VERCEL_PROJECT_ID=your_vercel_project_id_here
+# Shared secret for the manual trigger endpoint
+REBUILD_TRIGGER_TOKEN=your_random_secret_here
 ```
 
 #### Getting Your Credentials
@@ -65,9 +70,11 @@ npm run deploy:functions
 The function will automatically trigger a Vercel rebuild whenever any document in Firestore is created, updated, or deleted (with actual data changes).
 
 ### Manual Trigger
-You can manually trigger a rebuild by making a GET request to the triggerRebuild function:
+You can manually trigger a rebuild by calling the triggerRebuild function
+with the shared secret:
 ```bash
-curl https://[region]-[project-id].cloudfunctions.net/triggerRebuild
+curl -H "Authorization: Bearer $REBUILD_TRIGGER_TOKEN" \
+  https://[region]-[project-id].cloudfunctions.net/triggerRebuild
 ```
 
 ## Security Notes

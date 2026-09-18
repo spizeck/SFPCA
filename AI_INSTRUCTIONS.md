@@ -13,6 +13,9 @@ Saba Foundation for the Prevention of Cruelty to Animals (SFPCA), deployed
 on Vercel with Firebase (Auth, Firestore, Storage) as the backend and
 Firebase Cloud Functions triggering Vercel rebuilds on every Firestore
 document write (`onDocumentWritten("*")`, including non-content writes).
+The manual `triggerRebuild` HTTP function is gated by
+`Authorization: Bearer <REBUILD_TRIGGER_TOKEN>` and refuses all requests
+when the token is unset.
 **Node 24** is canonical (`.nvmrc`, `engines`, Functions runtime, CI).
 
 ## Application surfaces
@@ -36,14 +39,25 @@ document write (`onDocumentWritten("*")`, including non-content writes).
   (`src/proxy.ts`) only checks cookie presence as a fast gate — a session
   cookie alone does not grant admin.
 - **`admins/<email>` documents are the staff identity.** Document ID is
-  the email address. `ADMIN_EMAILS` is a bootstrap env allowlist; the
-  session route reconciles env-listed users into `admins/` docs so the
-  security rules see them.
+  the exact token email (rules look it up verbatim — never normalize it
+  before the doc lookup). `ADMIN_EMAILS` is a bootstrap env allowlist,
+  matched case-insensitively; the session route reconciles env-listed
+  users into `admins/` docs so the security rules see them.
 - **Verified email is required** at session creation and inside
   Firestore/Storage rules. Never trust an unverified email claim.
 - **Security rules are an independent boundary.** Client-side hiding is
   not authorization; rules enforce verified-email + `admins` doc
   independently of the app.
+- **Every privileged server action self-authorizes.** `use server`
+  exports are HTTP-callable; each must call `requireAdmin()` itself —
+  never rely on the route/UI being unreachable.
+- **Session cookie:** 5-day, `httpOnly`, `secure` in production,
+  `sameSite=Lax`. `/api/auth/session` rejects mutating requests whose
+  `Origin` doesn't match the host (login/logout CSRF). Logout clears the
+  cookie only — it does not revoke the Firebase session.
+- **Roles are recorded, not enforced.** `admins/` docs carry `role`
+  (`admin`/`editor`); nothing distinguishes them today — authorization
+  is binary. Don't pretend granularity that doesn't exist.
 - **Firestore is the content authority.** Page content, site settings,
   animals, FAQs, and registrations live in Firestore. Do not duplicate
   business/content data into source; `scripts/seed-data.json` is the
