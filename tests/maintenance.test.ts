@@ -1,6 +1,7 @@
 // Unit tests for the maintenance-mode routing predicates.
-// Run via `npm run test:maintenance` (no emulator or credentials needed).
-import { test } from "node:test";
+// Run via `npm test` / `npm run test:maintenance` (no emulator or
+// credentials needed).
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import {
   isMaintenanceMode,

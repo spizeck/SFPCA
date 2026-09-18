@@ -73,6 +73,7 @@ Use conventional commits:
    npm ci
    npm run lint
    npm run type-check
+   npm test
    npm run build
    ```
 
@@ -94,6 +95,13 @@ Use conventional commits:
    ```bash
    npm run test:rules
    ```
+
+   **Test layers** — application unit/component tests use Vitest +
+   Testing Library and live in `tests/` as `*.test.ts(x)`; run them with
+   `npm test` (CI-safe) or `npm run test:watch`. `npm test` needs no
+   emulators or credentials. The `tests/*.test.mjs` emulator suite is a
+   separate layer run only via `npm run test:rules`. Browser E2E tests
+   are tracked separately and are not part of either suite.
 
    > **Note:** `npm run build` requires the `NEXT_PUBLIC_FIREBASE_*` variables
    > from `.env.local` (or placeholders) to be set, because the Firebase client
