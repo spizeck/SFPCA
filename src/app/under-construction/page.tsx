@@ -2,15 +2,16 @@ import type { Metadata } from "next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Construction, Mail, Phone } from "lucide-react";
-import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "Under Construction",
-  description: "This section is currently under development. Contact SFPCA for more information.",
+  description: "Our website is currently under development. Contact SFPCA for more information.",
   openGraph: {
     title: "Under Construction | SFPCA",
-    description: "This section is currently under development. Contact SFPCA for more information.",
+    description: "Our website is currently under development. Contact SFPCA for more information.",
   },
+  // Temporary landing page while the public site is gated — never indexed.
+  robots: { index: false, follow: false },
 };
 
 export default function UnderConstructionPage() {
@@ -27,11 +28,11 @@ export default function UnderConstructionPage() {
         </CardHeader>
         <CardContent className="space-y-6">
           <p className="text-lg text-muted-foreground">
-            This section is currently being developed and will be available soon.
+            Our website is currently being developed and will be available soon.
           </p>
-          
+
           <div className="bg-muted p-6 rounded-lg">
-            <h3 className="font-semibold mb-4">In the meantime, you can:</h3>
+            <h3 className="font-semibold mb-4">In the meantime, you can reach us directly:</h3>
             <div className="grid md:grid-cols-2 gap-4 text-left">
               <div className="flex items-center gap-3">
                 <Phone className="h-5 w-5 text-primary" />
@@ -49,13 +50,13 @@ export default function UnderConstructionPage() {
               </div>
             </div>
           </div>
-          
+
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Button asChild variant="default">
-              <Link href="/contact">Contact Us</Link>
+              <a href="tel:+5994167947">Call Us</a>
             </Button>
             <Button asChild variant="outline">
-              <Link href="/">Return Home</Link>
+              <a href="mailto:sfpcasaba@gmail.com">Email Us</a>
             </Button>
           </div>
         </CardContent>

@@ -39,6 +39,9 @@ jobs:
       - name: Type-check
         run: npm run type-check
 
+      - name: Maintenance-mode routing tests
+        run: npm run test:maintenance
+
       - name: Build
         run: npm run build
         env:
