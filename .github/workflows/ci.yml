@@ -39,8 +39,8 @@ jobs:
       - name: Type-check
         run: npm run type-check
 
-      - name: Maintenance-mode routing tests
-        run: npm run test:maintenance
+      - name: Unit/component tests
+        run: npm test
 
       - name: Build
         run: npm run build
