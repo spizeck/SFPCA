@@ -17,6 +17,8 @@
     "test:watch": "vitest",
     "test:rules": "firebase emulators:exec --only auth,firestore,storage --project demo-sfpca \"node --test \\\"tests/*.test.mjs\\\"\"",
     "test:maintenance": "vitest run tests/maintenance.test.ts",
+    "test:e2e": "firebase emulators:exec --only auth,firestore --project demo-sfpca \"playwright test\"",
+    "test:e2e:headed": "firebase emulators:exec --only auth,firestore --project demo-sfpca \"playwright test --headed\"",
     "deploy:functions": "node scripts/deploy-functions.js"
   },
   "dependencies": {
@@ -47,6 +49,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.3",
     "@firebase/rules-unit-testing": "^5.0.2",
+    "@playwright/test": "^1.63.0",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",

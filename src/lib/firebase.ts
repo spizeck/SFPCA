@@ -1,6 +1,6 @@
 import { initializeApp, getApps, FirebaseApp } from "firebase/app";
-import { getAuth, Auth } from "firebase/auth";
-import { getFirestore, Firestore } from "firebase/firestore";
+import { getAuth, Auth, connectAuthEmulator } from "firebase/auth";
+import { getFirestore, Firestore, connectFirestoreEmulator } from "firebase/firestore";
 import { getStorage, FirebaseStorage } from "firebase/storage";
 
 const firebaseConfig = {
@@ -22,5 +22,14 @@ app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 auth = getAuth(app);
 db = getFirestore(app);
 storage = getStorage(app);
+
+// Emulator connection is opt-in and only used by local/E2E test runs —
+// it is never enabled in production (the flag is never set there).
+if (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === "true") {
+  connectAuthEmulator(auth, "http://localhost:9099", {
+    disableWarnings: true,
+  });
+  connectFirestoreEmulator(db, "localhost", 8080);
+}
 
 export { app, auth, db, storage };
