@@ -68,5 +68,9 @@ firebase-export-*/
 *.tmp
 *.temp
 
+# Playwright
+/test-results/
+/playwright-report/
+
 # Firebase
 *-firebase-adminsdk-*.json

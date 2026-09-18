@@ -100,8 +100,39 @@ Use conventional commits:
    Testing Library and live in `tests/` as `*.test.ts(x)`; run them with
    `npm test` (CI-safe) or `npm run test:watch`. `npm test` needs no
    emulators or credentials. The `tests/*.test.mjs` emulator suite is a
-   separate layer run only via `npm run test:rules`. Browser E2E tests
-   are tracked separately and are not part of either suite.
+   separate layer run only via `npm run test:rules`. Browser E2E smoke
+   tests live in `tests/e2e/` and run via `npm run test:e2e` (see below).
+
+   **Browser E2E smoke tests** (Playwright, Chromium-only; requires Java
+   for the Firebase emulators):
+   ```bash
+   npx playwright install chromium   # one-time browser install
+   npm run test:e2e                  # emulators + dev server + tests
+   npm run test:e2e:headed           # same, with a visible browser
+   ```
+
+   `npm run test:e2e` wraps `playwright test` in
+   `firebase emulators:exec`, so the Auth/Firestore emulators, the
+   `next dev` server (managed by Playwright's `webServer`), and fixture
+   seeding all start and stop together — no manual terminals. A
+   Playwright `globalSetup` (`tests/e2e/global-setup.ts`) seeds the
+   emulator with a synthetic admin (`e2e-admin@example.com`, test-only
+   password), its `admins/` authorization doc, and the homepage/site
+   settings content from `scripts/seed-data.json`. Emulator state is
+   ephemeral, so every run starts clean.
+
+   The admin login test exercises the real email/password UI flow: the
+   browser signs in against the Auth emulator, the app posts the ID
+   token to `/api/auth/session`, and navigation continues to `/admin`.
+   Emulator connection is enabled only when
+   `NEXT_PUBLIC_USE_FIREBASE_EMULATOR=true`, which is set only by the
+   E2E webServer config — production is never contacted and no real
+   credentials exist in this path.
+
+   On failure, Playwright retains a trace and screenshot per test under
+   `test-results/` (`npx playwright show-trace test-results/<dir>/trace.zip`);
+   CI uploads them as the `e2e-failure-artifacts` artifact only when the
+   `E2E smoke` job fails.
 
    > **Note:** `npm run build` requires the `NEXT_PUBLIC_FIREBASE_*` variables
    > from `.env.local` (or placeholders) to be set, because the Firebase client

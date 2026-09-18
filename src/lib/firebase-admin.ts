@@ -6,13 +6,23 @@ let adminApp: App;
 
 function getAdminApp() {
   if (getApps().length === 0) {
-    adminApp = initializeApp({
-      credential: cert({
-        projectId: process.env.FIREBASE_ADMIN_PROJECT_ID,
-        clientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL,
-        privateKey: process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-      }),
-    });
+    // Emulator hosts signal a local/E2E run: no credentials are needed or
+    // used, and a demo-* project ID can never reach production services.
+    if (process.env.FIRESTORE_EMULATOR_HOST || process.env.FIREBASE_AUTH_EMULATOR_HOST) {
+      adminApp = initializeApp({
+        projectId:
+          process.env.FIREBASE_ADMIN_PROJECT_ID ??
+          process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+      });
+    } else {
+      adminApp = initializeApp({
+        credential: cert({
+          projectId: process.env.FIREBASE_ADMIN_PROJECT_ID,
+          clientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL,
+          privateKey: process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+        }),
+      });
+    }
   } else {
     adminApp = getApps()[0];
   }
