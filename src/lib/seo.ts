@@ -63,15 +63,17 @@ export function pageMetadata({
   description,
 }: {
   path: string;
-  title: string;
+  // Omit on the homepage so the root default title/OG title apply rather
+  // than a redundant "Saba Foundation... | SFPCA" template expansion.
+  title?: string;
   description: string;
 }): Metadata {
   return {
-    title,
+    ...(title ? { title } : {}),
     description,
     alternates: { canonical: path },
     openGraph: {
-      title,
+      ...(title ? { title } : {}),
       description,
       url: path,
       images: SHARE_OG_IMAGES,
@@ -80,7 +82,7 @@ export function pageMetadata({
       // Page-level twitter fields replace the root twitter object, so the
       // card type must be restated here.
       card: "summary_large_image",
-      title,
+      ...(title ? { title } : {}),
       description,
       images: SHARE_TWITTER_IMAGES,
     },

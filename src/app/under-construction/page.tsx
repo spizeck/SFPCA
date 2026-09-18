@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Construction, Mail, Phone } from "lucide-react";
-import { SHARE_OG_IMAGES } from "@/lib/seo";
+import { SHARE_OG_IMAGES, SHARE_TWITTER_IMAGES } from "@/lib/seo";
 
 export const metadata: Metadata = {
   title: "Under Construction",
@@ -11,6 +11,10 @@ export const metadata: Metadata = {
     title: "Under Construction | SFPCA",
     description: "Our website is currently under development. Contact SFPCA for more information.",
     images: SHARE_OG_IMAGES,
+  },
+  twitter: {
+    card: "summary_large_image",
+    images: SHARE_TWITTER_IMAGES,
   },
   // Temporary landing page while the public site is gated — never indexed.
   robots: { index: false, follow: false },
