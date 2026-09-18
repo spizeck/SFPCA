@@ -154,6 +154,7 @@ SFPCA/
 │       ├── auth.ts                   # Auth helpers
 │       ├── animals.ts                # Animal data helpers
 │       ├── animations.ts             # Framer Motion utilities
+│       ├── seo.ts                    # Canonical URL, sitemap/robots, metadata helpers
 │       ├── types.ts                  # TypeScript types
 │       └── utils.ts                  # General utilities
 ├── tests/                            # Test suites (see Testing)
@@ -223,6 +224,22 @@ reachable.
 The flag is server-side only (never `NEXT_PUBLIC_*`) and is evaluated per
 request in `src/proxy.ts`. It is never inferred from `NODE_ENV`, branch
 names, or hostnames.
+
+### SEO, sitemap, and social metadata
+
+- `NEXT_PUBLIC_SITE_URL` is the canonical public origin (falls back to the
+  production domain). Canonical links, Open Graph URLs, `sitemap.xml`, and
+  `robots.txt` all derive from it via `src/lib/seo.ts` — never from
+  `VERCEL_URL`, so preview deployments can never become canonical.
+- Metadata defaults live in `src/app/layout.tsx`; public pages set
+  title/description/canonical through `pageMetadata()` in `src/lib/seo.ts`.
+- `/login`, `/admin/**`, and `/under-construction` are `noindex`.
+- While maintenance mode is on, `robots.txt` disallows everything and the
+  sitemap is empty; normal rules resume automatically when it lifts.
+- The social share image is generated at build time
+  (`src/app/opengraph-image.tsx`, `src/app/twitter-image.tsx`) — no static
+  asset to maintain.
+- `Organization` JSON-LD in the root layout contains only verified facts.
 
 ### Firebase Rules
 

@@ -3,17 +3,14 @@ import { getDoc, doc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { VeterinaryServices } from "@/components/veterinary-services/veterinary-services-page";
 import { SiteSettings } from "@/lib/types";
+import { pageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
+  path: "/vet-services",
   title: "Veterinary Services",
   description:
     "Professional veterinary care on Saba. SFPCA offers spay/neuter programs, vaccinations, wellness exams, and emergency animal care.",
-  openGraph: {
-    title: "Veterinary Services | SFPCA",
-    description:
-      "Professional veterinary care on Saba. Spay/neuter programs, vaccinations, wellness exams, and emergency animal care.",
-  },
-};
+});
 
 async function getSiteSettings(): Promise<SiteSettings | null> {
   try {

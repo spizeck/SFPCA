@@ -1,6 +1,8 @@
+import type { Metadata } from "next";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Homepage, SiteSettings } from "@/lib/types";
+import { pageMetadata } from "@/lib/seo";
 import { HeroSection } from "@/components/homepage/hero-section";
 import { AboutSection } from "@/components/homepage/about-section";
 import { ServicesSection } from "@/components/homepage/services-section";
@@ -11,6 +13,14 @@ import { ContactSection } from "@/components/homepage/contact-section";
 import { Footer } from "@/components/homepage/footer";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { HashClear } from "@/components/hash-clear";
+
+export const metadata: Metadata = pageMetadata({
+  path: "/",
+  // Empty title keeps the root default full organization name.
+  title: "Saba Foundation for Preventing Cruelty to Animals",
+  description:
+    "Dedicated to animal welfare, veterinary services, and pet adoption on Saba. Register your pet, adopt an animal, or learn about our veterinary services.",
+});
 
 async function getHomepageData(): Promise<Homepage | null> {
   try {

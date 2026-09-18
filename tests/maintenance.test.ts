@@ -107,6 +107,8 @@ test("required static assets are not gated", () => {
     "/videos/hero.mp4",
     "/robots.txt",
     "/sitemap.xml",
+    "/opengraph-image",
+    "/twitter-image",
   ]) {
     assert.equal(getProxyAction(path, false, ON), "allow", path);
   }

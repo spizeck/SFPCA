@@ -87,8 +87,12 @@ admin status on every request.
   of the file you are editing
 - `src/lib` holds Firebase init (`firebase.ts` client,
   `firebase-admin.ts` server), auth helpers (`auth.ts`), maintenance
-  predicates (`maintenance.ts`), and shared types (`types.ts`).
-  There are no `src/services` or `src/types` directories
+  predicates (`maintenance.ts`), SEO helpers (`seo.ts`), and shared
+  types (`types.ts`). There are no `src/services` or `src/types`
+  directories
+- Canonical/OG/sitemap/robots URLs come from `src/lib/seo.ts`
+  (`NEXT_PUBLIC_SITE_URL`, production-domain fallback). Never use
+  `VERCEL_URL` for canonical URLs — previews must not become canonical
 - shadcn/ui + Tailwind + Framer Motion (respect `shouldReduceMotion`)
 
 ## Testing (commands in `package.json`)

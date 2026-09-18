@@ -4,6 +4,12 @@ import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import {
+  getSiteUrl,
+  organizationJsonLd,
+  SITE_DESCRIPTION,
+  SITE_NAME,
+} from "@/lib/seo";
 
 const inter = Inter({ 
   subsets: ["latin"],
@@ -12,7 +18,7 @@ const inter = Inter({
   variable: "--font-inter"
 });
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://www.sabafpca.com";
+const siteUrl = getSiteUrl();
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -20,21 +26,8 @@ export const metadata: Metadata = {
     default: "SFPCA - Saba Foundation for Preventing Cruelty to Animals",
     template: "%s | SFPCA",
   },
-  description:
-    "Dedicated to animal welfare, veterinary services, and pet adoption on Saba. Register your pet, adopt an animal, or learn about our veterinary services.",
-  keywords: [
-    "SFPCA",
-    "Saba",
-    "animal welfare",
-    "pet adoption",
-    "veterinary services",
-    "animal registration",
-    "Caribbean",
-    "animal shelter",
-    "spay neuter",
-    "Saba Foundation for Preventing Cruelty to Animals",
-  ],
-  authors: [{ name: "SFPCA" }],
+  description: SITE_DESCRIPTION,
+  authors: [{ name: SITE_NAME }],
   icons: {
     icon: [
       { url: "/favicon.ico" },
@@ -46,14 +39,10 @@ export const metadata: Metadata = {
     ],
   },
   manifest: "/site.webmanifest",
-  alternates: {
-    canonical: siteUrl,
-  },
   openGraph: {
     type: "website",
     locale: "en_US",
-    url: siteUrl,
-    siteName: "SFPCA",
+    siteName: SITE_NAME,
     title: "SFPCA - Saba Foundation for Preventing Cruelty to Animals",
     description:
       "Dedicated to animal welfare, veterinary services, and pet adoption on the island of Saba.",
@@ -82,33 +71,13 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const structuredData = {
-    "@context": "https://schema.org",
-    "@type": "Organization",
-    "name": "Saba Foundation for Preventing Cruelty to Animals",
-    "alternateName": "SFPCA",
-    "url": siteUrl,
-    "logo": `${siteUrl}/favicon.ico`,
-    "description": "Dedicated to animal welfare, veterinary services, and pet adoption on the island of Saba.",
-    "address": {
-      "@type": "PostalAddress",
-      "addressLocality": "Saba",
-      "addressCountry": "Caribbean Netherlands"
-    },
-    "contactPoint": {
-      "@type": "ContactPoint",
-      "contactType": "animal welfare services"
-    },
-    "sameAs": []
-  };
-
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
-            __html: JSON.stringify(structuredData),
+            __html: JSON.stringify(organizationJsonLd()).replace(/</g, "\\u003c"),
           }}
         />
         {process.env.NEXT_PUBLIC_GA_ID && (
