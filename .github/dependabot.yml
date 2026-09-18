@@ -14,6 +14,14 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    # The runtime is pinned to Node 24 (.nvmrc, engines, Functions runtime),
+    # so type definitions must stay on the 24.x line. Node types majors have
+    # repeatedly opened PRs that contradict that policy; minor/patch updates
+    # within 24.x still flow through the group above.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types:
+          - "version-update:semver-major"
     commit-message:
       prefix: "chore"
       include: "scope"
