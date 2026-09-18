@@ -14,6 +14,7 @@
     "type-check": "tsc --noEmit",
     "seed": "tsx scripts/seed.ts",
     "test:rules": "firebase emulators:exec --only auth,firestore,storage --project demo-sfpca \"node --test \\\"tests/*.test.mjs\\\"\"",
+    "test:maintenance": "tsx --test tests/maintenance.test.ts",
     "deploy:functions": "node scripts/deploy-functions.js"
   },
   "dependencies": {

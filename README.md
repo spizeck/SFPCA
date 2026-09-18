@@ -171,6 +171,23 @@ To add an admin, create a document in the `admins` Firestore collection with the
 3. Add all environment variables from `.env.example` in the Vercel dashboard
 4. Deploy
 
+### Maintenance mode
+
+The production public site can be gated behind `/under-construction` while
+`/login`, `/admin`, the auth session API, and framework/static assets stay
+reachable.
+
+- **Enable (production only):** set `SITE_MAINTENANCE_MODE=true` in the
+  Vercel **Production** environment and redeploy.
+- **Preview & local development:** leave the variable unset — the full site
+  remains usable for feature development and PR review.
+- **Reopen the site:** remove the variable (or set it to `false`) in the
+  Vercel Production environment and redeploy.
+
+The flag is server-side only (never `NEXT_PUBLIC_*`) and is evaluated per
+request in `src/proxy.ts`. It is never inferred from `NODE_ENV`, branch
+names, or hostnames.
+
 ### Firebase Rules
 
 After any changes to security rules:

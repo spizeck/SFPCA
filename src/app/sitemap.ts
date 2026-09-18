@@ -1,7 +1,14 @@
 import type { MetadataRoute } from "next";
+import { isMaintenanceMode } from "@/lib/maintenance";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://www.sabaspca.org";
+
+  // Gated public routes must not be advertised to crawlers while the site
+  // is under construction; the normal sitemap returns when the gate lifts.
+  if (isMaintenanceMode()) {
+    return [];
+  }
 
   return [
     {
