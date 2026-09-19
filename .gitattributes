@@ -1,0 +1,5 @@
+# Normalize text files to LF in the index and working tree so lint rules
+# (e.g. functions/ eslint linebreak-style) behave identically on Windows
+# checkouts with core.autocrlf=true and on Linux CI. Binary files are
+# detected by content and left untouched.
+* text=auto eol=lf

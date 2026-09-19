@@ -83,7 +83,8 @@ admin status on every request.
 
 - `homepage/main`, `siteSettings/global`, `faq`, `vetServices`,
   `animalAdoptions` — public read, admin write
-- `animals` — public reads only `status == "available"`; admin read/write
+- `animals` — public reads only `status == "available"`; admin read/write.
+  Admin writes must carry a supported `status` value (see lifecycle below)
 - `animalRegistrations` — public **create** (unauthenticated,
   shape-validated, forced `status="pending"`); admin read/update/delete
 - `animalRegistration` — *different collection*: admin-only page-content
@@ -91,6 +92,29 @@ admin status on every request.
 - `admins` — admin-only read/write
 - Storage: `images/`, `animals/`, `team-photos/` public read; admin-only
   image uploads (<5 MB, `image/*`); default deny elsewhere
+
+## Animal lifecycle (canonical)
+
+`src/lib/animal-lifecycle.ts` is the single authoritative definition of
+animal states; `firestore.rules` mirrors its public-visibility decision.
+Do not compare `status` against string literals elsewhere — use the
+module's predicates (`isAnimalStatus`, `isPublicAnimalStatus`).
+
+| Status | Meaning | Public? |
+|--------|---------|---------|
+| `available` | Ready for adoption; listed on `/animal-adoptions` | yes — the only public state |
+| `pending` | Not currently adoptable (adoption in progress or temporary hold) | no |
+| `adopted` | Permanently homed; retained for historical record | no |
+| unknown/missing | Malformed or unrecognized value | never — fails closed |
+
+- Record existence is separate from visibility: non-public animals stay
+  in Firestore. Hard delete exists only for erroneous/test records.
+- Every supported status can transition to every other — no state is
+  terminal, so staff can correct mistakes (`canTransitionAnimalStatus`).
+- **Invariant: unknown or unsupported animal states are never publicly
+  visible.** Firestore rules require `status == "available"` for
+  unauthenticated reads, and admin writes with an unrecognized `status`
+  are rejected.
 
 ## Code conventions
 
@@ -101,9 +125,10 @@ admin status on every request.
   of the file you are editing
 - `src/lib` holds Firebase init (`firebase.ts` client,
   `firebase-admin.ts` server), auth helpers (`auth.ts`), maintenance
-  predicates (`maintenance.ts`), SEO helpers (`seo.ts`), and shared
-  types (`types.ts`). There are no `src/services` or `src/types`
-  directories
+  predicates (`maintenance.ts`), SEO helpers (`seo.ts`), the animal
+  lifecycle definition (`animal-lifecycle.ts`), public animal queries
+  (`animals.ts`), and shared types (`types.ts`). There are no
+  `src/services` or `src/types` directories
 - Canonical/OG/sitemap/robots URLs come from `src/lib/seo.ts`
   (`NEXT_PUBLIC_SITE_URL`, production-domain fallback). Never use
   `VERCEL_URL` for canonical URLs — previews must not become canonical
