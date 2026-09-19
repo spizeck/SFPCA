@@ -25,7 +25,11 @@ service cloud.firestore {
     // can never self-approve. Individual entries inside the animals list
     // cannot be iterated in rules — the client constrains them (required
     // inputs, enum radios, maxLength) and staff verify them on review.
-    function isValidRegistration() {
+    //
+    // paymentReceipt must name the storage object bound to THIS document
+    // ("receipts/<doc id>"): a submission can never point at an existing
+    // receipt belonging to a different registration.
+    function isValidRegistration(registrationId) {
       return request.resource.data.keys().hasOnly(
               ["ownerInfo", "animals", "paymentReceipt", "totalFee",
                "status", "createdAt", "updatedAt"])
@@ -52,10 +56,8 @@ service cloud.firestore {
           && request.resource.data.totalFee >= 0
           && request.resource.data.totalFee <= 25000
           && (request.resource.data.paymentReceipt == null
-              || (request.resource.data.paymentReceipt is string
-                  && request.resource.data.paymentReceipt.size() <= 200
-                  && request.resource.data.paymentReceipt.matches(
-                      "^receipts/[A-Za-z0-9._\\-]{1,180}$")))
+              || request.resource.data.paymentReceipt
+                  == "receipts/" + registrationId)
           && request.resource.data.createdAt == request.time
           && request.resource.data.updatedAt == request.time;
     }
@@ -129,7 +131,7 @@ service cloud.firestore {
     // must keep a supported lifecycle status so a typo can never create
     // an unclassifiable record.
     match /animalRegistrations/{registrationId} {
-      allow create: if isValidRegistration();
+      allow create: if isValidRegistration(registrationId);
       allow read, delete: if isAdmin();
       allow update: if isAdmin() && isSupportedRegistrationStatus();
     }

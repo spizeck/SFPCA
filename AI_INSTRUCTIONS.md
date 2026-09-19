@@ -95,7 +95,10 @@ admin status on every request.
 - Storage: `images/`, `animals/`, `team-photos/` public read; admin-only
   image uploads (<5 MB, `image/*`). `receipts/` is private submission
   data — public create-only of small image/PDF files, admin
-  read/update/delete. Default deny elsewhere
+  read/update/delete, plus one narrow exception: an anonymous delete is
+  permitted only while no `animalRegistrations/<id>` doc exists for the
+  object at `receipts/<id>` (the orphan-cleanup path — see below).
+  Default deny elsewhere
 
 ## Animal lifecycle (canonical)
 
@@ -139,7 +142,7 @@ listing whose CTAs point at `/contact` — do not invent one.
 **Fields the public writes** (allowlisted in `isValidRegistration`):
 `ownerInfo{name,address,phone,email}` (required strings with caps),
 `animals` (1–25 entries), `totalFee` (0–25000), `paymentReceipt` (null or
-a `receipts/` storage path), `status` (forced `pending`),
+the bound `receipts/<doc id>` path), `status` (forced `pending`),
 `createdAt`/`updatedAt` (must be `request.time` server timestamps).
 Rules cannot iterate the `animals` list — per-entry enums/required-ness
 are enforced by the form (`validateRegistration` mirrors the rules) and
@@ -147,10 +150,29 @@ verified by staff. Individual `animalRegistrations` docs are **not**
 linked to public `animals` records — registrations are independent owner
 submissions.
 
-**Receipts.** The optional file upload goes to `receipts/<uuid>`
-(public create-only, image/PDF ≤5 MB); the doc stores the storage *path*,
-never a public URL. The admin view resolves it through `getDownloadURL`,
-which returns a bearer-token link — treat it as a capability URL.
+**Receipts.** The form allocates the registration doc ID first
+(`doc(collection(...))` — no write), uploads the optional file to
+`receipts/<registration doc id>` (public create-only, image/PDF ≤5 MB,
+no overwrites), then `setDoc`s with `paymentReceipt` equal to that
+bound path — `firestore.rules` requires the path to match the doc's own
+ID, so a submission can never reference another registration's receipt
+or anything outside `receipts/`. The doc stores the storage *path*,
+never a public URL; the admin view resolves it through `getDownloadURL`
+(a bearer-token capability URL).
+
+**Orphan receipts.** If the upload succeeds but the Firestore write
+fails, the client deletes `receipts/<doc id>` — storage rules allow a
+non-admin delete exactly when `animalRegistrations/<doc id>` does not
+exist, so cleanup succeeds iff the write truly failed and is denied
+when the document actually landed (lost response → the client treats
+the submission as successful rather than retrying into a duplicate).
+A denied-or-failed cleanup never produces a false success: the user
+still sees the submission error and keeps their data. Residual orphans
+(browser death, cleanup failure) are removed by the scheduled
+`sweepOrphanedReceipts` function (every 24 h; skips objects <1 h old so
+in-flight submissions are never swept). Receipt doc IDs are unguessable
+auto-IDs and `receipts/` is not listable, so the conditional delete
+cannot be aimed at another user's in-flight upload.
 
 **Lifecycle:** `pending` (submitted, awaiting review) → `approved`
 ("Verified") or `rejected`; any supported status can move to any other
@@ -159,11 +181,13 @@ only ever set `pending`; admin updates must keep a supported status.
 Unknown/malformed statuses stay admin-visible flagged "Needs review"
 rather than being coerced.
 
-**Duplicates/retries:** deliberate — `addDoc` is not idempotent and a
-repeat submission creates a second pending doc (the submit button is
-disabled + a re-entrancy guard covers double-clicks; staff see and can
-reject accidental duplicates). No content-based dedup: two legitimate
-submissions can share owner details.
+**Duplicates/retries:** deliberate — `setDoc` on a fresh allocated ID is
+not idempotent and a repeat submission creates a second pending doc (the
+submit button is disabled + a re-entrancy guard covers double-clicks;
+staff see and can reject accidental duplicates). No content-based
+dedup: two legitimate submissions can share owner details. A retry
+after a failed submission allocates a new doc ID and uploads to a new
+bound receipt path — it never reuses a stale receipt reference.
 
 **Retention:** no formal retention period exists. Submissions persist
 indefinitely; rules permit admin delete but no UI exposes it — deletion

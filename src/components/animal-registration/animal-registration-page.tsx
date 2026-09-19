@@ -13,8 +13,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2 } from "lucide-react";
 import { AnimalRegistrationData } from "@/lib/types";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
-import { ref, uploadBytes } from "firebase/storage";
+import { collection, doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { ref, uploadBytes, deleteObject } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
 import {
   calculateRegistrationFee,
@@ -118,13 +118,20 @@ export function AnimalRegistration() {
     try {
       const totalFee = calculateTotalFee();
 
+      // The registration document ID is generated up front so the
+      // receipt object can live at the path bound to it
+      // (receipts/<doc id>). That binding is what lets the rules layer
+      // authorize orphan cleanup and prevents a submission from ever
+      // referencing another registration's receipt.
+      const docRef = doc(collection(db, "animalRegistrations"));
+
       // Upload the optional receipt first so its storage path can be
       // written with the submission in a single public create. A failed
       // upload must not block the registration itself.
       let receiptPath: string | null = null;
       if (formData.paymentReceipt) {
         try {
-          const path = `receipts/${crypto.randomUUID()}`;
+          const path = `receipts/${docRef.id}`;
           await uploadBytes(ref(storage, path), formData.paymentReceipt, {
             contentType: formData.paymentReceipt.type,
           });
@@ -149,7 +156,40 @@ export function AnimalRegistration() {
         updatedAt: serverTimestamp(),
       };
 
-      await addDoc(collection(db, "animalRegistrations"), registrationData);
+      let submissionLanded = false;
+      try {
+        await setDoc(docRef, registrationData);
+        submissionLanded = true;
+      } catch (writeError) {
+        // The receipt upload already succeeded — the object is an orphan
+        // unless removed. Storage rules permit anonymous delete of a
+        // receipts/<id> object only while animalRegistrations/<id> does
+        // not exist, so this delete succeeds exactly when the write
+        // truly failed and is denied when the document actually landed.
+        if (receiptPath) {
+          try {
+            await deleteObject(ref(storage, receiptPath));
+          } catch (cleanupError) {
+            if (
+              (cleanupError as { code?: string }).code ===
+              "storage/unauthorized"
+            ) {
+              // Delete denied ⟺ the registration document exists: the
+              // write succeeded but its response was lost. Treat the
+              // submission as successful rather than retrying into a
+              // duplicate.
+              submissionLanded = true;
+            } else {
+              // Cleanup itself failed (offline, quota, ...). The orphan
+              // is not permanent: the scheduled sweepOrphanedReceipts
+              // function deletes unreferenced receipts. Report the
+              // write failure honestly either way.
+              console.error("Receipt cleanup failed:", cleanupError);
+            }
+          }
+        }
+        if (!submissionLanded) throw writeError;
+      }
 
       toast({
         title: "Registration Submitted",

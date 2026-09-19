@@ -17,6 +17,15 @@ This directory contains Firebase Cloud Functions that trigger Vercel rebuilds wh
   When `REBUILD_TRIGGER_TOKEN` is not configured the endpoint refuses all
   requests (fails closed).
 
+### 3. sweepOrphanedReceipts
+- **Trigger**: Scheduled, every 24 hours
+- **Action**: Deletes `receipts/<id>` storage objects that have no matching
+  `animalRegistrations/<id>` document — orphans left when a public
+  registration upload succeeded but the submission write (and the
+  client's immediate cleanup) failed. Objects younger than 1 hour are
+  skipped so in-flight submissions are never swept. Logs counts only —
+  never file names or contents.
+
 ## Setup
 
 ### 1. Install Dependencies

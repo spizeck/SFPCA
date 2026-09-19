@@ -94,7 +94,10 @@ before(async () => {
       "team-photos/existing.png",
       "images/existing.png",
       "animals/avail-1/existing.png",
+      // An orphan: no animalRegistrations/existing document exists.
       "receipts/existing",
+      // A referenced receipt: animalRegistrations/reg-1 exists above.
+      "receipts/reg-1",
     ]) {
       await storage
         .ref(path)
@@ -277,11 +280,28 @@ test("public can submit a valid pending registration", async () => {
   );
 });
 
-test("public can submit a registration carrying a receipt path", async () => {
+test("public can submit a registration carrying its bound receipt path", async () => {
   await assertSucceeds(
     publicDb()
       .collection("animalRegistrations")
       .doc("reg-receipt")
+      .set(freshRegistration({ paymentReceipt: "receipts/reg-receipt" })),
+  );
+});
+
+test("public cannot reference a receipt belonging to another registration", async () => {
+  // paymentReceipt must equal receipts/<this doc's id> — a submission
+  // can never point at an existing receipt owned by a different doc.
+  await assertFails(
+    publicDb()
+      .collection("animalRegistrations")
+      .doc("reg-receipt-2")
+      .set(freshRegistration({ paymentReceipt: "receipts/reg-1" })),
+  );
+  await assertFails(
+    publicDb()
+      .collection("animalRegistrations")
+      .doc("reg-receipt-3")
       .set(freshRegistration({ paymentReceipt: "receipts/abc-123" })),
   );
 });
@@ -654,21 +674,85 @@ test("public cannot upload non-image/PDF or oversized receipts", async () => {
 });
 
 test("receipts are not readable by public or non-admin users", async () => {
-  await assertFails(publicStorage().ref("receipts/existing").getMetadata());
-  await assertFails(userStorage().ref("receipts/existing").getMetadata());
+  await assertFails(publicStorage().ref("receipts/reg-1").getMetadata());
+  await assertFails(userStorage().ref("receipts/reg-1").getMetadata());
   await assertFails(
-    publicStorage().ref("receipts/existing").getDownloadURL(),
+    publicStorage().ref("receipts/reg-1").getDownloadURL(),
   );
 });
 
-test("public and non-admin cannot overwrite or delete receipts", async () => {
+test("nobody can overwrite an existing receipt object", async () => {
   await assertFails(
     publicStorage()
+      .ref("receipts/reg-1")
+      .put(pngBytes(), { contentType: "image/png" }),
+  );
+  await assertFails(
+    userStorage()
       .ref("receipts/existing")
       .put(pngBytes(), { contentType: "image/png" }),
   );
-  await assertFails(userStorage().ref("receipts/existing").delete());
-  await assertFails(publicStorage().ref("receipts/existing").delete());
+});
+
+test("referenced receipts cannot be deleted by public or non-admin users", async () => {
+  // receipts/reg-1 is bound to the existing animalRegistrations/reg-1
+  // document — only admins may delete referenced receipts.
+  await assertFails(publicStorage().ref("receipts/reg-1").delete());
+  await assertFails(userStorage().ref("receipts/reg-1").delete());
+});
+
+test("an orphan receipt can be deleted — the submission-cleanup path", async () => {
+  // Self-contained orphan: receipts/orphan-1 has no matching
+  // animalRegistrations document, simulating an upload whose
+  // registration write failed. Anonymous delete is permitted exactly in
+  // this case — this is what lets the public form clean up its own
+  // upload when the Firestore write fails.
+  await assertSucceeds(
+    publicStorage()
+      .ref("receipts/orphan-1")
+      .put(pngBytes(), { contentType: "image/png" }),
+  );
+  await assertSucceeds(publicStorage().ref("receipts/orphan-1").delete());
+});
+
+test("a failed registration write leaves no orphan — full flow", async () => {
+  // Regression for the orphan-receipt bug: upload succeeds, the
+  // Firestore create is rejected (here: a forged privileged field, but
+  // any failure behaves identically), and the anonymous cleanup delete
+  // is then authorized because the document does not exist.
+  await assertSucceeds(
+    publicStorage()
+      .ref("receipts/reg-orphan")
+      .put(pngBytes(), { contentType: "image/png" }),
+  );
+  await assertFails(
+    publicDb()
+      .collection("animalRegistrations")
+      .doc("reg-orphan")
+      .set(
+        freshRegistration({
+          paymentReceipt: "receipts/reg-orphan",
+          internalNotes: "smuggle",
+        }),
+      ),
+  );
+  await assertSucceeds(
+    publicStorage().ref("receipts/reg-orphan").delete(),
+  );
+  // The lost-response case: the write actually lands, so the receipt is
+  // now referenced and anonymous cleanup must be denied.
+  await assertSucceeds(
+    publicStorage()
+      .ref("receipts/reg-late")
+      .put(pngBytes(), { contentType: "image/png" }),
+  );
+  await assertSucceeds(
+    publicDb()
+      .collection("animalRegistrations")
+      .doc("reg-late")
+      .set(freshRegistration({ paymentReceipt: "receipts/reg-late" })),
+  );
+  await assertFails(publicStorage().ref("receipts/reg-late").delete());
 });
 
 test("admin can read, delete, and re-upload receipts", async () => {
