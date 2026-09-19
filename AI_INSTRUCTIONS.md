@@ -85,13 +85,17 @@ admin status on every request.
   `animalAdoptions` — public read, admin write
 - `animals` — public reads only `status == "available"`; admin read/write.
   Admin writes must carry a supported `status` value (see lifecycle below)
-- `animalRegistrations` — public **create** (unauthenticated,
-  shape-validated, forced `status="pending"`); admin read/update/delete
+- `animalRegistrations` — private submissions. Public **create**
+  (unauthenticated, shape-validated, forced `status="pending"`); admin
+  read/update/delete. See the submission section below
 - `animalRegistration` — *different collection*: admin-only page-content
-  doc. Singular vs plural matters — do not confuse them
+  doc that nothing currently reads (the public form hardcodes its copy
+  and fees). Singular vs plural matters — do not confuse them
 - `admins` — admin-only read/write
 - Storage: `images/`, `animals/`, `team-photos/` public read; admin-only
-  image uploads (<5 MB, `image/*`); default deny elsewhere
+  image uploads (<5 MB, `image/*`). `receipts/` is private submission
+  data — public create-only of small image/PDF files, admin
+  read/update/delete. Default deny elsewhere
 
 ## Animal lifecycle (canonical)
 
@@ -116,6 +120,55 @@ module's predicates (`isAnimalStatus`, `isPublicAnimalStatus`).
   unauthenticated reads, and admin writes with an unrecognized `status`
   are rejected.
 
+## Registration submissions (canonical)
+
+`src/lib/animal-registration.ts` is the single authoritative definition
+of the submission lifecycle, field limits, the quoted fee schedule, and
+receipt-file constraints; `firestore.rules` and `storage.rules` mirror
+its security-relevant parts — keep all three in agreement.
+
+**The public↔private boundary.** `/animal-registration` is the only
+public submission surface. It writes `animalRegistrations` docs — owner
+name/address/phone/email (PII) plus per-animal name/type/sex/isFixed —
+which are **never publicly readable**. Anonymous and authenticated
+non-admin reads, list queries, and probing queries are all denied at the
+rules layer; only verified `admins/` members can read. There is no
+adoption-application collection: `/animal-adoptions` is a read-only
+listing whose CTAs point at `/contact` — do not invent one.
+
+**Fields the public writes** (allowlisted in `isValidRegistration`):
+`ownerInfo{name,address,phone,email}` (required strings with caps),
+`animals` (1–25 entries), `totalFee` (0–25000), `paymentReceipt` (null or
+a `receipts/` storage path), `status` (forced `pending`),
+`createdAt`/`updatedAt` (must be `request.time` server timestamps).
+Rules cannot iterate the `animals` list — per-entry enums/required-ness
+are enforced by the form (`validateRegistration` mirrors the rules) and
+verified by staff. Individual `animalRegistrations` docs are **not**
+linked to public `animals` records — registrations are independent owner
+submissions.
+
+**Receipts.** The optional file upload goes to `receipts/<uuid>`
+(public create-only, image/PDF ≤5 MB); the doc stores the storage *path*,
+never a public URL. The admin view resolves it through `getDownloadURL`,
+which returns a bearer-token link — treat it as a capability URL.
+
+**Lifecycle:** `pending` (submitted, awaiting review) → `approved`
+("Verified") or `rejected`; any supported status can move to any other
+so staff can correct mistakes — nothing is terminal. Public creates can
+only ever set `pending`; admin updates must keep a supported status.
+Unknown/malformed statuses stay admin-visible flagged "Needs review"
+rather than being coerced.
+
+**Duplicates/retries:** deliberate — `addDoc` is not idempotent and a
+repeat submission creates a second pending doc (the submit button is
+disabled + a re-entrancy guard covers double-clicks; staff see and can
+reject accidental duplicates). No content-based dedup: two legitimate
+submissions can share owner details.
+
+**Retention:** no formal retention period exists. Submissions persist
+indefinitely; rules permit admin delete but no UI exposes it — deletion
+is for erroneous/spam records only.
+
 ## Code conventions
 
 - App Router only; Server Components by default, `"use client"` only
@@ -126,8 +179,9 @@ module's predicates (`isAnimalStatus`, `isPublicAnimalStatus`).
 - `src/lib` holds Firebase init (`firebase.ts` client,
   `firebase-admin.ts` server), auth helpers (`auth.ts`), maintenance
   predicates (`maintenance.ts`), SEO helpers (`seo.ts`), the animal
-  lifecycle definition (`animal-lifecycle.ts`), public animal queries
-  (`animals.ts`), and shared types (`types.ts`). There are no
+  lifecycle definition (`animal-lifecycle.ts`), the registration
+  submission lifecycle/schema (`animal-registration.ts`), public animal
+  queries (`animals.ts`), and shared types (`types.ts`). There are no
   `src/services` or `src/types` directories
 - Canonical/OG/sitemap/robots URLs come from `src/lib/seo.ts`
   (`NEXT_PUBLIC_SITE_URL`, production-domain fallback). Never use

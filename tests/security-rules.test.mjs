@@ -1,6 +1,8 @@
 // Emulator-backed tests for firestore.rules and storage.rules.
 // Run via `npm run test:rules` (requires no production credentials).
 import { test, before, after } from "node:test";
+import firebase from "firebase/compat/app";
+import "firebase/compat/firestore";
 import {
   initializeTestEnvironment,
   assertFails,
@@ -12,9 +14,15 @@ const BUCKET = "demo-sfpca.appspot.com";
 const ADMIN_EMAIL = "staff@sfpca.org";
 const USER_EMAIL = "user@example.com";
 
+const serverTimestamp = () =>
+  firebase.firestore.FieldValue.serverTimestamp();
+
 let testEnv;
 
-// Valid submission shape matching src/components/animal-registration/
+// Valid submission shape matching src/components/animal-registration/.
+// Seed writes bypass the rules, so fixed Dates are fine there; public
+// creates must send server timestamps (rules pin createdAt/updatedAt to
+// request.time) — use freshRegistration() for those.
 const validRegistration = {
   ownerInfo: {
     name: "Jane Doe",
@@ -29,6 +37,13 @@ const validRegistration = {
   createdAt: new Date(),
   updatedAt: new Date(),
 };
+
+const freshRegistration = (overrides = {}) => ({
+  ...validRegistration,
+  createdAt: serverTimestamp(),
+  updatedAt: serverTimestamp(),
+  ...overrides,
+});
 
 before(async () => {
   testEnv = await initializeTestEnvironment({
@@ -79,6 +94,7 @@ before(async () => {
       "team-photos/existing.png",
       "images/existing.png",
       "animals/avail-1/existing.png",
+      "receipts/existing",
     ]) {
       await storage
         .ref(path)
@@ -254,7 +270,19 @@ test("admin cannot write an unsupported or missing animal status", async () => {
 
 test("public can submit a valid pending registration", async () => {
   await assertSucceeds(
-    publicDb().collection("animalRegistrations").doc("reg-new").set(validRegistration),
+    publicDb()
+      .collection("animalRegistrations")
+      .doc("reg-new")
+      .set(freshRegistration()),
+  );
+});
+
+test("public can submit a registration carrying a receipt path", async () => {
+  await assertSucceeds(
+    publicDb()
+      .collection("animalRegistrations")
+      .doc("reg-receipt")
+      .set(freshRegistration({ paymentReceipt: "receipts/abc-123" })),
   );
 });
 
@@ -263,13 +291,13 @@ test("public submissions cannot self-approve or carry unexpected fields", async 
     publicDb()
       .collection("animalRegistrations")
       .doc("reg-bad-1")
-      .set({ ...validRegistration, status: "approved" }),
+      .set(freshRegistration({ status: "approved" })),
   );
   await assertFails(
     publicDb()
       .collection("animalRegistrations")
       .doc("reg-bad-2")
-      .set({ ...validRegistration, isAdmin: true }),
+      .set({ ...freshRegistration(), isAdmin: true }),
   );
   await assertFails(
     publicDb()
@@ -277,13 +305,149 @@ test("public submissions cannot self-approve or carry unexpected fields", async 
       .doc("reg-bad-3")
       .set({ status: "pending" }),
   );
+  // Privileged/workflow fields must never be injectable on create.
+  for (const field of ["reviewed", "internalNotes", "assignedStaff", "approved"]) {
+    await assertFails(
+      publicDb()
+        .collection("animalRegistrations")
+        .doc(`reg-bad-${field}`)
+        .set({ ...freshRegistration(), [field]: true }),
+    );
+  }
 });
 
-test("registration data is not readable by public or non-admin users", async () => {
+test("public submissions with missing or mistyped required fields fail", async () => {
+  const cases = [
+    // Missing required fields
+    { ...freshRegistration(), ownerInfo: { name: "x", address: "y", phone: "z" } },
+    { ...freshRegistration(), animals: [] },
+    // Wrong types
+    { ...freshRegistration(), totalFee: "10" },
+    {
+      ...freshRegistration(),
+      ownerInfo: { name: 42, address: "y", phone: "z", email: "e@x.co" },
+    },
+    { ...freshRegistration(), animals: "dog" },
+    { ...freshRegistration(), paymentReceipt: 123 },
+    // Empty required strings
+    {
+      ...freshRegistration(),
+      ownerInfo: { name: "", address: "y", phone: "z", email: "e@x.co" },
+    },
+  ];
+  for (const [i, data] of cases.entries()) {
+    await assertFails(
+      publicDb().collection("animalRegistrations").doc(`reg-fail-${i}`).set(data),
+    );
+  }
+});
+
+test("public submissions cannot smuggle extra owner fields or oversized data", async () => {
+  await assertFails(
+    publicDb()
+      .collection("animalRegistrations")
+      .doc("reg-owner-extra")
+      .set(
+        freshRegistration({
+          ownerInfo: {
+            name: "Jane",
+            address: "x",
+            phone: "y",
+            email: "e@x.co",
+            ssn: "123-45-6789",
+          },
+        }),
+      ),
+  );
+  await assertFails(
+    publicDb()
+      .collection("animalRegistrations")
+      .doc("reg-long")
+      .set(
+        freshRegistration({
+          ownerInfo: {
+            name: "n".repeat(121),
+            address: "x",
+            phone: "y",
+            email: "e@x.co",
+          },
+        }),
+      ),
+  );
+  await assertFails(
+    publicDb()
+      .collection("animalRegistrations")
+      .doc("reg-many")
+      .set(freshRegistration({ animals: Array(26).fill({ name: "a" }) })),
+  );
+  await assertFails(
+    publicDb()
+      .collection("animalRegistrations")
+      .doc("reg-fee")
+      .set(freshRegistration({ totalFee: -5 })),
+  );
+  await assertFails(
+    publicDb()
+      .collection("animalRegistrations")
+      .doc("reg-fee-2")
+      .set(freshRegistration({ totalFee: 25001 })),
+  );
+});
+
+test("public submissions cannot forge receipt paths or timestamps", async () => {
+  // paymentReceipt must be null or a receipts/ storage path — not an
+  // arbitrary URL staff might later click.
+  await assertFails(
+    publicDb()
+      .collection("animalRegistrations")
+      .doc("reg-url")
+      .set(freshRegistration({ paymentReceipt: "https://evil.example/x" })),
+  );
+  // Client-controlled timestamps are rejected; createdAt/updatedAt must
+  // be server timestamps resolving to request.time.
+  await assertFails(
+    publicDb()
+      .collection("animalRegistrations")
+      .doc("reg-ts")
+      .set({
+        ...validRegistration,
+        createdAt: new Date("2020-01-01"),
+        updatedAt: new Date("2020-01-01"),
+      }),
+  );
+});
+
+test("registration data is not readable or enumerable by public or non-admin users", async () => {
   await assertFails(publicDb().collection("animalRegistrations").doc("reg-1").get());
   await assertFails(publicDb().collection("animalRegistrations").get());
   await assertFails(userDb().collection("animalRegistrations").doc("reg-1").get());
   await assertFails(userDb().collection("animalRegistrations").get());
+  // Probing queries against private fields are denied for everyone
+  // without admin rights.
+  await assertFails(
+    publicDb()
+      .collection("animalRegistrations")
+      .where("ownerInfo.email", "==", "jane@example.com")
+      .get(),
+  );
+  await assertFails(
+    userDb()
+      .collection("animalRegistrations")
+      .where("status", "==", "pending")
+      .get(),
+  );
+});
+
+test("public cannot update or delete an existing registration", async () => {
+  await assertFails(
+    publicDb()
+      .collection("animalRegistrations")
+      .doc("reg-1")
+      .update({ status: "approved" }),
+  );
+  await assertFails(
+    publicDb().collection("animalRegistrations").doc("reg-1").delete(),
+  );
 });
 
 test("non-admin cannot mutate or delete registrations", async () => {
@@ -296,13 +460,36 @@ test("non-admin cannot mutate or delete registrations", async () => {
   await assertFails(userDb().collection("animalRegistrations").doc("reg-1").delete());
 });
 
-test("admin can read and update registrations", async () => {
+test("admin can read and transition registrations through the lifecycle", async () => {
   await assertSucceeds(adminDb().collection("animalRegistrations").get());
+  // pending -> approved -> rejected -> pending: all supported transitions
+  // succeed so staff can correct mistakes; none is terminal.
   await assertSucceeds(
     adminDb()
       .collection("animalRegistrations")
       .doc("reg-1")
       .update({ status: "approved" }),
+  );
+  await assertSucceeds(
+    adminDb()
+      .collection("animalRegistrations")
+      .doc("reg-1")
+      .update({ status: "rejected" }),
+  );
+  await assertSucceeds(
+    adminDb()
+      .collection("animalRegistrations")
+      .doc("reg-1")
+      .update({ status: "pending" }),
+  );
+});
+
+test("admin cannot write an unsupported registration status", async () => {
+  await assertFails(
+    adminDb()
+      .collection("animalRegistrations")
+      .doc("reg-1")
+      .update({ status: "archived" }),
   );
 });
 
@@ -430,4 +617,75 @@ test("storage paths outside known prefixes are denied by default", async () => {
       .ref("backups/db.json")
       .put(pngBytes(), { contentType: "image/png" }),
   );
+});
+
+// ---------- Payment receipts (private submission data) ----------
+
+test("public can upload an image or PDF receipt", async () => {
+  await assertSucceeds(
+    publicStorage()
+      .ref("receipts/new-receipt-1")
+      .put(pngBytes(), { contentType: "image/png" }),
+  );
+  await assertSucceeds(
+    publicStorage()
+      .ref("receipts/new-receipt-2")
+      .put(new Uint8Array([37, 80, 68, 70]), {
+        contentType: "application/pdf",
+      }),
+  );
+});
+
+test("public cannot upload non-image/PDF or oversized receipts", async () => {
+  await assertFails(
+    publicStorage()
+      .ref("receipts/evil")
+      .put(new Uint8Array([60, 104, 116, 109, 108]), {
+        contentType: "text/html",
+      }),
+  );
+  await assertFails(
+    publicStorage()
+      .ref("receipts/huge")
+      .put(new Uint8Array(5 * 1024 * 1024 + 1), {
+        contentType: "image/png",
+      }),
+  );
+});
+
+test("receipts are not readable by public or non-admin users", async () => {
+  await assertFails(publicStorage().ref("receipts/existing").getMetadata());
+  await assertFails(userStorage().ref("receipts/existing").getMetadata());
+  await assertFails(
+    publicStorage().ref("receipts/existing").getDownloadURL(),
+  );
+});
+
+test("public and non-admin cannot overwrite or delete receipts", async () => {
+  await assertFails(
+    publicStorage()
+      .ref("receipts/existing")
+      .put(pngBytes(), { contentType: "image/png" }),
+  );
+  await assertFails(userStorage().ref("receipts/existing").delete());
+  await assertFails(publicStorage().ref("receipts/existing").delete());
+});
+
+test("admin can read, delete, and re-upload receipts", async () => {
+  await assertSucceeds(adminStorage().ref("receipts/existing").getMetadata());
+  // Replacing a receipt is delete-then-create: a PUT onto an occupied
+  // path is treated as a create and denied for everyone, so an existing
+  // object can never be silently overwritten.
+  await assertSucceeds(adminStorage().ref("receipts/existing").delete());
+  await assertSucceeds(
+    adminStorage()
+      .ref("receipts/existing")
+      .put(pngBytes(), { contentType: "image/png" }),
+  );
+  await assertSucceeds(
+    adminStorage()
+      .ref("receipts/to-delete")
+      .put(pngBytes(), { contentType: "image/png" }),
+  );
+  await assertSucceeds(adminStorage().ref("receipts/to-delete").delete());
 });

@@ -27,6 +27,15 @@ service firebase.storage {
           && (request.resource == null || isImageUpload());
     }
 
+    // Payment-receipt uploads from the public registration form: image or
+    // PDF, max 5 MB (mirrors isReceiptFile in src/lib/animal-registration.ts).
+    function isReceiptUpload() {
+      return request.resource.size < 5 * 1024 * 1024
+          && request.resource.size > 0
+          && (request.resource.contentType.matches("image/.*")
+              || request.resource.contentType == "application/pdf");
+    }
+
     // Images - public read, admin-only image uploads
     match /images/{allPaths=**} {
       allow read: if true;
@@ -43,6 +52,17 @@ service firebase.storage {
     match /team-photos/{allPaths=**} {
       allow read: if true;
       allow write: if canWrite();
+    }
+
+    // Payment receipts attached to animal registrations - private data.
+    // The public form uploads unauthenticated, so create is open but
+    // constrained to small image/PDF files; only admins can read, replace,
+    // or delete receipts. The resource == null check keeps an anonymous
+    // uploader from overwriting an existing object even where a PUT to
+    // an occupied path is classified as a create.
+    match /receipts/{receiptId} {
+      allow create: if resource == null && isReceiptUpload();
+      allow read, update, delete: if isAdmin();
     }
 
     // Default deny

@@ -266,7 +266,7 @@ export function AnimalAdoptions() {
               <Link href="/contact">Start Adoption Process</Link>
             </Button>
             <Button size="lg" variant="outline" asChild>
-              <Link href="/under-construction">Register Your Pet</Link>
+              <Link href="/animal-registration">Register Your Pet</Link>
             </Button>
           </div>
         </div>
