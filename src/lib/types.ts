@@ -99,7 +99,10 @@ export interface AnimalRegistration {
     email: string;
   };
   animals: AnimalRegistrationData[];
-  paymentReceipt?: string; // Firebase Storage URL
+  // Storage path of the uploaded receipt (e.g. "receipts/<id>"), or null
+  // when no receipt was provided. Resolved to a download URL only in the
+  // admin view via the Storage SDK.
+  paymentReceipt?: string | null;
   totalFee: number;
   status: "pending" | "approved" | "rejected";
   createdAt: string;

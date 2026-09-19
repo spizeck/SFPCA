@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { shouldReduceMotion } from "@/lib/animations";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,12 +13,26 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2 } from "lucide-react";
 import { AnimalRegistrationData } from "@/lib/types";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { collection, doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { ref, uploadBytes, deleteObject } from "firebase/storage";
+import { db, storage } from "@/lib/firebase";
+import {
+  calculateRegistrationFee,
+  isReceiptFile,
+  validateRegistration,
+  REGISTRATION_FIELD_LIMITS,
+  REGISTRATION_FEE_FIXED,
+  REGISTRATION_FEE_NOT_FIXED,
+  REGISTRATION_INITIAL_STATUS,
+} from "@/lib/animal-registration";
 import { OptimizedVideo } from "@/components/ui/optimized-video";
 
 export function AnimalRegistration() {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Synchronous re-entrancy guard: state updates flush after the event
+  // handler runs, so a fast double-submit could slip past a state check.
+  const submittingRef = useRef(false);
+  const [receiptError, setReceiptError] = useState<string | null>(null);
   const { toast } = useToast();
   
   const [formData, setFormData] = useState({
@@ -37,11 +51,7 @@ export function AnimalRegistration() {
     paymentReceipt: null as File | null,
   });
 
-  const calculateTotalFee = () => {
-    return formData.animals.reduce((total, animal) => {
-      return total + (animal.isFixed === "yes" ? 10 : 100);
-    }, 0);
-  };
+  const calculateTotalFee = () => calculateRegistrationFee(formData.animals);
 
   const addAnimal = () => {
     setFormData({
@@ -75,36 +85,122 @@ export function AnimalRegistration() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Guard against re-entrant submits (double-click, Enter during submit).
+    if (submittingRef.current) return;
+
+    const trimmed = {
+      ownerName: formData.ownerName.trim(),
+      ownerAddress: formData.ownerAddress.trim(),
+      ownerPhone: formData.ownerPhone.trim(),
+      ownerEmail: formData.ownerEmail.trim(),
+      animals: formData.animals.map((a) => ({
+        ...a,
+        name: a.name.trim(),
+        type: a.type.trim(),
+      })),
+    };
+
+    // Structural check mirroring the Firestore rules so a bad submission
+    // fails here with a useful message rather than a generic write error.
+    const errors = validateRegistration(trimmed);
+    if (errors.owner || errors.animals) {
+      toast({
+        title: "Check your submission",
+        description: errors.owner ?? errors.animals,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    submittingRef.current = true;
     setIsSubmitting(true);
 
     try {
       const totalFee = calculateTotalFee();
-      
-      // Prepare data for Firestore
+
+      // The registration document ID is generated up front so the
+      // receipt object can live at the path bound to it
+      // (receipts/<doc id>). That binding is what lets the rules layer
+      // authorize orphan cleanup and prevents a submission from ever
+      // referencing another registration's receipt.
+      const docRef = doc(collection(db, "animalRegistrations"));
+
+      // Upload the optional receipt first so its storage path can be
+      // written with the submission in a single public create. A failed
+      // upload must not block the registration itself.
+      let receiptPath: string | null = null;
+      if (formData.paymentReceipt) {
+        try {
+          const path = `receipts/${docRef.id}`;
+          await uploadBytes(ref(storage, path), formData.paymentReceipt, {
+            contentType: formData.paymentReceipt.type,
+          });
+          receiptPath = path;
+        } catch (uploadError) {
+          console.error("Receipt upload failed:", uploadError);
+        }
+      }
+
       const registrationData = {
         ownerInfo: {
-          name: formData.ownerName,
-          address: formData.ownerAddress,
-          phone: formData.ownerPhone,
-          email: formData.ownerEmail,
+          name: trimmed.ownerName,
+          address: trimmed.ownerAddress,
+          phone: trimmed.ownerPhone,
+          email: trimmed.ownerEmail,
         },
-        animals: formData.animals,
-        paymentReceipt: null, // Will be updated if file is uploaded
+        animals: trimmed.animals,
+        paymentReceipt: receiptPath,
         totalFee,
-        status: "pending",
+        status: REGISTRATION_INITIAL_STATUS,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
-      
-      // Save to Firestore
-      const docRef = await addDoc(collection(db, "animalRegistrations"), registrationData);
-      
+
+      let submissionLanded = false;
+      try {
+        await setDoc(docRef, registrationData);
+        submissionLanded = true;
+      } catch (writeError) {
+        // The receipt upload already succeeded — the object is an orphan
+        // unless removed. Storage rules permit anonymous delete of a
+        // receipts/<id> object only while animalRegistrations/<id> does
+        // not exist, so this delete succeeds exactly when the write
+        // truly failed and is denied when the document actually landed.
+        if (receiptPath) {
+          try {
+            await deleteObject(ref(storage, receiptPath));
+          } catch (cleanupError) {
+            if (
+              (cleanupError as { code?: string }).code ===
+              "storage/unauthorized"
+            ) {
+              // Delete denied ⟺ the registration document exists: the
+              // write succeeded but its response was lost. Treat the
+              // submission as successful rather than retrying into a
+              // duplicate.
+              submissionLanded = true;
+            } else {
+              // Cleanup itself failed (offline, quota, ...). The orphan
+              // is not permanent: the scheduled sweepOrphanedReceipts
+              // function deletes unreferenced receipts. Report the
+              // write failure honestly either way.
+              console.error("Receipt cleanup failed:", cleanupError);
+            }
+          }
+        }
+        if (!submissionLanded) throw writeError;
+      }
+
       toast({
         title: "Registration Submitted",
-        description: `Your registration for ${formData.animals.length} animal(s) has been submitted. The total fee is $${totalFee}. Please allow 24-48 hours for verification.`,
+        description:
+          formData.paymentReceipt && !receiptPath
+            ? `Your registration for ${formData.animals.length} animal(s) was submitted, but the receipt could not be uploaded. You can bring it to our office instead.`
+            : `Your registration for ${formData.animals.length} animal(s) has been submitted. The total fee is $${totalFee}. Please allow 24-48 hours for verification.`,
       });
-      
-      // Reset form
+
+      // Reset form only after the write succeeds so failed submissions
+      // preserve what the visitor entered.
       setFormData({
         ownerName: "",
         ownerAddress: "",
@@ -120,6 +216,7 @@ export function AnimalRegistration() {
         ],
         paymentReceipt: null as File | null,
       });
+      setReceiptError(null);
     } catch (error) {
       console.error("Error submitting registration:", error);
       toast({
@@ -128,14 +225,24 @@ export function AnimalRegistration() {
         variant: "destructive",
       });
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setFormData({ ...formData, paymentReceipt: e.target.files[0] });
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!isReceiptFile(file)) {
+      setFormData({ ...formData, paymentReceipt: null });
+      setReceiptError(
+        "Receipt must be an image or PDF no larger than 5 MB.",
+      );
+      e.target.value = "";
+      return;
     }
+    setReceiptError(null);
+    setFormData({ ...formData, paymentReceipt: file });
   };
 
   const totalFee = calculateTotalFee();
@@ -215,6 +322,7 @@ export function AnimalRegistration() {
                         autoComplete="name"
                         value={formData.ownerName}
                         onChange={(e) => setFormData({ ...formData, ownerName: e.target.value })}
+                        maxLength={REGISTRATION_FIELD_LIMITS.ownerName}
                         required
                       />
                     </div>
@@ -225,6 +333,7 @@ export function AnimalRegistration() {
                         autoComplete="street-address"
                         value={formData.ownerAddress}
                         onChange={(e) => setFormData({ ...formData, ownerAddress: e.target.value })}
+                        maxLength={REGISTRATION_FIELD_LIMITS.ownerAddress}
                         required
                       />
                     </div>
@@ -237,6 +346,7 @@ export function AnimalRegistration() {
                           autoComplete="tel"
                           value={formData.ownerPhone}
                           onChange={(e) => setFormData({ ...formData, ownerPhone: e.target.value })}
+                          maxLength={REGISTRATION_FIELD_LIMITS.ownerPhone}
                           required
                         />
                       </div>
@@ -248,6 +358,7 @@ export function AnimalRegistration() {
                           autoComplete="email"
                           value={formData.ownerEmail}
                           onChange={(e) => setFormData({ ...formData, ownerEmail: e.target.value })}
+                          maxLength={REGISTRATION_FIELD_LIMITS.ownerEmail}
                           required
                         />
                       </div>
@@ -263,6 +374,10 @@ export function AnimalRegistration() {
                         variant="outline"
                         size="sm"
                         onClick={addAnimal}
+                        disabled={
+                          formData.animals.length >=
+                          REGISTRATION_FIELD_LIMITS.maxAnimals
+                        }
                         className="flex items-center gap-2"
                       >
                         <Plus className="h-4 w-4" aria-hidden="true" />
@@ -295,6 +410,7 @@ export function AnimalRegistration() {
                               id={`animalName-${index}`}
                               value={animal.name}
                               onChange={(e) => updateAnimal(index, 'name', e.target.value)}
+                              maxLength={REGISTRATION_FIELD_LIMITS.animalName}
                               required
                             />
                           </div>
@@ -305,12 +421,14 @@ export function AnimalRegistration() {
                               placeholder="e.g., Dog, Cat, etc."
                               value={animal.type}
                               onChange={(e) => updateAnimal(index, 'type', e.target.value)}
+                              maxLength={REGISTRATION_FIELD_LIMITS.animalType}
                               required
                             />
                           </div>
                           <fieldset>
                             <legend className="text-sm font-medium leading-none">Sex <span aria-hidden="true">*</span></legend>
                             <RadioGroup
+                              name={`sex-${index}`}
                               value={animal.sex}
                               onValueChange={(value) => updateAnimal(index, 'sex', value)}
                               className="flex gap-4 mt-2"
@@ -329,6 +447,7 @@ export function AnimalRegistration() {
                           <fieldset>
                             <legend className="text-sm font-medium leading-none">Is the animal spayed/neutered? <span aria-hidden="true">*</span></legend>
                             <RadioGroup
+                              name={`fixed-${index}`}
                               value={animal.isFixed}
                               onValueChange={(value) => updateAnimal(index, 'isFixed', value)}
                               className="flex gap-4 mt-2"
@@ -346,7 +465,7 @@ export function AnimalRegistration() {
                             {animal.isFixed && (
                               <p className="text-sm text-muted-foreground mt-2">
                                 Registration fee: <span className="font-semibold text-primary">
-                                  ${animal.isFixed === "yes" ? 10 : 100}
+                                  ${animal.isFixed === "yes" ? REGISTRATION_FEE_FIXED : REGISTRATION_FEE_NOT_FIXED}
                                 </span>
                               </p>
                             )}
@@ -361,7 +480,7 @@ export function AnimalRegistration() {
                         {formData.animals.map((animal, index) => (
                           <div key={index} className="flex justify-between text-sm">
                             <span>Animal {index + 1} ({animal.name || 'Unnamed'})</span>
-                            <span>${animal.isFixed === "yes" ? 10 : 100}</span>
+                            <span>${animal.isFixed === "yes" ? REGISTRATION_FEE_FIXED : REGISTRATION_FEE_NOT_FIXED}</span>
                           </div>
                         ))}
                         <div className="border-t pt-2 mt-2">
@@ -388,8 +507,13 @@ export function AnimalRegistration() {
                         aria-describedby="paymentReceipt-help"
                       />
                       <p id="paymentReceipt-help" className="text-sm text-muted-foreground mt-1">
-                        Optionally upload a copy of your payment receipt. Accepted formats: JPG, PNG, PDF
+                        Optionally upload a copy of your payment receipt. Accepted formats: JPG, PNG, PDF (max 5 MB)
                       </p>
+                      {receiptError && (
+                        <p role="alert" className="text-sm text-destructive mt-1">
+                          {receiptError}
+                        </p>
+                      )}
                     </div>
                   </div>
 

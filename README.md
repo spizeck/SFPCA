@@ -179,8 +179,8 @@ SFPCA/
 | `siteSettings` | Contact info, social links, map embed (doc: `global`) |
 | `animals` | Animal listings — `status` controls public visibility (canonical lifecycle: `src/lib/animal-lifecycle.ts`) |
 | `faq` | FAQ entries with category, question, answer, and display order |
-| `animalRegistration` | Registration **page content** (admin-managed, singular) |
-| `animalRegistrations` | Submitted registration forms (public create → `pending`, plural) |
+| `animalRegistration` | Registration **page content** (admin-managed, singular; currently not read by the public form) |
+| `animalRegistrations` | Submitted registration forms — private owner data (public create → `pending`, admin-only read; canonical lifecycle/schema: `src/lib/animal-registration.ts`) |
 | `admins` | Admin user allowlist (email as document ID) |
 | `vetServices` | Veterinary services page content |
 | `animalAdoptions` | Animal adoptions page content |
@@ -251,12 +251,17 @@ firebase deploy --only storage
 
 ### Firebase Functions
 
-`functions/` contains two Cloud Functions that keep the deployed site in
-sync with Firestore content:
+`functions/` contains three Cloud Functions:
 
 - `onFirestoreChange` — any real document write triggers a Vercel rebuild
   via a deploy hook (skips no-op writes)
 - `triggerRebuild` — HTTP endpoint that triggers a rebuild manually
+- `sweepOrphanedReceipts` — scheduled (every 24 h); deletes
+  `receipts/<id>` objects with no matching `animalRegistrations/<id>`
+  document, skipping objects under 1 hour old. This is the fail-safe
+  for receipt uploads whose registration write and immediate client
+  cleanup both failed — private data is never left orphaned
+  indefinitely
 
 They need `VERCEL_TOKEN` and `VERCEL_PROJECT_ID` in `functions/.env`
 (see `functions/README.md`). Deploy with:
