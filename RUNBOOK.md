@@ -1,0 +1,480 @@
+# Production Runbook — Deployment & Recovery
+
+How to release and recover the SFPCA site. Pair this with the
+observability baseline in [README.md → Observability &
+troubleshooting](README.md#observability--troubleshooting), which covers
+*where to look* when something is broken; this file covers *what to do*
+about it.
+
+Every command below is verified against this repository. Where a step
+lives in a web console and cannot be verified from the repo, it is
+marked **[console]** — confirm the exact button/page names in the
+current dashboard UI rather than trusting this doc blindly.
+
+## 1. Production topology
+
+```
+GitHub (main)
+  │  merge/push
+  ▼
+Vercel Git integration ──► Next.js build ──► production deployment
+  ▲                                            (saba-sfpca domain)
+  │ deploy hook (VERCEL_TOKEN / VERCEL_PROJECT_ID)
+  │
+Firestore content write ──► onFirestoreChange ──► deploy hook POST
+(scheduled every 24 h)  ──► sweepOrphanedReceipts ──► Storage cleanup
+(authenticated HTTPS)   ──► triggerRebuild ──► same deploy hook
+
+Firebase deploy (manual, CLI):
+  functions/  ──► Cloud Functions (+ Cloud Scheduler for the sweep)
+  firestore.rules / firestore.indexes.json ──► Firestore
+  storage.rules ──► Cloud Storage
+```
+
+**Deployments are independent.** Merging to `main` deploys the Next.js
+app only. Firebase Functions, Firestore rules, and Storage rules deploy
+only via `firebase deploy` — a Vercel deploy never touches them, and a
+`firebase deploy` never touches Vercel. Firebase Hosting is **not**
+configured (no `hosting` key in `firebase.json`); Vercel serves
+everything.
+
+## 2. Components and ownership
+
+| Component | Source | Platform | Deploy trigger | Status visible at | Runtime failures at |
+|-----------|--------|----------|----------------|-------------------|---------------------|
+| Next.js app | repo root (`src/`) | Vercel | automatic on merge to `main` [console: confirm production branch] | Vercel → Deployments | Vercel → Logs (Runtime) |
+| `onFirestoreChange` | `functions/index.js` | Cloud Functions v2 | manual `firebase deploy` | `firebase deploy` output / Firebase console → Functions | Cloud Logging, `subsystem:"rebuild"` |
+| `triggerRebuild` | `functions/index.js` | Cloud Functions v2 | manual `firebase deploy` | same | Cloud Logging |
+| `sweepOrphanedReceipts` | `functions/index.js`, `functions/lib/sweep.js` | Cloud Functions + Cloud Scheduler | manual `firebase deploy` (schedule is part of the function definition) | Firebase console → Functions / Cloud Scheduler | Cloud Logging, `subsystem:"receipt-cleanup"` |
+| Firestore rules | `firestore.rules` | Firestore | manual `firebase deploy --only firestore:rules` | Firebase console → Firestore → Rules | denied requests surface as `permission-denied` in app logs |
+| Storage rules | `storage.rules` | Cloud Storage | manual `firebase deploy --only storage` | Firebase console → Storage → Rules | `storage/unauthorized` in app logs |
+| Firestore indexes | `firestore.indexes.json` | Firestore | manual (currently none — see §7) | Firebase console → Firestore → Indexes | query failures in app logs |
+| CI | `.github/workflows/ci.yml` | GitHub Actions | every PR and push to `main` | PR checks / Actions tab | same |
+
+**Access needed (roles, not credentials):**
+
+- GitHub repository maintainer — merge PRs, revert commits.
+- Vercel project member with deployment access — environment variables,
+  rollbacks, deployment promotion.
+- Firebase/Google Cloud project member with deploy permissions on
+  `saba-sfpca` — `firebase deploy`, plus console access for logs,
+  Scheduler, and rules history.
+
+## 3. Environment variables
+
+Canonical lists are the committed `.env.example` files — names and
+purposes only, never values. Any variable not listed here and in those
+files is not used by production code.
+
+**Vercel — Production environment** (set in Vercel project settings):
+
+| Variable | Purpose | Secret? |
+|----------|---------|---------|
+| `NEXT_PUBLIC_FIREBASE_API_KEY` | Firebase client init | no — public config, rules are the boundary |
+| `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` | Firebase client init | no |
+| `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | Firebase client init | no |
+| `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET` | Firebase client init | no |
+| `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID` | Firebase client init | no |
+| `NEXT_PUBLIC_FIREBASE_APP_ID` | Firebase client init | no |
+| `FIREBASE_ADMIN_PROJECT_ID` | Admin SDK (session route, admin auth) | **yes** |
+| `FIREBASE_ADMIN_CLIENT_EMAIL` | Admin SDK service account | **yes** |
+| `FIREBASE_ADMIN_PRIVATE_KEY` | Admin SDK service account | **yes** |
+| `ADMIN_EMAILS` | Bootstrap admin allowlist (comma-separated) | yes-ish — emails are personal data |
+| `NEXT_PUBLIC_GA_ID` | Google Analytics tag; GA absent when unset | no |
+| `NEXT_PUBLIC_SITE_URL` | Canonical origin for sitemap/OG/canonical | no |
+| `SITE_MAINTENANCE_MODE` | `"true"` gates all public routes (§9) | no, but server-only — never `NEXT_PUBLIC_*` |
+
+**Firebase Functions runtime** — `functions/.env`, uploaded by
+`firebase deploy` (dotenv support; the file is gitignored and the
+`deploy:functions` script refuses to deploy without it):
+
+| Variable | Purpose | Secret? |
+|----------|---------|---------|
+| `VERCEL_TOKEN` | Deploy-hook auth — embedded in the hook URL | **yes** |
+| `VERCEL_PROJECT_ID` | Deploy-hook target (`prj_…`) | sensitive — part of the hook URL |
+| `REBUILD_TRIGGER_TOKEN` | Bearer secret for `triggerRebuild` | **yes** |
+
+If the hook URL ever leaks, rotate `VERCEL_TOKEN` — the URL contains it.
+
+**Local development** — `.env.local` (gitignored): the same root
+variables. `npm run seed` additionally needs `FIREBASE_ADMIN_*`.
+
+**Harness-only — never set these in real deployments:**
+
+- `NEXT_PUBLIC_USE_FIREBASE_EMULATOR` — set only by the Playwright
+  `webServer` config; connects the client SDK to emulators.
+- `FIRESTORE_EMULATOR_HOST` / `FIREBASE_AUTH_EMULATOR_HOST` — set by
+  `firebase emulators:exec`; make the Admin SDK skip `cert()`.
+
+**CI only** — `.github/workflows/ci.yml` injects `ci-placeholder`
+`NEXT_PUBLIC_FIREBASE_*` values for the build; no real credentials are
+used anywhere in CI.
+
+## 4. Firebase project safety
+
+`.firebaserc` maps the `default` alias to **`saba-sfpca`** — the
+production project. Every `firebase deploy` in this repo targets it
+unless you override. Confirm the target *before* any production deploy:
+
+```bash
+firebase use            # must show saba-sfpca as the active project
+firebase projects:list  # confirm saba-sfpca exists and you have access
+```
+
+If the active project is wrong: `firebase use saba-sfpca` (or
+`firebase use --add` to set up the alias). Deploys authenticate via
+`firebase login` (browser) — no service-account key is needed for CLI
+deploys.
+
+Emulators can never hit production: `test:rules` and `test:e2e` pin
+`--project demo-sfpca`, and `demo-*` projects are emulator-only by
+design. No test command in this repo targets a real project.
+
+## 5. Pre-release checklist
+
+Before merging a PR that will go to production:
+
+1. Branch is based on current `main` (`git fetch origin && git merge-base HEAD origin/main` — or let GitHub's "branch is up to date" tell you).
+2. All four required checks are green: **Next.js app**, **Firebase
+   Functions**, **Firebase security rules**, **E2E smoke**.
+3. Review threads resolved; no unaddressed automated findings.
+4. **Deployment surface identified** — for each changed file, does it
+   reach production via Vercel (`src/`), `firebase deploy`
+   (`functions/`, `*.rules`, `firestore.indexes.json`), or both?
+   Functions/rules changes do *not* ship by merging — plan their deploy.
+5. Rules changes: emulator suite covers the new behavior; the diff was
+   reviewed as an authorization boundary, not just code.
+6. New/changed env vars are listed in `.env.example` /
+   `functions/.env.example` and already exist in Vercel / `functions/.env`
+   *before* the code that needs them deploys.
+7. Any manual console configuration is written down in the PR body.
+8. Maintenance mode considered: does this release need the public gate
+   up (§9)? Usually no — the flag exists for risky or half-migrated work.
+
+## 6. Normal release — Next.js / Vercel
+
+Merging to `main` triggers a production deployment through the Vercel
+Git integration. **[console]** Confirm the project is wired the
+expected way once: Vercel → Settings → Git → Production Branch = `main`.
+
+Sequence:
+
+1. Merge the PR. CI runs again on the `main` push (same four jobs).
+2. Vercel starts a build — watch Vercel → Deployments.
+3. On success the deployment is promoted to the production domain
+   automatically. No manual aliasing step exists in this setup.
+4. Run the post-release smoke checks (§10).
+5. If the build fails, the previous production deployment stays live —
+   fix forward on `main` or revert (§11).
+
+Nothing else deploys. If the change touched `functions/`, `*.rules`, or
+`firestore.indexes.json`, those deploys are your job now — see
+Functions (§7) and rules (§8).
+
+## 7. Firebase Functions
+
+All commands run from the **repo root** (`firebase.json` points at
+`functions/`). Deploys require the Firebase CLI (`firebase-tools` is a
+devDependency; `npx firebase …` works without a global install) and a
+login with deploy rights on `saba-sfpca`.
+
+**Preflight:**
+
+```bash
+firebase use                    # must show saba-sfpca
+cd functions && npm ci
+npm run lint                    # ESLint, google style
+npm test                        # functions unit tests
+cd ..
+```
+
+**Deploy everything (all three functions + the sweep schedule):**
+
+```bash
+firebase deploy --only functions
+```
+
+or `npm run deploy:functions`, which additionally fails fast if
+`functions/.env` is missing `VERCEL_TOKEN`/`VERCEL_PROJECT_ID`.
+
+**Deploy one function** (verified firebase-tools syntax — useful for a
+hotfix that touches a single function):
+
+```bash
+firebase deploy --only functions:triggerRebuild
+firebase deploy --only functions:onFirestoreChange
+firebase deploy --only functions:sweepOrphanedReceipts
+```
+
+**Verify:**
+
+```bash
+firebase functions:log                          # recent executions
+firebase functions:log --only onFirestoreChange # one function
+```
+
+Firebase console → Functions shows deployed revisions, trigger type,
+and error rate. For `sweepOrphanedReceipts`, also confirm the job exists
+in Google Cloud console → Cloud Scheduler **[console]** (created by the
+deploy; `every 24 hours`).
+
+`functions/.env` is uploaded as the functions' environment during
+deploy. If you deploy a function that needs `VERCEL_TOKEN`,
+`VERCEL_PROJECT_ID`, or `REBUILD_TRIGGER_TOKEN` without it, the deploy
+succeeds but the function logs `outcome:"skipped"` / refuses requests —
+check `functions/.env` first when a deployed function silently does
+nothing.
+
+## 8. Firestore & Storage rules
+
+Rules are an **authorization boundary**, not config — treat every rules
+deploy as security-sensitive.
+
+**Preflight (always):**
+
+```bash
+firebase use          # saba-sfpca
+npm run test:rules    # full emulator suite must pass first
+```
+
+**Deploy:**
+
+```bash
+firebase deploy --only firestore:rules   # Firestore rules only
+firebase deploy --only storage           # Storage rules only
+firebase deploy --only firestore:rules,storage   # both, one command
+```
+
+**Verify afterward:** Firebase console → Firestore → Rules and
+Storage → Rules show the new version and publish timestamp. A smoke
+check that exercises the changed path (e.g., load the public adoptions
+listing after a rules change) confirms the app still reads.
+
+`storage.rules` protects private registration receipts — a bad Storage
+rules deploy can expose `receipts/` or lock admins out of them. If in
+doubt, roll back per §13.
+
+**Indexes:** `firestore.indexes.json` is intentionally empty
+(`{"indexes": [], "fieldOverrides": []}`) — there are no managed
+indexes; current queries need none. If an index is ever added:
+`firebase deploy --only firestore` deploys rules *and* indexes, or
+`firebase deploy --only firestore:indexes` for indexes alone. Caution:
+deploying the file can delete indexes that exist in the console but not
+in the file — the CLI warns before removing them; do not answer yes
+without checking what the index serves.
+
+## 9. Maintenance mode
+
+`SITE_MAINTENANCE_MODE` (Vercel env, Production only — never
+`NEXT_PUBLIC_*`) redirects every public route to `/under-construction`
+while it is `"true"`. Verified behavior (`src/lib/maintenance.ts`,
+`src/proxy.ts`):
+
+- **Stays reachable:** `/login`, `/admin/*` (still behind the session
+  gate — maintenance mode never weakens admin auth), `/api/auth/*`,
+  `/under-construction`, `/robots.txt`, `/sitemap.xml`, share images,
+  `/_next/*` and other static assets.
+- **SEO while gated:** `robots.txt` disallows everything and the sitemap
+  is empty; both revert automatically when the flag lifts.
+- **Scope:** this gates HTTP requests to the Next.js app only. It does
+  **not** change Firestore/Storage rules — public form creates in
+  `animalRegistrations` are still accepted by the rules layer, and
+  Firebase Functions keep running normally.
+
+**Enable before risky work:**
+
+1. [console] Vercel → Settings → Environment Variables → set
+   `SITE_MAINTENANCE_MODE=true`, scope **Production**.
+2. Trigger a redeploy — env changes do not affect the running
+   deployment; only new builds see them (Vercel → Deployments →
+   redeploy latest, or push a trivial commit).
+
+**Disable:** remove the variable (or set `false`) and redeploy again.
+Verify `/` loads publicly afterward.
+
+## 10. Post-release smoke checks
+
+Non-mutating only — never submit test registrations or create throwaway
+data in production.
+
+1. `/` loads; hero, sections, animals render.
+2. `/animal-adoptions` lists animals; `/faq`, `/contact`,
+   `/animal-registration` (form renders — do not submit),
+   `/vet-services` all load.
+3. `/login` renders; an authorized maintainer signs in and `/admin`
+   loads with real data (registrations list, animal list).
+4. Maintenance mode is in its intended state (§9).
+5. Vercel → Logs (Runtime): no error burst since the deploy.
+6. Firebase console → Functions / Cloud Logging: no unexpected failures
+   on `onFirestoreChange` / `sweepOrphanedReceipts` since the deploy.
+7. If the release changed content plumbing: make one real admin content
+   edit and confirm a new Vercel deployment appears within a minute or
+   two (that is the end-to-end rebuild path working).
+
+## 11. Rollback
+
+### 11a. Vercel (app rollback — fastest recovery)
+
+[console] Vercel → Deployments → find the last known-good production
+deployment → use the dashboard's rollback/promote control ("Instant
+Rollback" / redeploy that deployment) to point the production domain at
+it. Verify the domain afterward.
+
+- Check env compatibility before rolling back far: if the bad release
+   added a required env var and you already configured it, the old
+   deployment simply ignores it — but if you *removed* a var the old
+   build needs, restore it first.
+- Rolling back the app does **not** roll back Functions, rules, or
+   data — the other surfaces stay as deployed.
+
+### 11b. Git (repository truth — always required after a bad merge)
+
+A Vercel rollback restores service but leaves `main` broken. To make
+the repo authoritative again, **revert — never force-push or rewrite
+`main`**:
+
+```bash
+git revert -m 1 <merge-commit-sha>   # for a merge commit
+# or: git revert <sha>               # for a regular commit
+```
+
+Push the revert, let CI go green, merge → Vercel deploys the corrected
+`main`. Alternatively GitHub's "Revert" button on the merged PR creates
+the revert as a new PR, which is the safer path when unsure.
+
+### 11c. Firebase Functions
+
+There is no `firebase rollback` command for functions, and functions do
+not follow Vercel rollbacks. The supported recovery is
+repository-driven:
+
+1. Identify the last known-good function code in Git history.
+2. `git revert` the offending change on a branch (or check out the
+   good version of `functions/` onto a hotfix branch).
+3. `cd functions && npm run lint && npm test`.
+4. `firebase deploy --only functions` (or `functions:<name>` if only
+   one function is affected).
+
+[console] Cloud Functions v2 run on Cloud Run, which keeps prior
+revisions — an emergency traffic rollback in the Google Cloud console
+(Cloud Run → service → Revisions) can restore the previous revision in
+seconds without a redeploy. Use it only as a stopgap; still do the
+Git revert + redeploy so the repo remains the source of truth.
+
+### 11d. Firestore / Storage rules
+
+Rules changes take effect immediately and can break or expose
+authorization — move deliberately:
+
+1. Get the known-good rules from Git: `git show <good-sha>:firestore.rules`.
+2. Diff against current — understand what the bad deploy changed.
+3. Put the known-good content back on a branch, run `npm run test:rules`
+   against it (the emulator suite validates the restored rules, not
+   just new ones).
+4. `firebase deploy --only firestore:rules` (and/or `storage`).
+5. Verify the affected access path immediately (public read, admin
+   write, receipt access).
+
+Do not blindly restore old rules if the app's data expectations moved
+(e.g., a required field was added between the good and bad versions) —
+restore the rules that match the *deployed app's* expectations, which
+may mean a forward fix instead.
+
+### 11e. Data recovery — honest status
+
+**Code rollback is not data rollback.** Nothing in this repository
+implements backups: no Firestore scheduled exports, no
+point-in-time-recovery config, no Storage backup. Firestore PITR and
+scheduled exports are Google Cloud console settings that cannot be
+verified from the repo — **[console] confirm whether PITR/exports are
+enabled on `saba-sfpca` before you ever need them** (tracked in
+GitHub issue #135). If neither is enabled, deleted/corrupted Firestore data is
+unrecoverable — a reason to treat rules deploys (§8) and admin deletes
+with care.
+
+## 12. Multi-system release ordering
+
+There is no universal order — reason about *compatibility windows*:
+at no point should a deployed component depend on behavior of a
+component that isn't deployed yet.
+
+- **Widening rules / new collection:** deploy rules first or together
+  with the app — permissive-to-what's-needed rules break nothing
+  existing.
+- **Tightening rules:** only deploy first if the currently-deployed app
+  already conforms (e.g., the app already writes the bound
+  `paymentReceipt` shape). If it doesn't, ship the conforming app first,
+  then tighten — otherwise you create a window where legitimate writes
+  are rejected.
+- **Functions:** decoupled from app version (they react to Firestore
+  events). Deploy them in either order; just don't leave a function
+  expecting a document shape the rules now reject.
+- **Env vars:** always configure them *before* the code that requires
+  them deploys — a missing-var deploy is a self-inflicted outage.
+- **Maintenance mode (§9):** for multi-step migrations where a partial
+  public view would be misleading, gate the site first, do the work,
+  verify, reopen.
+
+## 13. Incident decision path
+
+```
+Public site broken
+  → Vercel → Deployments (did the last build fail? is a bad deploy live?)
+  → Vercel → Logs: subsystem:"content" / error digests
+  → immediate restore: Vercel rollback (§11a)
+  → then: git revert + merge (§11b)
+
+Admin can't load
+  → distinguish deploy / auth / session / admin-lookup per README
+    troubleshooting; treat missing FIREBASE_ADMIN_* as config, not code
+
+Function broken / not running
+  → Cloud Logging (filter resource.type="cloud_function")
+  → which function? onFirestoreChange | triggerRebuild | sweepOrphanedReceipts
+  → fix or revert functions/ → firebase deploy --only functions[:name]
+
+Authorization regression (rules)
+  → security-sensitive — §11d: restore tested known-good rules NOW
+
+Content change didn't reach the site
+  → Cloud Logging: operation:"firestore-trigger" fired? (writes to
+    animalRegistrations/admins correctly trigger nothing)
+  → operation:"vercel-hook" outcome? skipped = missing env;
+    failed + httpStatus/errorCode = hook rejected or network
+  → Vercel → Deployments: did a deploy start and fail?
+  → if the pipeline is down but a rebuild is needed now: triggerRebuild
+
+Manual rebuild
+  → POST the triggerRebuild function URL (printed by `firebase deploy`
+    and listed in Firebase console → Functions; v2 URLs live on
+    *.run.app) with header  Authorization: Bearer <REBUILD_TRIGGER_TOKEN>
+    — placeholder only; get the real URL/token from the console and
+    never paste either into docs, tickets, or chats
+  → 403 = wrong/missing token · 503 = hook env unconfigured ·
+    500 = upstream failure, see vercel-hook error log
+
+Orphan-receipt sweep failing
+  → Cloud Logging subsystem:"receipt-cleanup": a failed execution or
+    outcome:"partial-failure" summary means orphans remain; the next
+    daily run retries them (idempotent). Investigate the errorCode on
+    per-object warn entries. Registration IDs/receipt names are
+    deliberately never logged — inspect Storage directly if needed.
+```
+
+## 14. Automatic content rebuilds (post-#94)
+
+A write to a **content collection** — `homepage`, `siteSettings`,
+`animals`, `faq`, `vetServices`, `animalAdoptions`, `animalRegistration`
+(`REBUILD_COLLECTIONS` in `functions/index.js`) — triggers
+`onFirestoreChange`, which POSTs the configured Vercel deploy hook, and
+Vercel starts a new deployment. Writes with no actual data change are
+skipped. Writes to `animalRegistrations` (private submissions) and
+`admins` trigger **nothing** — by design, and so their document paths
+never enter the logs.
+
+A successful Firestore write does **not** imply a successful rebuild —
+the write commits before the hook runs. If the hook fails
+(non-2xx/timeout/network) the function execution is marked failed and
+the error is in Cloud Logging; nothing user-visible breaks except that
+the site is stale. Rebuild manually (`triggerRebuild`, §13) or fix the
+hook config and edit again.

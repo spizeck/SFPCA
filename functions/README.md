@@ -5,7 +5,11 @@ This directory contains Firebase Cloud Functions that trigger Vercel rebuilds wh
 ## Functions
 
 ### 1. onFirestoreChange
-- **Trigger**: Any document write/update/delete in Firestore
+- **Trigger**: Document write/update/delete in a *content* collection
+  (`homepage`, `siteSettings`, `animals`, `faq`, `vetServices`,
+  `animalAdoptions`, `animalRegistration` — the `REBUILD_COLLECTIONS`
+  set in `index.js`). Writes to `animalRegistrations` and `admins`
+  trigger nothing.
 - **Action**: Triggers a rebuild on Vercel
 - **Smart Detection**: Skips rebuild if no actual data change occurred
 
@@ -79,7 +83,7 @@ npm run deploy:functions
 ## Usage
 
 ### Automatic Trigger
-The function will automatically trigger a Vercel rebuild whenever any document in Firestore is created, updated, or deleted (with actual data changes).
+The function will automatically trigger a Vercel rebuild whenever a document in a content collection is created, updated, or deleted (with actual data changes). Private submission (`animalRegistrations`) and `admins` writes are ignored — see `REBUILD_COLLECTIONS` in `index.js`.
 
 ### Manual Trigger
 You can manually trigger a rebuild by calling the triggerRebuild function
