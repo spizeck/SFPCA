@@ -38,3 +38,15 @@ Object.defineProperty(globalThis, "IntersectionObserver", {
   writable: true,
   value: IntersectionObserverStub,
 });
+
+// jsdom does not implement ResizeObserver; Radix primitives (Checkbox,
+// RadioGroup) measure themselves with it. A no-op stub is sufficient.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+Object.defineProperty(globalThis, "ResizeObserver", {
+  writable: true,
+  value: ResizeObserverStub,
+});

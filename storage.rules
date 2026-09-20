@@ -27,6 +27,15 @@ service firebase.storage {
           && (request.resource == null || isImageUpload());
     }
 
+    // Payment-receipt uploads from the public registration form: image or
+    // PDF, max 5 MB (mirrors isReceiptFile in src/lib/animal-registration.ts).
+    function isReceiptUpload() {
+      return request.resource.size < 5 * 1024 * 1024
+          && request.resource.size > 0
+          && (request.resource.contentType.matches("image/.*")
+              || request.resource.contentType == "application/pdf");
+    }
+
     // Images - public read, admin-only image uploads
     match /images/{allPaths=**} {
       allow read: if true;
@@ -43,6 +52,30 @@ service firebase.storage {
     match /team-photos/{allPaths=**} {
       allow read: if true;
       allow write: if canWrite();
+    }
+
+    // Payment receipts attached to animal registrations - private data.
+    // Receipts are stored at receipts/<registration document ID> — the
+    // bound path is what makes orphaned uploads self-identifying and
+    // lets cleanup be evaluated authoritatively in rules.
+    //
+    // The public form uploads unauthenticated, so create is open but
+    // constrained to small image/PDF files; only admins can read or
+    // replace receipts. The resource == null check keeps an anonymous
+    // uploader from overwriting an existing object even where a PUT to
+    // an occupied path is classified as a create.
+    //
+    // Delete: admins always; anonymous/non-admin only when the matching
+    // registration document does NOT exist — i.e. the object is an
+    // orphan whose submission write failed. The check runs at delete
+    // time, so a receipt whose registration actually landed (response
+    // lost in transit) can never be removed through this path.
+    match /receipts/{receiptId} {
+      allow create: if resource == null && isReceiptUpload();
+      allow read, update: if isAdmin();
+      allow delete: if isAdmin()
+          || !firestore.exists(
+              /databases/(default)/documents/animalRegistrations/$(receiptId));
     }
 
     // Default deny

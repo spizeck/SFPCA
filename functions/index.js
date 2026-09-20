@@ -124,3 +124,53 @@ exports.triggerRebuild = functions.https.onRequest(async (req, res) => {
     });
   }
 });
+
+/**
+ * Deletes payment receipts whose registration write never landed.
+ * The public form uploads a receipt to receipts/<registrationId>
+ * before creating the Firestore document; a failed write leaves an
+ * orphan. Clients delete their own orphan immediately (storage rules
+ * permit delete only while the document does not exist), but that
+ * cleanup call can itself fail. This sweeper is the fail-safe: any
+ * receipts/<id> object without a matching animalRegistrations/<id>
+ * document is unreferenced private data and is removed. Logs counts
+ * only — never object names or contents.
+ */
+// Orphans younger than this are left alone: a receipt whose submission
+// is still in flight (upload done, document write pending or retrying)
+// must never be swept out from under it. One hour is far beyond any
+// realistic submission window.
+const ORPHAN_GRACE_MS = 60 * 60 * 1000;
+
+exports.sweepOrphanedReceipts =
+    functions.scheduler.onSchedule("every 24 hours", async () => {
+      const bucket = admin.storage().bucket();
+      const [files] = await bucket.getFiles({prefix: "receipts/"});
+      const cutoff = Date.now() - ORPHAN_GRACE_MS;
+      let deleted = 0;
+      for (const file of files) {
+        const registrationId = file.name.slice("receipts/".length);
+        if (!registrationId || registrationId.includes("/")) {
+          continue;
+        }
+        // Skip objects too new to safely classify — and any whose age
+        // cannot be determined.
+        const created = Date.parse(file.metadata.timeCreated || "");
+        if (!created || created > cutoff) {
+          continue;
+        }
+        const doc = await admin
+            .firestore()
+            .collection("animalRegistrations")
+            .doc(registrationId)
+            .get();
+        if (!doc.exists) {
+          await file.delete();
+          deleted++;
+        }
+      }
+      console.log(
+          "sweepOrphanedReceipts: scanned " + files.length +
+          " receipt object(s), deleted " + deleted + " orphan(s)",
+      );
+    });
