@@ -94,8 +94,11 @@ admin status on every request.
   doc that nothing currently reads (the public form hardcodes its copy
   and fees). Singular vs plural matters — do not confuse them
 - `admins` — admin-only read/write
-- Storage: `images/`, `team-photos/` public read; admin-only image
-  uploads (<5 MB, `image/*`). `animals/` has **no** rule — animal photos
+- Storage: `team-photos/` public read; admin-only image uploads
+  (<5 MB, `image/*`). `images/` has **no** rule — no active workflow
+  ever owned the prefix and the production namespace was verified
+  empty, so it is default-deny for everyone like `animals/` below.
+  `animals/` has **no** rule — animal photos
   are plain URLs on the Firestore doc and nothing uploads there, so the
   prefix is default-deny for everyone; a future animal-photo upload
   feature must add lifecycle-aware Storage rules deliberately (never
