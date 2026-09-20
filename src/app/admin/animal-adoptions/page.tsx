@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { logError } from "@/lib/logger";
 
 interface SuccessStory {
   name: string;
@@ -78,7 +79,7 @@ export default function AnimalAdoptionsAdminPage() {
         setData(docSnap.data() as AnimalAdoptionsData);
       }
     } catch (error) {
-      console.error("Error loading animal adoptions data:", error);
+      logError("admin", "adoptions-content-load", error);
       toast({
         title: "Error",
         description: "Failed to load data",
@@ -100,7 +101,7 @@ export default function AnimalAdoptionsAdminPage() {
         description: "Animal adoptions page updated successfully",
       });
     } catch (error) {
-      console.error("Error saving data:", error);
+      logError("admin", "adoptions-content-save", error);
       toast({
         title: "Error",
         description: "Failed to save data",

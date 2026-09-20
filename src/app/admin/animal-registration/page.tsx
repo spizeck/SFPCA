@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { logError } from "@/lib/logger";
 
 interface AnimalRegistrationData {
   heroTitle: string;
@@ -64,7 +65,7 @@ export default function AnimalRegistrationAdminPage() {
         setData(docSnap.data() as AnimalRegistrationData);
       }
     } catch (error) {
-      console.error("Error loading animal registration data:", error);
+      logError("admin", "registration-content-load", error);
       toast({
         title: "Error",
         description: "Failed to load data",
@@ -86,7 +87,7 @@ export default function AnimalRegistrationAdminPage() {
         description: "Animal registration page updated successfully",
       });
     } catch (error) {
-      console.error("Error saving data:", error);
+      logError("admin", "registration-content-save", error);
       toast({
         title: "Error",
         description: "Failed to save data",

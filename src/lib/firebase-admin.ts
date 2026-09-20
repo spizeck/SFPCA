@@ -4,6 +4,20 @@ import { getFirestore } from "firebase-admin/firestore";
 
 let adminApp: App;
 
+// Required production configuration (names only — values are secrets
+// and must never appear in logs or errors).
+const REQUIRED_ADMIN_ENV = [
+  "FIREBASE_ADMIN_PROJECT_ID",
+  "FIREBASE_ADMIN_CLIENT_EMAIL",
+  "FIREBASE_ADMIN_PRIVATE_KEY",
+] as const;
+
+export function missingAdminEnvVars(
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  return REQUIRED_ADMIN_ENV.filter((name) => !env[name]);
+}
+
 function getAdminApp() {
   if (getApps().length === 0) {
     // Emulator hosts signal a local/E2E run: no credentials are needed or
@@ -19,6 +33,15 @@ function getAdminApp() {
           process.env.FIREBASE_ADMIN_PROJECT_ID,
       });
     } else {
+      // A missing credential would otherwise surface as a cryptic cert()
+      // or first-request failure far from its cause. Fail fast naming
+      // which variables are absent — never their values.
+      const missing = missingAdminEnvVars();
+      if (missing.length > 0) {
+        throw new Error(
+          `Firebase Admin is not configured: missing env var(s) ${missing.join(", ")}`,
+        );
+      }
       adminApp = initializeApp({
         credential: cert({
           projectId: process.env.FIREBASE_ADMIN_PROJECT_ID,

@@ -2,6 +2,7 @@ import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "./firebase";
 import { Animal } from "./types";
 import { isPublicAnimalStatus, PUBLIC_ANIMAL_STATUS } from "./animal-lifecycle";
+import { logError } from "./logger";
 
 // Public adoptions listing. The Firestore query enforces the same
 // visibility boundary as the security rules, so a public visitor only
@@ -29,7 +30,7 @@ export async function getAvailableAnimals(): Promise<Animal[]> {
       })
       .filter((animal) => isPublicAnimalStatus(animal.status));
   } catch (error) {
-    console.error("Error fetching animals:", error);
+    logError("animals", "fetch", error);
     return [];
   }
 }

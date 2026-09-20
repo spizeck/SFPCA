@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronUp, Phone, Mail, MapPin } from "lucide-react";
 import { fadeInUpVariants, shouldReduceMotion } from "@/lib/animations";
 import Link from "next/link";
+import { logError } from "@/lib/logger";
 
 interface FAQItem {
   id: string;
@@ -46,7 +47,7 @@ export function FAQ() {
       
       setFaqs(faqsData);
     } catch (error) {
-      console.error("Error loading FAQs:", error);
+      logError("content", "faq-load", error);
     } finally {
       setLoading(false);
     }

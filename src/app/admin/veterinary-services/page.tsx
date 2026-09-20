@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { logError } from "@/lib/logger";
 
 interface VetService {
   title: string;
@@ -58,7 +59,7 @@ export default function VetServicesAdminPage() {
         setData(docSnap.data() as VetServicesData);
       }
     } catch (error) {
-      console.error("Error loading vet services data:", error);
+      logError("admin", "vet-content-load", error);
       toast({
         title: "Error",
         description: "Failed to load data",
@@ -80,7 +81,7 @@ export default function VetServicesAdminPage() {
         description: "Veterinary services page updated successfully",
       });
     } catch (error) {
-      console.error("Error saving data:", error);
+      logError("admin", "vet-content-save", error);
       toast({
         title: "Error",
         description: "Failed to save data",

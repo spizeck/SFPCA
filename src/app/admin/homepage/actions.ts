@@ -3,6 +3,7 @@
 import { adminDb } from "@/lib/firebase-admin";
 import { requireAdmin } from "@/lib/auth";
 import { Homepage } from "@/lib/types";
+import { logError } from "@/lib/logger";
 
 export async function saveHomepageData(data: Homepage) {
   const { authorized } = await requireAdmin();
@@ -15,7 +16,7 @@ export async function saveHomepageData(data: Homepage) {
     await adminDb().collection("homepage").doc("main").set(data);
     return { success: true };
   } catch (error) {
-    console.error("Error saving homepage data:", error);
+    logError("admin", "homepage-save", error);
     throw new Error("Failed to save homepage data");
   }
 }
@@ -39,7 +40,7 @@ export async function loadHomepageData() {
     
     return null;
   } catch (error) {
-    console.error("Error loading homepage data:", error);
+    logError("admin", "homepage-load", error);
     throw new Error("Failed to load homepage data");
   }
 }

@@ -204,13 +204,36 @@ is for erroneous/spam records only.
   `firebase-admin.ts` server), auth helpers (`auth.ts`), maintenance
   predicates (`maintenance.ts`), SEO helpers (`seo.ts`), the animal
   lifecycle definition (`animal-lifecycle.ts`), the registration
-  submission lifecycle/schema (`animal-registration.ts`), public animal
-  queries (`animals.ts`), and shared types (`types.ts`). There are no
-  `src/services` or `src/types` directories
+  submission lifecycle/schema (`animal-registration.ts`), the logging
+  convention (`logger.ts`), public animal queries (`animals.ts`), and
+  shared types (`types.ts`). There are no `src/services` or `src/types`
+  directories
 - Canonical/OG/sitemap/robots URLs come from `src/lib/seo.ts`
   (`NEXT_PUBLIC_SITE_URL`, production-domain fallback). Never use
   `VERCEL_URL` for canonical URLs — previews must not become canonical
 - shadcn/ui + Tailwind + Framer Motion (respect `shouldReduceMotion`)
+
+## Observability (canonical)
+
+- Log through `src/lib/logger.ts` (`logError`/`logWarn`/`logInfo`) with
+  a `subsystem` + `operation`, never raw `console.error("x:", err)`.
+  Errors are normalized to `errorName`/`errorCode`/`errorMessage`
+  (truncated); stacks and attached objects are dropped in production.
+- Functions use `firebase-functions/logger` with the same field shape.
+- Never log: owner PII, registration fields, receipt paths/IDs, doc
+  contents, tokens, cookies, `Authorization`, the Vercel hook URL,
+  `REBUILD_TRIGGER_TOKEN`, env values, service-account keys.
+- Expected rejections (denied login, expired cookie, invalid form,
+  unauthorized probes) are warn-level at most — they are not incidents.
+- Error boundaries: `src/app/error.tsx` + `src/app/global-error.tsx`
+  share `src/components/error-fallback.tsx`; the Next `error.digest`
+  is the correlation handle into server logs. Do not add per-route
+  copies without a distinct need.
+- `onFirestoreChange` rebuilds only on `REBUILD_COLLECTIONS` writes;
+  `animalRegistrations`/`admins` writes must not trigger deploys.
+- Native-only baseline (Vercel logs + Cloud Logging + boundaries) —
+  no browser telemetry. See README's Observability & troubleshooting
+  section for the runbook and the console-side setup checklist.
 
 ## Testing (commands in `package.json`)
 

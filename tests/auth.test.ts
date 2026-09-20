@@ -3,13 +3,19 @@
 // decisions under test are real.
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { mockAdminGet, mockDocId, mockVerifySessionCookie, mockCookieGet } =
-  vi.hoisted(() => ({
-    mockAdminGet: vi.fn(),
-    mockDocId: vi.fn(),
-    mockVerifySessionCookie: vi.fn(),
-    mockCookieGet: vi.fn(),
-  }));
+const {
+  mockAdminGet,
+  mockDocId,
+  mockVerifySessionCookie,
+  mockCookieGet,
+  mockLogError,
+} = vi.hoisted(() => ({
+  mockAdminGet: vi.fn(),
+  mockDocId: vi.fn(),
+  mockVerifySessionCookie: vi.fn(),
+  mockCookieGet: vi.fn(),
+  mockLogError: vi.fn(),
+}));
 
 vi.mock("@/lib/firebase-admin", () => ({
   adminDb: () => ({
@@ -29,7 +35,18 @@ vi.mock("next/headers", () => ({
   cookies: async () => ({ get: mockCookieGet }),
 }));
 
-import { getCurrentUser, isAdmin, requireAdmin } from "@/lib/auth";
+vi.mock("@/lib/logger", () => ({
+  logError: mockLogError,
+  logWarn: vi.fn(),
+  logInfo: vi.fn(),
+}));
+
+import {
+  getCurrentUser,
+  isAdmin,
+  isExpectedAuthError,
+  requireAdmin,
+} from "@/lib/auth";
 
 const adminDoc = (exists: boolean, data?: Record<string, unknown>) => ({
   exists,
@@ -45,6 +62,7 @@ beforeEach(() => {
   mockDocId.mockReset();
   mockVerifySessionCookie.mockReset();
   mockCookieGet.mockReset();
+  mockLogError.mockReset();
 });
 
 describe("isAdmin", () => {
@@ -85,9 +103,16 @@ describe("isAdmin", () => {
     });
   });
 
-  test("fails closed when Firestore lookup errors", async () => {
+  test("fails closed — and logs — when Firestore lookup errors", async () => {
     mockAdminGet.mockRejectedValue(new Error("firestore unavailable"));
     expect(await isAdmin("staff@example.com")).toEqual({ isAdmin: false });
+    // The failure is denied correctly AND diagnosable: a Firestore
+    // outage here would otherwise silently lock out every admin.
+    expect(mockLogError).toHaveBeenCalledWith(
+      "auth",
+      "admin-lookup",
+      expect.any(Error),
+    );
   });
 
   test("matches the env allowlist case-insensitively", async () => {
@@ -138,6 +163,57 @@ describe("getCurrentUser", () => {
     mockCookieGet.mockReturnValue({ value: "forged-cookie" });
     mockVerifySessionCookie.mockRejectedValue(new Error("invalid"));
     expect(await getCurrentUser()).toBeNull();
+  });
+
+  test("expected cookie rejections fail silently — no error noise", async () => {
+    mockCookieGet.mockReturnValue({ value: "expired-cookie" });
+    mockVerifySessionCookie.mockRejectedValue(
+      Object.assign(new Error("expired"), {
+        code: "auth/session-cookie-expired",
+      }),
+    );
+    expect(await getCurrentUser()).toBeNull();
+    expect(mockLogError).not.toHaveBeenCalled();
+  });
+
+  test("unexpected verification failures are logged — Firebase outages must be diagnosable", async () => {
+    mockCookieGet.mockReturnValue({ value: "any-cookie" });
+    mockVerifySessionCookie.mockRejectedValue(
+      Object.assign(new Error("deadline exceeded"), { code: "4" }),
+    );
+    expect(await getCurrentUser()).toBeNull();
+    expect(mockLogError).toHaveBeenCalledWith(
+      "session",
+      "verify-session-cookie",
+      expect.any(Error),
+    );
+  });
+});
+
+describe("isExpectedAuthError", () => {
+  test("recognizes routine client-credential rejections", () => {
+    for (const code of [
+      "auth/id-token-expired",
+      "auth/id-token-revoked",
+      "auth/invalid-id-token",
+      "auth/session-cookie-expired",
+      "auth/session-cookie-revoked",
+      "auth/invalid-session-cookie",
+      "auth/argument-error",
+    ]) {
+      expect(isExpectedAuthError(Object.assign(new Error("x"), { code })))
+        .toBe(true);
+    }
+  });
+
+  test("does not classify infrastructure failures as expected", () => {
+    expect(
+      isExpectedAuthError(
+        Object.assign(new Error("x"), { code: "auth/internal-error" }),
+      ),
+    ).toBe(false);
+    expect(isExpectedAuthError(new Error("network down"))).toBe(false);
+    expect(isExpectedAuthError("weird")).toBe(false);
   });
 });
 

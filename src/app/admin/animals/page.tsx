@@ -22,6 +22,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Pencil, Trash2 } from "lucide-react";
+import { logError } from "@/lib/logger";
 
 export default function AnimalsManager() {
   const [animals, setAnimals] = useState<Animal[]>([]);
@@ -60,7 +61,7 @@ export default function AnimalsManager() {
       });
       setAnimals(animalsData);
     } catch (error) {
-      console.error("Error loading animals:", error);
+      logError("animals", "admin-load", error);
       toast({
         title: "Error",
         description: "Failed to load animals",
@@ -104,7 +105,7 @@ export default function AnimalsManager() {
       resetForm();
       loadAnimals();
     } catch (error) {
-      console.error("Error saving animal:", error);
+      logError("animals", "admin-save", error);
       toast({
         title: "Error",
         description: "Failed to save animal",
@@ -140,7 +141,7 @@ export default function AnimalsManager() {
       toast({ title: "Success", description: "Animal deleted successfully" });
       loadAnimals();
     } catch (error) {
-      console.error("Error deleting animal:", error);
+      logError("animals", "admin-delete", error);
       toast({
         title: "Error",
         description: "Failed to delete animal",

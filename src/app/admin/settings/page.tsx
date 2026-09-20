@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { logError } from "@/lib/logger";
 
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
@@ -46,7 +47,7 @@ export default function SettingsPage() {
         setData(docSnap.data() as SiteSettings);
       }
     } catch (error) {
-      console.error("Error loading settings:", error);
+      logError("admin", "settings-load", error);
       toast({
         title: "Error",
         description: "Failed to load settings",
@@ -68,7 +69,7 @@ export default function SettingsPage() {
         description: "Settings saved successfully",
       });
     } catch (error) {
-      console.error("Error saving settings:", error);
+      logError("admin", "settings-save", error);
       toast({
         title: "Error",
         description: "Failed to save settings",

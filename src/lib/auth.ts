@@ -1,5 +1,28 @@
 import { adminAuth, adminDb } from "./firebase-admin";
+import { logError } from "./logger";
 import { cookies } from "next/headers";
+
+// Firebase Auth error codes that represent an expected rejection —
+// expired/revoked/invalid credentials, or a malformed client token —
+// rather than an infrastructure failure. These are normal outcomes
+// (logout, expiry, attacker-crafted input) and must not produce
+// error-level operational noise. Everything else (network, quota,
+// internal) indicates a real Firebase/infra problem worth alerting on.
+const EXPECTED_AUTH_ERROR_CODES = new Set([
+  "auth/id-token-expired",
+  "auth/id-token-revoked",
+  "auth/invalid-id-token",
+  "auth/session-cookie-expired",
+  "auth/session-cookie-revoked",
+  "auth/invalid-session-cookie",
+  "auth/argument-error",
+  "auth/user-disabled",
+]);
+
+export function isExpectedAuthError(error: unknown): boolean {
+  const code = (error as { code?: unknown })?.code;
+  return typeof code === "string" && EXPECTED_AUTH_ERROR_CODES.has(code);
+}
 
 export async function getCurrentUser() {
   const cookieStore = await cookies();
@@ -13,6 +36,12 @@ export async function getCurrentUser() {
     const decodedClaims = await adminAuth().verifySessionCookie(sessionCookie, true);
     return decodedClaims;
   } catch (error) {
+    // Expired/revoked/malformed cookies are routine — silently logged
+    // out. Anything else (Firebase unreachable, internal error) means
+    // admins are being locked out by an infra failure: log it.
+    if (!isExpectedAuthError(error)) {
+      logError("session", "verify-session-cookie", error);
+    }
     return null;
   }
 }
@@ -44,7 +73,9 @@ export async function isAdmin(email: string): Promise<{ isAdmin: boolean; role?:
       return { isAdmin: true, role: data?.role || "editor" };
     }
   } catch (error) {
-    console.error("Error checking admin status:", error);
+    // Fail closed to non-admin, but a Firestore outage here silently
+    // locks out every admin — that must be diagnosable.
+    logError("auth", "admin-lookup", error);
   }
 
   return { isAdmin: false };

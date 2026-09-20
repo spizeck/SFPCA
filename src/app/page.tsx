@@ -13,6 +13,7 @@ import { ContactSection } from "@/components/homepage/contact-section";
 import { Footer } from "@/components/homepage/footer";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { HashClear } from "@/components/hash-clear";
+import { logError } from "@/lib/logger";
 
 // No title: the homepage keeps the root default full organization name.
 export const metadata: Metadata = pageMetadata({
@@ -30,7 +31,7 @@ async function getHomepageData(): Promise<Homepage | null> {
     }
     return null;
   } catch (error) {
-    console.error("Error fetching homepage data:", error);
+    logError("content", "fetch-homepage", error);
     return null;
   }
 }
@@ -45,7 +46,7 @@ async function getSiteSettings(): Promise<SiteSettings | null> {
     }
     return null;
   } catch (error) {
-    console.error("Error fetching site settings:", error);
+    logError("content", "fetch-site-settings", error);
     return null;
   }
 }

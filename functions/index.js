@@ -1,16 +1,31 @@
 const functions = require("firebase-functions/v2");
+const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
-const axios = require("axios");
 const crypto = require("crypto");
+const {triggerVercelRebuild} = require("./lib/rebuild");
+const {sweepOrphanedReceipts} = require("./lib/sweep");
 
 admin.initializeApp();
 
 // Get environment variables
 const {
-  VERCEL_TOKEN,
-  VERCEL_PROJECT_ID,
   REBUILD_TRIGGER_TOKEN,
 } = process.env;
+
+// Firestore collections whose writes can change statically generated
+// public pages — the only writes that should trigger a Vercel rebuild.
+// Notably absent: animalRegistrations and admins. A public
+// registration submission must not burn a deploy, and filtering here
+// also keeps private document paths out of the trigger logs entirely.
+const REBUILD_COLLECTIONS = new Set([
+  "homepage",
+  "siteSettings",
+  "animals",
+  "faq",
+  "vetServices",
+  "animalAdoptions",
+  "animalRegistration",
+]);
 
 /**
  * The manual rebuild endpoint performs a privileged operation, so it
@@ -34,43 +49,25 @@ function isRebuildAuthorized(req) {
 }
 
 /**
- * Triggers a Vercel rebuild via the configured deploy hook.
- */
-async function triggerVercelRebuild() {
-  try {
-    if (!VERCEL_TOKEN || !VERCEL_PROJECT_ID) {
-      console.log("Vercel credentials not configured, skipping rebuild");
-      return;
-    }
-
-    console.log("Triggering Vercel rebuild...");
-
-    const response = await axios.post(
-        `https://api.vercel.com/v1/integrations/deploy/prj_${VERCEL_PROJECT_ID}/${VERCEL_TOKEN}`,
-        {},
-        {
-          headers: {
-            "Content-Type": "application/json",
-          },
-        },
-    );
-
-    console.log("Vercel rebuild triggered successfully:", response.data);
-  } catch (error) {
-    console.error(
-        "Error triggering Vercel rebuild:",
-        error.response?.data || error.message,
-    );
-  }
-}
-
-/**
- * Triggers a Vercel rebuild when a Firestore document is written.
+ * Triggers a Vercel rebuild when a content-bearing Firestore document
+ * is written.
  * @param {object} event The Firestore document write event.
  */
 async function handleFirestoreChange(event) {
-  // Only proceed if this is not a read operation and there's actual data change
+  // Only proceed if this is not a read operation and there's actual data
+  // change
   if (!event.data.before.exists && !event.data.after.exists) {
+    return;
+  }
+
+  const docPath = event.data.before.exists ?
+      event.data.before.ref.path : event.data.after.ref.path;
+  const collectionId = docPath.split("/")[0];
+
+  // Non-content writes (registrations, admins, ...) never change the
+  // public site. Skipping them before any logging also means private
+  // document IDs never appear in these logs.
+  if (!REBUILD_COLLECTIONS.has(collectionId)) {
     return;
   }
 
@@ -80,15 +77,22 @@ async function handleFirestoreChange(event) {
     const afterData = event.data.after.data();
 
     if (JSON.stringify(beforeData) === JSON.stringify(afterData)) {
-      console.log("No actual data change detected, skipping rebuild");
       return;
     }
   }
 
-  console.log(`Firestore document changed: ${event.resource.name}`);
+  const eventId = crypto.randomUUID();
+  logger.info({
+    subsystem: "rebuild",
+    operation: "firestore-trigger",
+    outcome: "content-change",
+    collection: collectionId,
+    eventId,
+  });
 
-  // Trigger Vercel rebuild
-  await triggerVercelRebuild();
+  // Propagates on failure: a failed rebuild request must mark this
+  // execution failed, not disappear as a silent skip.
+  await triggerVercelRebuild({log: logger, eventId});
 }
 
 // Firestore trigger for any document change
@@ -99,6 +103,13 @@ exports.onFirestoreChange =
 // must not be enough to trigger rebuilds.
 exports.triggerRebuild = functions.https.onRequest(async (req, res) => {
   if (!isRebuildAuthorized(req)) {
+    // Warn, not error: an unauthorized probe is not an operational
+    // incident, and this must not become an error-spam vector.
+    logger.warn({
+      subsystem: "rebuild",
+      operation: "manual-trigger",
+      outcome: "denied",
+    });
     res.status(403).json({
       success: false,
       error: "Forbidden",
@@ -107,20 +118,25 @@ exports.triggerRebuild = functions.https.onRequest(async (req, res) => {
   }
 
   try {
-    console.log("Manual rebuild triggered via HTTP");
-
-    // Trigger Vercel rebuild
-    await triggerVercelRebuild();
-
+    const triggered = await triggerVercelRebuild({log: logger});
+    if (!triggered) {
+      res.status(503).json({
+        success: false,
+        error: "Rebuild is not configured",
+      });
+      return;
+    }
     res.json({
       success: true,
       message: "Vercel rebuild triggered successfully",
     });
   } catch (error) {
-    console.error("Error in manual rebuild:", error);
+    // triggerVercelRebuild already logged the safe fields. Return a
+    // generic message — the caller is authenticated but internal error
+    // detail (upstream payloads, URLs) stays in the logs.
     res.status(500).json({
       success: false,
-      error: error.message,
+      error: "Rebuild request failed",
     });
   }
 });
@@ -136,41 +152,20 @@ exports.triggerRebuild = functions.https.onRequest(async (req, res) => {
  * document is unreferenced private data and is removed. Logs counts
  * only — never object names or contents.
  */
-// Orphans younger than this are left alone: a receipt whose submission
-// is still in flight (upload done, document write pending or retrying)
-// must never be swept out from under it. One hour is far beyond any
-// realistic submission window.
-const ORPHAN_GRACE_MS = 60 * 60 * 1000;
-
 exports.sweepOrphanedReceipts =
     functions.scheduler.onSchedule("every 24 hours", async () => {
-      const bucket = admin.storage().bucket();
-      const [files] = await bucket.getFiles({prefix: "receipts/"});
-      const cutoff = Date.now() - ORPHAN_GRACE_MS;
-      let deleted = 0;
-      for (const file of files) {
-        const registrationId = file.name.slice("receipts/".length);
-        if (!registrationId || registrationId.includes("/")) {
-          continue;
-        }
-        // Skip objects too new to safely classify — and any whose age
-        // cannot be determined.
-        const created = Date.parse(file.metadata.timeCreated || "");
-        if (!created || created > cutoff) {
-          continue;
-        }
-        const doc = await admin
-            .firestore()
-            .collection("animalRegistrations")
-            .doc(registrationId)
-            .get();
-        if (!doc.exists) {
-          await file.delete();
-          deleted++;
-        }
+      const result = await sweepOrphanedReceipts({
+        bucket: admin.storage().bucket(),
+        db: admin.firestore(),
+        log: logger,
+        runId: crypto.randomUUID(),
+      });
+      if (result.failed > 0) {
+        // Mark the execution failed so error-rate alerting fires; the
+        // sweep is idempotent and the next run retries the remainder.
+        throw new Error(
+            "sweepOrphanedReceipts: " + result.failed +
+            " receipt object(s) failed during sweep",
+        );
       }
-      console.log(
-          "sweepOrphanedReceipts: scanned " + files.length +
-          " receipt object(s), deleted " + deleted + " orphan(s)",
-      );
     });
