@@ -16,7 +16,7 @@ service firebase.storage {
           && firestore.exists(/databases/(default)/documents/admins/$(request.auth.token.email));
     }
 
-    // Uploads are image assets only (site/team/animal photos), max 5 MB.
+    // Uploads are image assets only (site/team photos), max 5 MB.
     // request.resource is null on delete, so deletes only need isAdmin().
     function isImageUpload() {
       return request.resource.size < 5 * 1024 * 1024
@@ -42,11 +42,12 @@ service firebase.storage {
       allow write: if canWrite();
     }
 
-    // Animal photos - public read, admin-only image uploads
-    match /animals/{animalId}/{photoId} {
-      allow read: if true;
-      allow write: if canWrite();
-    }
+    // Animal photos are plain URLs stored on the Firestore document —
+    // nothing uploads to an animals/ Storage prefix, so there is
+    // deliberately no animals/ rule: it falls through to default-deny.
+    // A future upload feature must add lifecycle-aware authorization
+    // (a photo for a pending/adopted/malformed animal must not become
+    // publicly readable just because it landed under animals/).
 
     // Team photos - public read, admin-only image uploads
     match /team-photos/{allPaths=**} {

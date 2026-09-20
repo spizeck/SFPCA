@@ -94,9 +94,13 @@ admin status on every request.
   doc that nothing currently reads (the public form hardcodes its copy
   and fees). Singular vs plural matters — do not confuse them
 - `admins` — admin-only read/write
-- Storage: `images/`, `animals/`, `team-photos/` public read; admin-only
-  image uploads (<5 MB, `image/*`). `receipts/` is private submission
-  data — public create-only of small image/PDF files, admin
+- Storage: `images/`, `team-photos/` public read; admin-only image
+  uploads (<5 MB, `image/*`). `animals/` has **no** rule — animal photos
+  are plain URLs on the Firestore doc and nothing uploads there, so the
+  prefix is default-deny for everyone; a future animal-photo upload
+  feature must add lifecycle-aware Storage rules deliberately (never
+  public read of non-public animals' media). `receipts/` is private
+  submission data — public create-only of small image/PDF files, admin
   read/update/delete, plus one narrow exception: an anonymous delete is
   permitted only while no `animalRegistrations/<id>` doc exists for the
   object at `receipts/<id>` (the orphan-cleanup path — see below).
