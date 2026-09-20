@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Upload, X, Plus, Loader2 } from "lucide-react";
+import { logError } from "@/lib/logger";
 
 interface TeamMember {
   id?: string;
@@ -72,7 +73,7 @@ export function TeamManager({ team, onChange }: TeamManagerProps) {
       // Update member with the storage URL
       updateMember(index, { photo: downloadUrl });
     } catch (error) {
-      console.error("Error uploading photo:", error);
+      logError("admin", "team-photo-upload", error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       alert(`Upload failed: ${errorMessage}. Falling back to local storage.`);
       

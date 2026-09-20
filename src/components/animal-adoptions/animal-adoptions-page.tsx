@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import { Animal } from "@/lib/types";
 import { getAvailableAnimals } from "@/lib/animals";
+import { logError } from "@/lib/logger";
 
 export function AnimalAdoptions() {
   const [animals, setAnimals] = useState<Animal[]>([]);
@@ -25,7 +26,7 @@ export function AnimalAdoptions() {
       const animalList = await getAvailableAnimals();
       setAnimals(animalList);
     } catch (error) {
-      console.error("Error loading animals:", error);
+      logError("animals", "list", error);
     } finally {
       setLoading(false);
     }

@@ -16,6 +16,7 @@ import { AnimalRegistrationData } from "@/lib/types";
 import { collection, doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { ref, uploadBytes, deleteObject } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
+import { logError } from "@/lib/logger";
 import {
   calculateRegistrationFee,
   isReceiptFile,
@@ -137,7 +138,7 @@ export function AnimalRegistration() {
           });
           receiptPath = path;
         } catch (uploadError) {
-          console.error("Receipt upload failed:", uploadError);
+          logError("registration", "receipt-upload", uploadError);
         }
       }
 
@@ -184,7 +185,7 @@ export function AnimalRegistration() {
               // is not permanent: the scheduled sweepOrphanedReceipts
               // function deletes unreferenced receipts. Report the
               // write failure honestly either way.
-              console.error("Receipt cleanup failed:", cleanupError);
+              logError("registration", "receipt-cleanup", cleanupError);
             }
           }
         }
@@ -218,7 +219,7 @@ export function AnimalRegistration() {
       });
       setReceiptError(null);
     } catch (error) {
-      console.error("Error submitting registration:", error);
+      logError("registration", "submit", error);
       toast({
         title: "Error",
         description: "Failed to submit registration. Please try again.",

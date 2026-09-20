@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Pencil, Trash2, GripVertical } from "lucide-react";
+import { logError } from "@/lib/logger";
 
 interface FAQ {
   id: string;
@@ -80,7 +81,7 @@ export default function FAQManager() {
       
       setFaqs(faqsData);
     } catch (error) {
-      console.error("Error loading FAQs:", error);
+      logError("admin", "faq-load", error);
       toast({
         title: "Error",
         description: `Failed to load FAQs: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -139,7 +140,7 @@ export default function FAQManager() {
         loadFaqs();
       }, 500);
     } catch (error) {
-      console.error("Error saving FAQ:", error);
+      logError("admin", "faq-save", error);
       toast({
         title: "Error",
         description: `Failed to save FAQ: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -167,7 +168,7 @@ export default function FAQManager() {
       toast({ title: "Success", description: "FAQ deleted successfully" });
       loadFaqs();
     } catch (error) {
-      console.error("Error deleting FAQ:", error);
+      logError("admin", "faq-delete", error);
       toast({
         title: "Error",
         description: "Failed to delete FAQ",

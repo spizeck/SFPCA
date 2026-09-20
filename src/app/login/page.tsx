@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { signInWithPopup, GoogleAuthProvider, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import { logError, logWarn } from "@/lib/logger";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,6 +20,21 @@ export default function LoginPage() {
   const [isSignIn, setIsSignIn] = useState(true);
   const router = useRouter();
   const { toast } = useToast();
+
+  // Expected auth outcomes (wrong password, popup closed, duplicate
+  // email, ...) are user-facing and handled by toasts — they are not
+  // operational incidents. Only non-auth failures (network, internal
+  // SDK errors) warrant error-level logging.
+  const logAuthFailure = (operation: string, error: unknown) => {
+    const code = (error as { code?: unknown })?.code;
+    if (typeof code === "string" && code.startsWith("auth/")) {
+      logWarn("auth", operation, "authentication rejected", {
+        errorCode: code,
+      });
+    } else {
+      logError("auth", operation, error);
+    }
+  };
 
   // Prevent hydration mismatch
   useEffect(() => {
@@ -70,7 +86,7 @@ export default function LoginPage() {
         throw new Error("Failed to create session");
       }
     } catch (error) {
-      console.error("Login error:", error);
+      logAuthFailure("google-sign-in", error);
       toast({
         title: "Login Failed",
         description: "An error occurred during login. Please try again.",
@@ -115,7 +131,7 @@ export default function LoginPage() {
         throw new Error("Failed to create session");
       }
     } catch (error: any) {
-      console.error("Login error:", error);
+      logAuthFailure("email-sign-in", error);
       toast({
         title: "Login Failed",
         description: error.code === 'auth/user-not-found' 
@@ -149,7 +165,7 @@ export default function LoginPage() {
       setPassword("");
       setIsSignIn(true);
     } catch (error: any) {
-      console.error("Registration error:", error);
+      logAuthFailure("email-sign-up", error);
       toast({
         title: "Registration Failed",
         description: error.code === 'auth/email-already-in-use'
@@ -189,7 +205,7 @@ export default function LoginPage() {
         description: "Check your inbox for instructions to reset your password.",
       });
     } catch (error: any) {
-      console.error("Password reset error:", error);
+      logAuthFailure("password-reset", error);
       toast({
         title: "Error",
         description: error.code === 'auth/user-not-found'

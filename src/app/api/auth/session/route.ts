@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/firebase-admin";
-import { isAdmin } from "@/lib/auth";
+import { isAdmin, isExpectedAuthError } from "@/lib/auth";
+import { logError, logWarn } from "@/lib/logger";
 import { cookies } from "next/headers";
 
 // Cross-origin POSTs could plant a session cookie in a victim's browser
@@ -75,7 +76,15 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ authorized: true, role });
   } catch (error) {
-    console.error("Session creation error:", error);
+    // Malformed JSON and invalid/expired/revoked ID tokens are routine
+    // client failures (and attacker-craftable) — warn only, never
+    // error-level noise. Anything else is a Firebase/infra failure
+    // locking out legitimate admins.
+    if (isExpectedAuthError(error) || error instanceof SyntaxError) {
+      logWarn("session", "create", "session request rejected");
+    } else {
+      logError("session", "create", error);
+    }
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 }

@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { saveHomepageData, loadHomepageData } from "./actions";
+import { logError } from "@/lib/logger";
 
 export default function HomepageEditor() {
   const [loading, setLoading] = useState(true);
@@ -63,7 +64,7 @@ export default function HomepageEditor() {
         setData(result);
       }
     } catch (error) {
-      console.error("Error loading homepage data:", error);
+      logError("admin", "homepage-load", error);
       toast({
         title: "Error",
         description: "Failed to load homepage data",
@@ -85,7 +86,7 @@ export default function HomepageEditor() {
         duration: 5000,
       });
     } catch (error) {
-      console.error("Error saving homepage data:", error);
+      logError("admin", "homepage-save", error);
       toast({
         title: "Error",
         description: "Failed to save homepage data",

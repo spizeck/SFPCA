@@ -34,7 +34,11 @@ vi.mock("@/lib/firebase-admin", () => ({
   }),
 }));
 
-vi.mock("@/lib/auth", () => ({
+// Partial mock: isAdmin is stubbed, but isExpectedAuthError stays real —
+// the classification under test decides which failures are routine
+// client rejections vs infrastructure errors worth paging on.
+vi.mock("@/lib/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth")>()),
   isAdmin: mockIsAdmin,
 }));
 

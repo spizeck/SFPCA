@@ -4,6 +4,7 @@ import { db } from "@/lib/firebase";
 import { AnimalRegistration } from "@/components/animal-registration/animal-registration-page";
 import { SiteSettings } from "@/lib/types";
 import { pageMetadata } from "@/lib/seo";
+import { logError } from "@/lib/logger";
 
 export const metadata: Metadata = pageMetadata({
   path: "/animal-registration",
@@ -22,7 +23,7 @@ async function getSiteSettings(): Promise<SiteSettings | null> {
     }
     return null;
   } catch (error) {
-    console.error("Error fetching site settings:", error);
+    logError("content", "fetch-site-settings", error);
     return null;
   }
 }

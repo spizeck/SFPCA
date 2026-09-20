@@ -253,8 +253,11 @@ firebase deploy --only storage
 
 `functions/` contains three Cloud Functions:
 
-- `onFirestoreChange` — any real document write triggers a Vercel rebuild
-  via a deploy hook (skips no-op writes)
+- `onFirestoreChange` — a real write to a *content* collection
+  (`homepage`, `siteSettings`, `animals`, `faq`, `vetServices`,
+  `animalAdoptions`, `animalRegistration`) triggers a Vercel rebuild via
+  a deploy hook; writes to `animalRegistrations`/`admins` change no
+  public page and are skipped before logging
 - `triggerRebuild` — HTTP endpoint that triggers a rebuild manually
 - `sweepOrphanedReceipts` — scheduled (every 24 h); deletes
   `receipts/<id>` objects with no matching `animalRegistrations/<id>`
@@ -269,6 +272,101 @@ They need `VERCEL_TOKEN` and `VERCEL_PROJECT_ID` in `functions/.env`
 ```bash
 npm run deploy:functions   # or: cd functions && firebase deploy --only functions
 ```
+
+## Observability & troubleshooting
+
+The baseline is deliberately **native-only**: Vercel runtime logs +
+Firebase/Google Cloud logs + Next.js error boundaries + the CI suites.
+No external monitoring service (Sentry, Datadog, ...) is introduced —
+for an app this size they add cost, config, and a new PII-processing
+surface without answering questions the platform logs can't. Known
+limitation: **unhandled browser exceptions are not centrally
+collected** — intentional caught failures log normalized, PII-free
+entries to the browser console; server-side failures land in Vercel
+logs. If volume or user-reported-error rates ever justify browser
+telemetry, evaluate a service with a signed DPA then.
+
+**Where logs live:**
+
+| Surface | Location |
+|---------|----------|
+| Next.js server (session route, server actions, RSC fetches, render errors) | Vercel → Project → Logs (Runtime) |
+| Browser-only failures | Visitor's console — not collected centrally |
+| Cloud Functions (`onFirestoreChange`, `triggerRebuild`, `sweepOrphanedReceipts`) | Firebase console → Functions → Logs, or Google Cloud Logging (`resource.type="cloud_function"`) |
+| Vercel deploys (incl. hook-triggered rebuilds) | Vercel → Deployments |
+| CI checks | GitHub → PR checks / Actions |
+
+**Log shape.** App code emits one JSON object per event via
+`src/lib/logger.ts` (`logError`/`logWarn`/`logInfo`) with `subsystem`,
+`operation`, `outcome`, and normalized `errorName`/`errorCode`/
+`errorMessage` fields — never raw payloads. Functions emit the same
+fields via `firebase-functions/logger`. Expected outcomes (denied
+login, expired cookie, invalid form) are **not** error-level events.
+
+**Never logged:** owner names/emails/phones/addresses, registration
+fields or receipt paths/IDs, receipt contents, ID tokens, session
+cookies, `Authorization` headers, `REBUILD_TRIGGER_TOKEN`, the Vercel
+deploy-hook URL, service-account keys, env values.
+
+### Troubleshooting
+
+- **Public site down/broken** → Vercel deployment status first, then
+  Vercel runtime logs for `subsystem:"content"` fetch errors; check
+  Firebase status page if Firestore errors dominate. A hard page crash
+  shows "Something went wrong" + a `Reference:` digest — search Vercel
+  logs for that digest.
+- **Admin can't load / gets bounced to login** → distinguish:
+  deployment (Vercel), auth (browser sign-in toast), session
+  (`subsystem:"session"` errors in Vercel logs — e.g.
+  `errorCode:"auth/internal-error"` = Firebase problem, expected denials
+  log at warn), admin lookup (`operation:"admin-lookup"` errors =
+  Firestore down), or missing config (`missing env var(s)
+  FIREBASE_ADMIN_*` — set them in Vercel env, never logged values).
+- **Content rebuild didn't happen** → check in order: Functions logs
+  for `operation:"firestore-trigger"` (did the write fire?), then
+  `operation:"vercel-hook"` (`outcome:"skipped"` = missing
+  VERCEL_TOKEN/VERCEL_PROJECT_ID; `outcome:"failed"` + `httpStatus`/
+  `errorCode` = hook rejected or network), then Vercel Deployments (did
+  a deploy start/fail?). Writes to `animalRegistrations`/`admins`
+  correctly trigger nothing.
+- **Manual rebuild failed** → 403 = wrong/missing
+  `REBUILD_TRIGGER_TOKEN` (never logged); 503 = hook env not
+  configured; 500 = upstream request failed — see `vercel-hook` error
+  log for `httpStatus`/`errorCode`.
+- **Registration submission failing** → the user sees a generic toast.
+  Maintainer checks: form validation errors are client-side only;
+  `permission-denied` means Firestore rules rejected the shape
+  (`firestore.rules` is the authority); `storage/*` codes mean the
+  receipt upload path. Firebase outage → check Firebase status. Never
+  log or inspect the submission's PII to diagnose.
+- **Receipt cleanup failed** → Functions logs for
+  `subsystem:"receipt-cleanup"`: each run logs counts (`scanned`,
+  `deleted`, `skippedRecent`, `skippedMalformed`, `failed`). A run
+  ending `outcome:"partial-failure"` (or a failed execution) means some
+  orphans remain — the next daily run retries them; investigate the
+  `errorCode` on the per-object warn entries.
+- **CI failing** → `Next.js app` = lint/types/unit/build; `Firebase
+  Functions` = functions lint/unit/export shape; `Firebase security
+  rules` = emulator rules tests; `E2E smoke` = Playwright journeys.
+
+### Maintainer must configure in production
+
+Nothing below can be committed to the repo — configure in consoles:
+
+- **Vercel** → project Settings → Notifications: enable deployment-
+  failure notifications (email/Slack) so failed rebuilds page someone.
+- **Google Cloud** → Logging → Log-based alerts: alert on
+  `resource.type="cloud_function" AND severity>=ERROR`. Fires on failed
+  rebuild triggers and failed sweeps. Threshold philosophy: alert on
+  sustained/repeated failures, not single transient events — Functions
+  already retries nothing, so one ERROR entry is one real failure.
+- **Firebase console** → Functions → Health: glance at error rate when
+  anything seems off.
+- **Uptime:** no synthetic `/health` endpoint exists by design — it
+  would test little, cost reads, and widen the attack surface. Vercel
+  deployment health + CI E2E + the checks above are the baseline; add
+  an external uptime monitor on the public homepage URL only if SFPCA
+  wants down-detection between deploys.
 
 ## Scripts
 

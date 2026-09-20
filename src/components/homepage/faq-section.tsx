@@ -8,6 +8,7 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import { fadeInUpVariants, shouldReduceMotion } from "@/lib/animations";
 import { collection, getDocs, orderBy, query } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { logError } from "@/lib/logger";
 
 interface FAQItem {
   id: string;
@@ -45,7 +46,7 @@ export function FaqSection() {
       
       setFaqs(faqsData);
     } catch (error) {
-      console.error("Error loading FAQs:", error);
+      logError("content", "faq-load", error);
     } finally {
       setLoading(false);
     }

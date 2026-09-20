@@ -23,6 +23,7 @@ import {
   RegistrationStatus,
 } from "@/lib/animal-registration";
 import { RegistrationStatusBadge } from "@/components/admin/registration-status-badge";
+import { logError } from "@/lib/logger";
 
 export default function RegistrationsPage() {
   const [registrations, setRegistrations] = useState<AnimalRegistration[]>([]);
@@ -55,7 +56,7 @@ export default function RegistrationsPage() {
 
       setRegistrations(registrationsData);
     } catch (error) {
-      console.error("Error loading registrations:", error);
+      logError("admin", "registrations-load", error);
       toast({
         title: "Error",
         description: "Failed to load registrations from database.",
@@ -83,7 +84,7 @@ export default function RegistrationsPage() {
         description: `Status changed to ${status}.`,
       });
     } catch (error) {
-      console.error("Error updating registration:", error);
+      logError("admin", "registration-update", error);
       toast({
         title: "Error",
         description: "Failed to update registration status.",
@@ -111,7 +112,7 @@ export default function RegistrationsPage() {
         : await getDownloadURL(ref(storage, receipt));
       window.open(url, "_blank");
     } catch (error) {
-      console.error("Error fetching receipt:", error);
+      logError("admin", "receipt-view", error);
       toast({
         title: "Error",
         description: "Could not load the payment receipt.",

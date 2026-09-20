@@ -23,8 +23,11 @@ This directory contains Firebase Cloud Functions that trigger Vercel rebuilds wh
   `animalRegistrations/<id>` document — orphans left when a public
   registration upload succeeded but the submission write (and the
   client's immediate cleanup) failed. Objects younger than 1 hour are
-  skipped so in-flight submissions are never swept. Logs counts only —
-  never file names or contents.
+  skipped so in-flight submissions are never swept. A failing object is
+  counted and skipped rather than aborting the run; if any objects
+  failed, the run logs an error summary and the execution is marked
+  failed so alerting catches it. Logs counts only — never file names
+  or contents.
 
 ## Setup
 
