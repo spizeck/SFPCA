@@ -567,17 +567,35 @@ const pngBytes = () => new Uint8Array([137, 80, 78, 71]);
 for (const path of [
   "team-photos/existing.png",
   "images/existing.png",
-  "animals/avail-1/existing.png",
 ]) {
   test(`public can read storage object ${path}`, async () => {
     await assertSucceeds(publicStorage().ref(path).getMetadata());
   });
 }
 
+// The animals/ Storage prefix was deliberately removed (issue #127): the
+// app stores animal photo URLs on the Firestore document and nothing
+// uploads to animals/**, so the namespace falls through to default-deny —
+// for everyone, including admins. The seeded animals/avail-1/existing.png
+// object proves removal denies access without deleting existing data.
+test("animals/ storage objects are unreadable by everyone", async () => {
+  await assertFails(publicStorage().ref("animals/avail-1/existing.png").getMetadata());
+  await assertFails(userStorage().ref("animals/avail-1/existing.png").getMetadata());
+  await assertFails(adminStorage().ref("animals/avail-1/existing.png").getMetadata());
+});
+
+test("animals/ storage namespace is not writable by anyone", async () => {
+  for (const storage of [publicStorage(), userStorage(), adminStorage()]) {
+    await assertFails(
+      storage.ref("animals/avail-1/photo.png").put(pngBytes(), { contentType: "image/png" }),
+    );
+    await assertFails(storage.ref("animals/avail-1/existing.png").delete());
+  }
+});
+
 for (const path of [
   "team-photos/new.png",
   "images/new.png",
-  "animals/avail-1/photo.png",
 ]) {
   test(`non-admin cannot upload to ${path}`, async () => {
     await assertFails(
