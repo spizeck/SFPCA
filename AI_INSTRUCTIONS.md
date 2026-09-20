@@ -4,7 +4,9 @@ Orientation for coding agents working in this repository. This file states
 what is true **now** — verify against code when in doubt, and keep it
 updated when architecture changes. Human-facing docs: `README.md`
 (overview/setup), `CONTRIBUTING.md` (workflow/tests), `SECURITY.md`
-(security model).
+(security model), `RUNBOOK.md` (production deploy/rollback — never run
+its `firebase deploy` commands from an agent session without explicit
+instruction).
 
 ## What this is
 

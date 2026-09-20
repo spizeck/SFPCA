@@ -11,8 +11,10 @@ security model and dependency practices.
 [AI_INSTRUCTIONS.md](AI_INSTRUCTIONS.md) gives coding agents a concise
 orientation and the architectural invariants.
 [ACCESSIBILITY.md](ACCESSIBILITY.md) records the public-site accessibility
-audit baseline and remaining exceptions. `functions/README.md`
-covers the Cloud Functions project.
+audit baseline and remaining exceptions.
+[RUNBOOK.md](RUNBOOK.md) is the production deployment and recovery
+runbook (release checklist, Firebase/rules deploys, maintenance mode,
+rollbacks). `functions/README.md` covers the Cloud Functions project.
 
 ## Features
 
@@ -200,6 +202,11 @@ in the `admins` collection with the user's email as the document ID, or
 add the email to `ADMIN_EMAILS`.
 
 ## Deployment
+
+The full release/recovery procedure — topology, per-component deploy
+commands, pre-release and smoke checklists, maintenance mode, rollbacks,
+and incident decision paths — lives in [RUNBOOK.md](RUNBOOK.md). This
+section is the short version.
 
 ### Vercel
 
