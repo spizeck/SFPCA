@@ -5,6 +5,10 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 
+vi.mock("@sentry/nextjs", () => ({
+  captureException: vi.fn(),
+}));
+
 import { ErrorFallback } from "@/components/error-fallback";
 
 describe("ErrorFallback", () => {

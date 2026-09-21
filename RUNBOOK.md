@@ -83,6 +83,12 @@ files is not used by production code.
 | `NEXT_PUBLIC_GA_ID` | Google Analytics tag; GA absent when unset | no |
 | `NEXT_PUBLIC_SITE_URL` | Canonical origin for sitemap/OG/canonical | no |
 | `SITE_MAINTENANCE_MODE` | `"true"` gates all public routes (§9) | no, but server-only — never `NEXT_PUBLIC_*` |
+| `NEXT_PUBLIC_SENTRY_DSN` | Sentry runtime DSN — enables error capture; SDK never initializes without it | no — public config by design, not an auth secret |
+| `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | Optional Sentry environment override (defaults `VERCEL_ENV` → `NODE_ENV`) | no |
+| `SENTRY_ORG` | Sentry org slug for source-map upload at build time | no, but not public config |
+| `SENTRY_PROJECT` | Sentry project slug for source-map upload | no, but not public config |
+| `SENTRY_AUTH_TOKEN` | Auth token for source-map upload during build | **yes** — build-time only |
+| `SENTRY_RELEASE` | Optional release override (defaults to commit SHA via the build plugin) | no |
 
 **Firebase Functions runtime** — `functions/.env`, uploaded by
 `firebase deploy` (dotenv support; the file is gitignored and the
@@ -307,6 +313,8 @@ data in production.
 5. Vercel → Logs (Runtime): no error burst since the deploy.
 6. Firebase console → Functions / Cloud Logging: no unexpected failures
    on `onFirestoreChange` / `sweepOrphanedReceipts` since the deploy.
+6a. Once Sentry is configured (§15): Sentry → Issues filtered to the new
+   release — no new unhandled exceptions attributable to the deploy.
 7. If the release changed content plumbing: make one real admin content
    edit and confirm a new Vercel deployment appears within a minute or
    two (that is the end-to-end rebuild path working).
@@ -478,3 +486,55 @@ the write commits before the hook runs. If the hook fails
 the error is in Cloud Logging; nothing user-visible breaks except that
 the site is stale. Rebuild manually (`triggerRebuild`, §13) or fix the
 hook config and edit again.
+
+## 15. Sentry error monitoring (post-#139)
+
+Sentry collects **unexpected application exceptions** — unhandled
+browser errors, React error-boundary crashes, and server-side
+exceptions in Server Components, route handlers, and `proxy.ts`. It is
+a supplement, not a replacement: Vercel runtime logs remain the
+structured operational record (`src/lib/logger.ts`), Cloud Logging
+covers Functions, and GitHub Actions gates deploys.
+
+**When to look where:**
+
+- **Sentry → Issues** — a user-visible crash ("Something went wrong"),
+  a new exception class appearing after a deploy, or correlating a
+  browser failure you cannot reproduce locally. Events group by
+  exception type; each carries environment, release, route, and the
+  Next.js `error_digest` tag when the error came through a boundary.
+- **Vercel → Logs (Runtime)** — expected/handled failures (auth
+  denials, validation, upstream fetch misses), `subsystem`/`operation`
+  timelines, and anything too routine to be an exception. A boundary
+  crash appears in both places: the Vercel log entry and the Sentry
+  event share the same digest.
+- **Cloud Logging** — Firebase Functions only; Sentry does not
+  instrument Functions (deliberate — #139 scopes Sentry to the Next.js
+  app).
+
+**Releases and deploys.** When `SENTRY_ORG`/`SENTRY_PROJECT`/
+`SENTRY_AUTH_TOKEN` are present at build time, `withSentryConfig`
+uploads source maps keyed to a release derived from the commit SHA
+(override with `SENTRY_RELEASE`). Sentry → Releases then maps each
+issue to the deploy that introduced it. Without the token the build
+proceeds normally and simply skips the upload — stack traces stay
+minified until configured.
+
+**Required configuration** (all in Vercel env — see §3): the runtime
+DSN `NEXT_PUBLIC_SENTRY_DSN` is the only value needed for error
+capture; without it the app sends nothing. Issue **#140** owns the
+production project setup, alert rules, and release verification.
+
+**Privacy boundary.** Every event passes `src/lib/sentry.ts` before
+leaving the process: request headers/cookies/bodies/query strings are
+removed, user identity and server hostname are never attached, console
+and DOM-interaction breadcrumbs are dropped, stack-frame locals are
+stripped, and emails/bearer tokens/`receipts/` paths are redacted from
+message text. **Customer PII must never appear in a Sentry event.** If
+you ever see owner data, tokens, or receipt identifiers in Sentry:
+treat it as an incident — delete the event in Sentry, open a fix that
+extends the sanitizer to cover that carrier, and check whether the same
+data reached Vercel logs.
+
+**Local development and CI** send nothing: no DSN is configured, so the
+SDK never initializes and no network calls are made.
