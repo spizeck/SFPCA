@@ -487,7 +487,7 @@ the error is in Cloud Logging; nothing user-visible breaks except that
 the site is stale. Rebuild manually (`triggerRebuild`, §13) or fix the
 hook config and edit again.
 
-## 15. Sentry error monitoring (post-#139)
+## 15. Sentry error monitoring (post-#139/#140)
 
 Sentry collects **unexpected application exceptions** — unhandled
 browser errors, React error-boundary crashes, and server-side
@@ -512,29 +512,140 @@ covers Functions, and GitHub Actions gates deploys.
   instrument Functions (deliberate — #139 scopes Sentry to the Next.js
   app).
 
-**Releases and deploys.** When `SENTRY_ORG`/`SENTRY_PROJECT`/
-`SENTRY_AUTH_TOKEN` are present at build time, `withSentryConfig`
-uploads source maps keyed to a release derived from the commit SHA
-(override with `SENTRY_RELEASE`). Sentry → Releases then maps each
-issue to the deploy that introduced it. Without the token the build
-proceeds normally and simply skips the upload — stack traces stay
-minified until configured.
+### 15a. Configuration (operator checklist)
 
-**Required configuration** (all in Vercel env — see §3): the runtime
-DSN `NEXT_PUBLIC_SENTRY_DSN` is the only value needed for error
-capture; without it the app sends nothing. Issue **#140** owns the
-production project setup, alert rules, and release verification.
+All values live in Vercel → Settings → Environment Variables (§3).
+Nothing Sentry-related is committed to the repo.
 
-**Privacy boundary.** Every event passes `src/lib/sentry.ts` before
-leaving the process: request headers/cookies/bodies/query strings are
-removed, user identity and server hostname are never attached, console
-and DOM-interaction breadcrumbs are dropped, stack-frame locals are
+| Variable | Scope | Kind | Required? |
+|----------|-------|------|-----------|
+| `NEXT_PUBLIC_SENTRY_DSN` | Production + Preview | public runtime config — embedded in the client bundle by design, **not** a secret | yes — without it the SDK never initializes and nothing is sent |
+| `SENTRY_ORG` | Production (+ Preview for symbolicated preview events) | build-time, not secret | needed only for source-map upload |
+| `SENTRY_PROJECT` | same as `SENTRY_ORG` | build-time, not secret | needed only for source-map upload |
+| `SENTRY_AUTH_TOKEN` | same as `SENTRY_ORG` | build-time **secret** (org auth token) | needed only for source-map upload |
+| `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | — | optional public override | only if the auto value is wrong — defaults to `VERCEL_ENV` then `NODE_ENV` |
+| `SENTRY_RELEASE` | — | optional build-time override | only to override the auto release (see 15b) |
+
+Recommended scoping: set the DSN for **Production and Preview** — the
+environment tag (`production`/`preview` from `VERCEL_ENV`) keeps the
+streams separable. If you prefer zero preview events, scope the DSN to
+Production only. Source-map variables: Production is required;
+adding Preview lets preview-deploy errors symbolicate too.
+
+### 15b. Releases and source maps
+
+`withSentryConfig` resolves the release at build time in this order:
+`SENTRY_RELEASE` env → `git rev-parse HEAD` (the deployed commit).
+The **same** value is then (a) used to name the release for source-map
+upload and (b) injected into both the client and server bundles, so
+every event automatically reports the release its maps were uploaded
+under — there is nothing extra to wire. Source maps are uploaded at
+build time and deleted from the public bundle afterward — they are
+never publicly exposed.
+
+Consequences:
+
+- A Sentry issue's release = the Vercel deployment's commit SHA — the
+  same SHA shown in Vercel → Deployments and in `git log`.
+- Without `SENTRY_AUTH_TOKEN` (+org/project) the build still succeeds;
+  the upload is skipped and stack traces stay minified until
+  configured. This is the correct local/CI behavior — do not "fix" it.
+- If a Sentry event ever arrives with no release or with maps missing,
+  check the Vercel build log for the upload step rather than guessing
+  (see 15d).
+
+### 15c. Post-configuration verification
+
+After Chad sets the Sentry/Vercel values and a deployment has gone out:
+
+1. Sign in as an admin and open **`/admin/sentry-check`** (deliberately
+   not in the admin nav — URL only).
+2. Click **"Throw server test error"** — the panel reports the throw.
+3. Click **"Throw browser test error"** — the page is replaced by the
+   real "Something went wrong" fallback with a Reference digest; note
+   the digest, then click Try again.
+4. In Sentry → Issues, confirm **exactly two** events with messages
+   starting `SENTRY_VERIFICATION_EVENT:` (`:server` and `:browser`).
+   One event per click — no duplicates.
+5. Confirm each event's **environment** is `production`. A preview
+   deploy performing the same steps should show `preview`.
+6. Confirm each event's **release** equals the deployment's commit SHA
+   (Vercel → Deployments → commit).
+7. Open an event's stack trace — frames resolve to real source
+   locations (e.g. `sentry-check-panel.tsx`, `actions.ts`), not
+   minified `_next/static/chunks/...` references.
+8. Inspect the event payload: **no** user identity, email, cookies,
+   `Authorization`, request body, receipt path, or registration data —
+   only method + path under request, redacted messages, safe tags.
+9. For the browser event, search Vercel → Logs (Runtime) for the
+   Reference digest shown on the fallback page — the
+   `subsystem:"ui"` log entry with the same digest should exist.
+
+### 15d. Troubleshooting
+
+- **No event received** → `NEXT_PUBLIC_SENTRY_DSN` set in the right
+  Vercel scope and deployed *after* it was set (env changes need a
+  redeploy)? Sentry project exists and DSN copied exactly? Ad-blocker/
+  CSP blocking `*.ingest.sentry.io` in the browser? Check the Vercel
+  runtime log — the error still logs there even when Sentry is absent.
+- **Event in the wrong environment** → `NEXT_PUBLIC_SENTRY_ENVIRONMENT`
+  set unnecessarily (remove it; `VERCEL_ENV` is correct automatically),
+  or the DSN is scoped to the wrong Vercel environment.
+- **Event received but stack trace not symbolicated** → the release on
+  the event has no uploaded artifacts: check the deploy's build log for
+  the source-map upload step; confirm `SENTRY_ORG`/`SENTRY_PROJECT`/
+  `SENTRY_AUTH_TOKEN` are set in the build environment and the token is
+  a valid **org** auth token; confirm the event's release SHA matches a
+  release in Sentry → Releases with artifacts.
+- **Source-map upload failure in build log** → token expired/wrong
+  scope, or org/project slug mismatch. Fix the env values and redeploy;
+  the app itself is unaffected either way.
+- **Duplicate events for one failure** → report it — each capture path
+  is designed to fire once (single `captureException` in the shared
+  fallback, framework hooks elsewhere); duplicates indicate a
+  regression, not configuration.
+- **Sentry event exists but no matching Vercel log** → boundary events
+  correlate by the `error_digest` tag / Reference digest; server
+  exceptions logged via `logger.ts` carry `subsystem`/`operation`. If
+  neither is findable, the error was likely a client-only failure that
+  never reached the server — expected for browser render errors.
+- **Verification button says "Not authorized"** → session cookie
+  expired or the account isn't in `admins/`/`ADMIN_EMAILS` — sign in
+  again via `/login`.
+
+### 15e. Alert policy (configure in Sentry manually)
+
+Goal: page a human on **new or regressed unexpected production
+application errors** — never on every occurrence.
+
+- Scope alerts to the **production** environment only; preview events
+  are noise unless deliberately wanted.
+- Alert on **new issues** (first event of a new exception signature)
+  and **regressions** (a resolved issue reoccurring).
+- If using frequency conditions, alert only on unusual spikes —
+  sustained rate increases, not single events.
+- Do **not** alert on expected/rejected paths: auth denials, expired
+  tokens, and validation failures are dropped by `beforeSend` and never
+  reach Sentry — anything arriving is already filtered to unexpected
+  errors.
+- Exclude `SENTRY_VERIFICATION_EVENT` issues from paging if the alert
+  rule allows message filtering (they are deliberate).
+- Keep notification channels minimal (existing email/Slack); no new
+  integrations are introduced by this repo.
+
+### 15f. Privacy boundary (unchanged from #139)
+
+Every event passes `src/lib/sentry.ts` before leaving the process:
+request headers/cookies/bodies/query strings are removed, user
+identity and server hostname are never attached, console and
+DOM-interaction breadcrumbs are dropped, stack-frame locals are
 stripped, and emails/bearer tokens/`receipts/` paths are redacted from
-message text. **Customer PII must never appear in a Sentry event.** If
-you ever see owner data, tokens, or receipt identifiers in Sentry:
-treat it as an incident — delete the event in Sentry, open a fix that
-extends the sanitizer to cover that carrier, and check whether the same
-data reached Vercel logs.
+message text. The verification errors are synthetic — they carry no
+real data and flow through the same boundary. **Customer PII must
+never appear in a Sentry event.** If you ever see owner data, tokens,
+or receipt identifiers in Sentry: treat it as an incident — delete the
+event in Sentry, open a fix that extends the sanitizer to cover that
+carrier, and check whether the same data reached Vercel logs.
 
-**Local development and CI** send nothing: no DSN is configured, so the
-SDK never initializes and no network calls are made.
+**Local development and CI** send nothing: no DSN is configured, so
+the SDK never initializes and no network calls are made.

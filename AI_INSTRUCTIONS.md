@@ -251,8 +251,12 @@ is for erroneous/spam records only.
   `ErrorFallback` — do not add `captureException` to `error.tsx`/
   `global-error.tsx` or `logger.ts`. No edge config exists — `proxy.ts`
   runs on Node.js. Sentry is inactive unless `NEXT_PUBLIC_SENTRY_DSN`
-  is set; never commit real DSN/org/token values. See README's
-  Observability & troubleshooting section and RUNBOOK §15.
+  is set; never commit real DSN/org/token values. Controlled
+  verification lives at `/admin/sentry-check` (admin-gated, URL-only):
+  a browser throw through the real boundary and a server action that
+  re-checks `requireAdmin()` itself — server actions are POST
+  endpoints, never rely on layout auth. See README's Observability &
+  troubleshooting section and RUNBOOK §15.
 
 ## Testing (commands in `package.json`)
 

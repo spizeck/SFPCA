@@ -375,9 +375,11 @@ Nothing below can be committed to the repo — configure in consoles:
 - **Sentry** → create the project, then set `NEXT_PUBLIC_SENTRY_DSN`
   (runtime), `SENTRY_ORG` / `SENTRY_PROJECT` / `SENTRY_AUTH_TOKEN`
   (source-map upload at build time), and optionally
-  `NEXT_PUBLIC_SENTRY_ENVIRONMENT` / `SENTRY_RELEASE` in Vercel env.
-  Issue #140 covers this plus production alert rules. Until then the
-  app runs normally and sends nothing.
+  `NEXT_PUBLIC_SENTRY_ENVIRONMENT` / `SENTRY_RELEASE` in Vercel env —
+  see RUNBOOK §15 for scoping and the post-config verification
+  procedure (admin-only `/admin/sentry-check` fires controlled
+  synthetic errors through the real capture paths). Until configured
+  the app runs normally and sends nothing.
 - **Vercel** → project Settings → Notifications: enable deployment-
   failure notifications (email/Slack) so failed rebuilds page someone.
 - **Google Cloud** → Logging → Log-based alerts: alert on
