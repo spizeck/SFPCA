@@ -5,19 +5,33 @@
 // development and CI send nothing to Sentry by default.
 import * as Sentry from "@sentry/nextjs";
 import {
-  getSentryDsn,
-  getSentryEnvironment,
   sentryBeforeBreadcrumb,
   sentryBeforeSend,
   sentryBeforeSendTransaction,
 } from "@/lib/sentry";
 
-const dsn = getSentryDsn();
+// The public env values must be direct `process.env.NEXT_PUBLIC_*`
+// member expressions: Next.js inlines only statically analyzable
+// references into the client bundle at build time. Routing them through
+// a helper that reads a passed/defaulted env object compiles to a
+// runtime lookup on the browser's empty process shim — the values are
+// never inlined, the DSN is undefined, and the SDK never initializes
+// (#146). The env-object helpers in lib/sentry.ts are for the server
+// and tests only.
+const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN || undefined;
+
+// The browser-visible chain is shorter than the server's on purpose:
+// non-public SENTRY_ENVIRONMENT/VERCEL_ENV can never be inlined into a
+// client bundle, so the override falls straight to the inlined NODE_ENV.
+const environment =
+  process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT ||
+  process.env.NODE_ENV ||
+  "development";
 
 if (dsn) {
   Sentry.init({
     dsn,
-    environment: getSentryEnvironment(),
+    environment,
 
     // Never attach user identity, IP, request headers, or cookies.
     sendDefaultPii: false,

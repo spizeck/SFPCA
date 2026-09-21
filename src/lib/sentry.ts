@@ -49,6 +49,11 @@ const STRING_REDACTIONS: ReadonlyArray<readonly [RegExp, string]> = [
 const SENSITIVE_KEY_PATTERN =
   /token|secret|password|passwd|cookie|authorization|auth|receipt|email|phone|address|owner|api[-_]?key|private[-_]?key|session|credential|ssn|headers?|body|query|data/i;
 
+// Server/test env resolution only. Browser code must NOT route through
+// these helpers: a defaulted env object defeats Next.js client-bundle
+// inlining, which only substitutes statically analyzable
+// `process.env.NEXT_PUBLIC_*` member expressions (#146). Client
+// initialization reads process.env directly in instrumentation-client.
 export function getSentryDsn(
   env: Record<string, string | undefined> = process.env,
 ): string | undefined {
