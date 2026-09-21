@@ -240,9 +240,19 @@ is for erroneous/spam records only.
   copies without a distinct need.
 - `onFirestoreChange` rebuilds only on `REBUILD_COLLECTIONS` writes;
   `animalRegistrations`/`admins` writes must not trigger deploys.
-- Native-only baseline (Vercel logs + Cloud Logging + boundaries) —
-  no browser telemetry. See README's Observability & troubleshooting
-  section for the runbook and the console-side setup checklist.
+- Sentry (`@sentry/nextjs`, post-#139) captures unexpected app
+  exceptions only — no Replay, tracing, profiling, or Sentry Logs.
+  Init lives in `instrumentation-client.ts` / `sentry.server.config.ts`
+  / `instrumentation.ts`; every event passes the privacy boundary in
+  `src/lib/sentry.ts` (request data, cookies, tokens, user identity,
+  console/DOM breadcrumbs, frame locals, sensitive-named keys stripped;
+  emails/receipts paths/Bearer tokens redacted; expected auth
+  rejections dropped). Boundary errors report once from the shared
+  `ErrorFallback` — do not add `captureException` to `error.tsx`/
+  `global-error.tsx` or `logger.ts`. No edge config exists — `proxy.ts`
+  runs on Node.js. Sentry is inactive unless `NEXT_PUBLIC_SENTRY_DSN`
+  is set; never commit real DSN/org/token values. See README's
+  Observability & troubleshooting section and RUNBOOK §15.
 
 ## Testing (commands in `package.json`)
 

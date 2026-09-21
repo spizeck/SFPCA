@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
+import * as Sentry from "@sentry/nextjs";
 import { Button } from "@/components/ui/button";
 import { logError } from "@/lib/logger";
 
@@ -23,6 +24,15 @@ export function ErrorFallback({
     // digest is the link to the server-rendered log entry Next.js
     // already wrote for server-side failures.
     logError("ui", "render", error, { digest: error.digest });
+    // Errors reaching App Router boundaries never reach Sentry's global
+    // handlers (the boundary swallows them), so they are captured here —
+    // the single shared site for error.tsx and global-error.tsx, which
+    // keeps each failure to exactly one event. The digest tag correlates
+    // the Sentry issue with the Vercel runtime log entry. No-ops when
+    // Sentry is not initialized; beforeSend applies the PII boundary.
+    Sentry.captureException(error, {
+      tags: error.digest ? { "nextjs.error_digest": error.digest } : {},
+    });
   }, [error]);
 
   return (

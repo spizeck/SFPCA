@@ -282,23 +282,31 @@ npm run deploy:functions   # or: cd functions && firebase deploy --only function
 
 ## Observability & troubleshooting
 
-The baseline is deliberately **native-only**: Vercel runtime logs +
-Firebase/Google Cloud logs + Next.js error boundaries + the CI suites.
-No external monitoring service (Sentry, Datadog, ...) is introduced —
-for an app this size they add cost, config, and a new PII-processing
-surface without answering questions the platform logs can't. Known
-limitation: **unhandled browser exceptions are not centrally
-collected** — intentional caught failures log normalized, PII-free
-entries to the browser console; server-side failures land in Vercel
-logs. If volume or user-reported-error rates ever justify browser
-telemetry, evaluate a service with a signed DPA then.
+Observability is layered: **Sentry** collects unexpected Next.js
+application exceptions (browser + server) centrally; **Vercel** keeps
+runtime/deployment logs including the app's structured `#94` logging;
+**Firebase/Google Cloud** covers Cloud Functions; **GitHub Actions** is
+the build/test gate. Sentry supplements — it never replaces — the
+Vercel/Firebase log streams.
 
-**Where logs live:**
+Sentry is **error monitoring only**: no Session Replay, no profiling,
+no performance tracing, no feedback widgets, no request-body capture.
+The SDK initializes only when `NEXT_PUBLIC_SENTRY_DSN` is set — without
+it the app behaves exactly as before (no events, no network calls).
+When configured, events pass through a deliberate privacy boundary
+(`src/lib/sentry.ts`) that strips request headers/cookies/bodies/query
+strings, user identity, server hostnames, breadcrumbs that echo console
+output or form interaction, and any context/extra key that looks
+sensitive — then redacts emails, bearer tokens, and `receipts/` paths
+from remaining message text. Expected auth rejections (expired/invalid
+tokens) are dropped, not reported.
+
+**Where errors and logs live:**
 
 | Surface | Location |
 |---------|----------|
+| Unexpected app exceptions (browser render errors, server exceptions) | Sentry → Issues (grouped by release/environment) |
 | Next.js server (session route, server actions, RSC fetches, render errors) | Vercel → Project → Logs (Runtime) |
-| Browser-only failures | Visitor's console — not collected centrally |
 | Cloud Functions (`onFirestoreChange`, `triggerRebuild`, `sweepOrphanedReceipts`) | Firebase console → Functions → Logs, or Google Cloud Logging (`resource.type="cloud_function"`) |
 | Vercel deploys (incl. hook-triggered rebuilds) | Vercel → Deployments |
 | CI checks | GitHub → PR checks / Actions |
@@ -310,10 +318,13 @@ telemetry, evaluate a service with a signed DPA then.
 fields via `firebase-functions/logger`. Expected outcomes (denied
 login, expired cookie, invalid form) are **not** error-level events.
 
-**Never logged:** owner names/emails/phones/addresses, registration
-fields or receipt paths/IDs, receipt contents, ID tokens, session
-cookies, `Authorization` headers, `REBUILD_TRIGGER_TOKEN`, the Vercel
-deploy-hook URL, service-account keys, env values.
+**Never logged or sent to Sentry:** owner names/emails/phones/
+addresses, registration fields or receipt paths/IDs, receipt contents,
+ID tokens, session cookies, `Authorization` headers,
+`REBUILD_TRIGGER_TOKEN`, the Vercel deploy-hook URL, service-account
+keys, env values. Sentry events carry only sanitized technical context
+(route, runtime, subsystem, release, environment, error type, Next.js
+digest) — never user identity or request data.
 
 ### Troubleshooting
 
@@ -321,7 +332,8 @@ deploy-hook URL, service-account keys, env values.
   Vercel runtime logs for `subsystem:"content"` fetch errors; check
   Firebase status page if Firestore errors dominate. A hard page crash
   shows "Something went wrong" + a `Reference:` digest — search Vercel
-  logs for that digest.
+  logs for that digest, and (once Sentry is configured) the Sentry
+  issue tagged `nextjs.error_digest` with the same value.
 - **Admin can't load / gets bounced to login** → distinguish:
   deployment (Vercel), auth (browser sign-in toast), session
   (`subsystem:"session"` errors in Vercel logs — e.g.
@@ -360,6 +372,12 @@ deploy-hook URL, service-account keys, env values.
 
 Nothing below can be committed to the repo — configure in consoles:
 
+- **Sentry** → create the project, then set `NEXT_PUBLIC_SENTRY_DSN`
+  (runtime), `SENTRY_ORG` / `SENTRY_PROJECT` / `SENTRY_AUTH_TOKEN`
+  (source-map upload at build time), and optionally
+  `NEXT_PUBLIC_SENTRY_ENVIRONMENT` / `SENTRY_RELEASE` in Vercel env.
+  Issue #140 covers this plus production alert rules. Until then the
+  app runs normally and sends nothing.
 - **Vercel** → project Settings → Notifications: enable deployment-
   failure notifications (email/Slack) so failed rebuilds page someone.
 - **Google Cloud** → Logging → Log-based alerts: alert on
