@@ -36,11 +36,12 @@ service firebase.storage {
               || request.resource.contentType == "application/pdf");
     }
 
-    // Images - public read, admin-only image uploads
-    match /images/{allPaths=**} {
-      allow read: if true;
-      allow write: if canWrite();
-    }
+    // There is deliberately no images/ rule: no active workflow owns
+    // the namespace (nothing in the app uploads to or reads from it,
+    // and the production prefix is empty), so it falls through to
+    // default-deny for everyone — same posture as animals/ below.
+    // A future media feature must introduce explicit authorization
+    // for its own prefix rather than reviving a generic catch-all.
 
     // Animal photos are plain URLs stored on the Firestore document —
     // nothing uploads to an animals/ Storage prefix, so there is

@@ -564,14 +564,43 @@ const spoofedStorage = () =>
 
 const pngBytes = () => new Uint8Array([137, 80, 78, 71]);
 
-for (const path of [
-  "team-photos/existing.png",
-  "images/existing.png",
-]) {
-  test(`public can read storage object ${path}`, async () => {
-    await assertSucceeds(publicStorage().ref(path).getMetadata());
-  });
-}
+test("public can read storage object team-photos/existing.png", async () => {
+  await assertSucceeds(
+    publicStorage().ref("team-photos/existing.png").getMetadata(),
+  );
+});
+
+// The images/ Storage prefix was deliberately removed (issue #137): no
+// code path ever uploaded to or read from it — the rule was boilerplate
+// predating every current Storage workflow — and the production prefix
+// is empty, so no stored content can reference a live object there. The
+// seeded images/existing.png object proves removal denies access without
+// deleting existing data.
+test("images/ storage objects are unreadable by everyone", async () => {
+  await assertFails(publicStorage().ref("images/existing.png").getMetadata());
+  await assertFails(userStorage().ref("images/existing.png").getMetadata());
+  await assertFails(adminStorage().ref("images/existing.png").getMetadata());
+});
+
+test("images/ storage namespace is not writable by anyone", async () => {
+  for (const storage of [
+    publicStorage(),
+    userStorage(),
+    adminStorage(),
+    spoofedStorage(),
+  ]) {
+    await assertFails(
+      storage.ref("images/new.png").put(pngBytes(), { contentType: "image/png" }),
+    );
+    // A PUT onto an occupied path is an update — also denied.
+    await assertFails(
+      storage
+        .ref("images/existing.png")
+        .put(pngBytes(), { contentType: "image/png" }),
+    );
+    await assertFails(storage.ref("images/existing.png").delete());
+  }
+});
 
 // The animals/ Storage prefix was deliberately removed (issue #127): the
 // app stores animal photo URLs on the Firestore document and nothing
@@ -595,7 +624,6 @@ test("animals/ storage namespace is not writable by anyone", async () => {
 
 for (const path of [
   "team-photos/new.png",
-  "images/new.png",
 ]) {
   test(`non-admin cannot upload to ${path}`, async () => {
     await assertFails(
