@@ -102,8 +102,11 @@
    `klaro.css` is imported after this file in layout.tsx, so overrides below
    must beat Klaro's specificity without `!important`: every rule is scoped
    under `#klaro` (the mount element from `elementID` in src/lib/consent.ts),
-   which outranks all of Klaro's class-only selectors. */
-.klaro {
+   which outranks all of Klaro's class-only selectors. klaro.css only
+   *consumes* its variables (`var(--dark1, #333)` fallbacks) — declaring them
+   on `#klaro` keeps that true even if a future Klaro release starts
+   declaring defaults. */
+#klaro .klaro {
   --dark1: hsl(var(--card));               /* notice/modal surface */
   --dark2: hsl(var(--border));             /* hairlines; also neutral button
                                               bg + powered-by link, both of
