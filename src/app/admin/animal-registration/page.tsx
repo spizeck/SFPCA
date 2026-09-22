@@ -10,47 +10,21 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { logError } from "@/lib/logger";
+import {
+  AnimalRegistrationContent,
+  DEFAULT_REGISTRATION_CONTENT,
+} from "@/lib/page-content";
 
-interface AnimalRegistrationData {
-  heroTitle: string;
-  heroDescription: string;
-  fixedFee: string;
-  notFixedFee: string;
-  formTitle: string;
-  formDescription: string;
-  howToPayTitle: string;
-  howToPayItems: string[];
-  whatHappensNextTitle: string;
-  whatHappensNextItems: string[];
-}
+type AnimalRegistrationData = AnimalRegistrationContent;
 
 export default function AnimalRegistrationAdminPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
   
-  const [data, setData] = useState<AnimalRegistrationData>({
-    heroTitle: "Animal Registration",
-    heroDescription: "Register your pet with SABA. Annual registration required for all animals.",
-    fixedFee: "10",
-    notFixedFee: "100",
-    formTitle: "Animal Registration Form",
-    formDescription: "Please fill out all required fields. Registration must be renewed annually.",
-    howToPayTitle: "How to Pay",
-    howToPayItems: [
-      "In person at our office",
-      "Via bank transfer",
-      "Through our online portal",
-      "At participating vet clinics",
-    ],
-    whatHappensNextTitle: "What Happens Next",
-    whatHappensNextItems: [
-      "Submit this form with payment receipt",
-      "We verify your payment within 24-48 hours",
-      "You'll receive a registration certificate",
-      "Annual renewal required",
-    ],
-  });
+  const [data, setData] = useState<AnimalRegistrationData>(
+    DEFAULT_REGISTRATION_CONTENT,
+  );
 
   useEffect(() => {
     loadData();
@@ -117,7 +91,14 @@ export default function AnimalRegistrationAdminPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Edit Animal Registration Page</h1>
+        <div>
+          <h1 className="text-3xl font-bold">Edit Animal Registration Page</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            This page edits descriptive copy only. Registration fees are
+            defined in code and verified by staff — they cannot be changed
+            here.
+          </p>
+        </div>
         <Button onClick={handleSave} disabled={saving}>
           {saving ? "Saving..." : "Save Changes"}
         </Button>
@@ -144,26 +125,6 @@ export default function AnimalRegistrationAdminPage() {
               value={data.heroDescription}
               onChange={(e) => setData({ ...data, heroDescription: e.target.value })}
             />
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="fixed-fee">Spayed/Neutered Fee ($)</Label>
-              <Input
-                id="fixed-fee"
-                type="number"
-                value={data.fixedFee}
-                onChange={(e) => setData({ ...data, fixedFee: e.target.value })}
-              />
-            </div>
-            <div>
-              <Label htmlFor="not-fixed-fee">Not Fixed Fee ($)</Label>
-              <Input
-                id="not-fixed-fee"
-                type="number"
-                value={data.notFixedFee}
-                onChange={(e) => setData({ ...data, notFixedFee: e.target.value })}
-              />
-            </div>
           </div>
         </CardContent>
       </Card>

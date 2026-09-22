@@ -103,7 +103,7 @@ await scanDoc("homepage", "main");
 await scanDoc("siteSettings", "global");
 await scanDoc("vetServices", "main");
 await scanDoc("animalAdoptions", "main");
-await scanDoc("animalRegistration", "main"); // expected: admin-only
+await scanDoc("animalRegistration", "main"); // public read, admin write
 
 try {
   const faqs = await getDocs(collection(db, "faq"));

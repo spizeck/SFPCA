@@ -27,8 +27,16 @@ import {
   REGISTRATION_INITIAL_STATUS,
 } from "@/lib/animal-registration";
 import { OptimizedVideo } from "@/components/ui/optimized-video";
+import {
+  AnimalRegistrationContent,
+  DEFAULT_REGISTRATION_CONTENT,
+} from "@/lib/page-content";
 
-export function AnimalRegistration() {
+export function AnimalRegistration({
+  content = DEFAULT_REGISTRATION_CONTENT,
+}: {
+  content?: AnimalRegistrationContent;
+}) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   // Synchronous re-entrancy guard: state updates flush after the event
   // handler runs, so a fast double-submit could slip past a state check.
@@ -272,19 +280,19 @@ export function AnimalRegistration() {
             className="text-center max-w-4xl mx-auto"
           >
             <h1 className="text-4xl md:text-6xl font-bold mb-6 text-white">
-              Animal Registration
+              {content.heroTitle}
             </h1>
             <p className="text-xl md:text-2xl mb-8 text-white/90">
-              Register your pet with SABA. Annual registration required for all animals.
+              {content.heroDescription}
             </p>
             <div className="bg-black/40 backdrop-blur-sm rounded-lg p-6 max-w-2xl mx-auto">
               <h2 className="text-xl font-semibold mb-2 text-white">Registration Fees</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
                 <div className="bg-white/10 rounded p-3">
-                  <p className="font-semibold text-white">Spayed/Neutered: $10</p>
+                  <p className="font-semibold text-white">Spayed/Neutered: ${REGISTRATION_FEE_FIXED}</p>
                 </div>
                 <div className="bg-white/10 rounded p-3">
-                  <p className="font-semibold text-white">Not Fixed: $100</p>
+                  <p className="font-semibold text-white">Not Fixed: ${REGISTRATION_FEE_NOT_FIXED}</p>
                 </div>
               </div>
             </div>
@@ -306,9 +314,9 @@ export function AnimalRegistration() {
           >
             <Card>
               <CardHeader>
-                <h2 className="text-2xl font-semibold tracking-tight">Animal Registration Form</h2>
+                <h2 className="text-2xl font-semibold tracking-tight">{content.formTitle}</h2>
                 <p className="text-muted-foreground">
-                  Please fill out all required fields. Registration must be renewed annually.
+                  {content.formDescription}
                 </p>
               </CardHeader>
               <CardContent>
@@ -548,27 +556,25 @@ export function AnimalRegistration() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <Card>
                 <CardHeader>
-                  <CardTitle>How to Pay</CardTitle>
+                  <CardTitle>{content.howToPayTitle}</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <ul className="list-disc pl-5 space-y-2">
-                    <li>In person at our office</li>
-                    <li>Via bank transfer</li>
-                    <li>Through our online portal</li>
-                    <li>At participating vet clinics</li>
+                    {content.howToPayItems.map((item, index) => (
+                      <li key={index}>{item}</li>
+                    ))}
                   </ul>
                 </CardContent>
               </Card>
               <Card>
                 <CardHeader>
-                  <CardTitle>What Happens Next</CardTitle>
+                  <CardTitle>{content.whatHappensNextTitle}</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <ul className="list-disc pl-5 space-y-2">
-                    <li>Submit this form with payment receipt</li>
-                    <li>We verify your payment within 24-48 hours</li>
-                    <li>You&apos;ll receive a registration certificate</li>
-                    <li>Annual renewal required</li>
+                    {content.whatHappensNextItems.map((item, index) => (
+                      <li key={index}>{item}</li>
+                    ))}
                   </ul>
                 </CardContent>
               </Card>

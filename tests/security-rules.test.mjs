@@ -137,6 +137,7 @@ for (const [collection, docId] of [
   ["faq", "q1"],
   ["vetServices", "main"],
   ["animalAdoptions", "main"],
+  ["animalRegistration", "main"],
 ]) {
   test(`public can read ${collection}/${docId}`, async () => {
     await assertSucceeds(publicDb().collection(collection).doc(docId).get());
@@ -155,18 +156,10 @@ test("admin can write public content", async () => {
   );
 });
 
-test("animalRegistration page content is admin-only", async () => {
-  await assertFails(publicDb().collection("animalRegistration").doc("main").get());
-  await assertFails(userDb().collection("animalRegistration").doc("main").get());
-  await assertFails(
-    publicDb().collection("animalRegistration").doc("main").set({ hacked: true }),
-  );
-  await assertFails(
-    userDb().collection("animalRegistration").doc("main").set({ hacked: true }),
-  );
-  await assertSucceeds(
-    adminDb().collection("animalRegistration").doc("main").get(),
-  );
+// animalRegistration is in the public-read loop above — it holds only
+// page copy rendered on the public registration page. Writes stay
+// admin-only, so also pin the positive admin case.
+test("admin can write animalRegistration page content", async () => {
   await assertSucceeds(
     adminDb().collection("animalRegistration").doc("main").set({ content: "y" }),
   );

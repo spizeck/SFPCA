@@ -181,7 +181,7 @@ SFPCA/
 | `siteSettings` | Contact info, social links, map embed (doc: `global`) |
 | `animals` | Animal listings — `status` controls public visibility (canonical lifecycle: `src/lib/animal-lifecycle.ts`) |
 | `faq` | FAQ entries with category, question, answer, and display order |
-| `animalRegistration` | Registration **page content** (admin-managed, singular; currently not read by the public form) |
+| `animalRegistration` | Registration **page content** — copy only (doc: `main`; fees are code constants in `src/lib/animal-registration.ts`, not CMS data) |
 | `animalRegistrations` | Submitted registration forms — private owner data (public create → `pending`, admin-only read; canonical lifecycle/schema: `src/lib/animal-registration.ts`) |
 | `admins` | Admin user allowlist (email as document ID) |
 | `vetServices` | Veterinary services page content |

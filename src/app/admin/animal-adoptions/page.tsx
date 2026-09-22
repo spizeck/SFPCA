@@ -10,32 +10,14 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { logError } from "@/lib/logger";
+import {
+  AnimalAdoptionsContent,
+  DEFAULT_ADOPTIONS_CONTENT,
+  Partner,
+  SuccessStory,
+} from "@/lib/page-content";
 
-interface SuccessStory {
-  name: string;
-  story: string;
-  image: string;
-}
-
-interface Partner {
-  name: string;
-  logo: string;
-}
-
-interface AnimalAdoptionsData {
-  heroTitle: string;
-  heroDescription: string;
-  successTitle: string;
-  successDescription: string;
-  successStories: SuccessStory[];
-  availableTitle: string;
-  availableDescription: string;
-  partnerTitle: string;
-  partnerDescription: string;
-  partners: Partner[];
-  ctaTitle: string;
-  ctaDescription: string;
-}
+type AnimalAdoptionsData = AnimalAdoptionsContent;
 
 export default function AnimalAdoptionsAdminPage() {
   const [loading, setLoading] = useState(true);
@@ -43,27 +25,20 @@ export default function AnimalAdoptionsAdminPage() {
   const { toast } = useToast();
   
   const [data, setData] = useState<AnimalAdoptionsData>({
-    heroTitle: "Animal Adoptions",
-    heroDescription: "Find your perfect companion. Give a loving animal their forever home.",
-    successTitle: "Success Stories",
-    successDescription: "Heartwarming stories of animals who found their forever homes",
+    ...DEFAULT_ADOPTIONS_CONTENT,
+    // Start new installs with empty story/partner slots to fill in; the
+    // defaults exist so a missing document still renders good copy.
     successStories: [
       { name: "", story: "", image: "" },
       { name: "", story: "", image: "" },
       { name: "", story: "", image: "" },
     ],
-    availableTitle: "Available for Adoption",
-    availableDescription: "These loving animals are waiting for their forever homes",
-    partnerTitle: "Partner Organizations",
-    partnerDescription: "We work with these amazing organizations to help more animals",
     partners: [
       { name: "", logo: "" },
       { name: "", logo: "" },
       { name: "", logo: "" },
       { name: "", logo: "" },
     ],
-    ctaTitle: "Ready to Adopt?",
-    ctaDescription: "Take the first step in giving an animal a loving home. Contact us to start the adoption process.",
   });
 
   useEffect(() => {
