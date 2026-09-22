@@ -224,7 +224,11 @@ is for erroneous/spam records only.
 - Canonical/OG/sitemap/robots URLs come from `src/lib/seo.ts`
   (`NEXT_PUBLIC_SITE_URL`, production-domain fallback). Never use
   `VERCEL_URL` for canonical URLs — previews must not become canonical
-- shadcn/ui + Tailwind + Framer Motion (respect `shouldReduceMotion`)
+- shadcn/ui + Tailwind + Framer Motion. Reduced motion is handled via
+  `useReducedMotion()` on `transition` props only — `initial`/`animate`/
+  `whileInView`/`exit` must stay identical between server and first client
+  render or hydration mismatches leave content hidden (see
+  `src/lib/animations.ts`)
 
 ## Observability (canonical)
 

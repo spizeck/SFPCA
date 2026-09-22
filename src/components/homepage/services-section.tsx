@@ -3,8 +3,8 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Stethoscope, Heart, ClipboardList, ArrowRight } from "lucide-react";
-import { motion } from "framer-motion";
-import { fadeInUpVariants, staggerContainer, defaultTransition, shouldReduceMotion } from "@/lib/animations";
+import { motion, useReducedMotion } from "framer-motion";
+import { fadeInUpVariants, staggerContainer, defaultTransition, instantTransition, useInViewAnimationProps } from "@/lib/animations";
 import Link from "next/link";
 
 interface ServicesSectionProps {
@@ -35,17 +35,8 @@ export function ServicesSection({ data }: ServicesSectionProps) {
   };
 
   const servicesData = data.title && data.items.length > 0 ? data : fallbackData;
-  const animationProps = shouldReduceMotion() ? {
-    initial: {},
-    whileInView: undefined,
-    viewport: undefined,
-    transition: {},
-  } : {
-    initial: "initial",
-    whileInView: "whileInView",
-    viewport: { once: true, margin: "-100px" },
-    transition: defaultTransition,
-  };
+  const animationProps = useInViewAnimationProps();
+  const reduceMotion = useReducedMotion();
 
   return (
     <motion.section 
@@ -71,7 +62,7 @@ export function ServicesSection({ data }: ServicesSectionProps) {
             <motion.div
               key={index}
               variants={fadeInUpVariants}
-              transition={{
+              transition={reduceMotion ? instantTransition : {
                 ...defaultTransition,
                 delay: index * 0.1,
               }}

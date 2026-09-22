@@ -1,6 +1,6 @@
 "use client"
 
-import { Variants, Transition } from "framer-motion"
+import { Variants, Transition, useReducedMotion } from "framer-motion"
 
 // Base animation variants
 export const fadeInUpVariants: Variants = {
@@ -56,28 +56,31 @@ export const defaultViewport = {
   margin: "-100px",
 }
 
-// Check for reduced motion preference
-export const shouldReduceMotion = () => {
-  if (typeof window === "undefined") return false
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches
+// Reduced-motion experience: fully instant, no delay.
+export const instantTransition: Transition = { duration: 0, delay: 0 }
+
+// Hydration rule: `initial`, `animate`, `whileInView`, `exit`, `variants`,
+// and `viewport` are serialized into the rendered markup, so they must be
+// identical on the server and the first client render — never vary them by
+// media query. `transition` is never serialized, so it is the one prop that
+// may safely depend on the user's reduced-motion preference.
+//
+// Do not reintroduce a render-time matchMedia check here: the server has no
+// `window`, so such a check produces divergent markup for reduced-motion
+// users (React reports a hydration mismatch and leaves the stale hidden
+// styles in place, permanently hiding content).
+export function useMotionTransition(transition: Transition = defaultTransition): Transition {
+  const reduceMotion = useReducedMotion()
+  return reduceMotion ? instantTransition : transition
 }
 
-// Animation props that respect reduced motion
-export const getAnimationProps = (variants: Variants, transition = defaultTransition) => {
-  if (shouldReduceMotion()) {
-    return {
-      initial: false,
-      whileInView: undefined,
-      viewport: undefined,
-      transition: undefined,
-    }
-  }
-
+// Shared props for scroll-triggered reveal sections. Markup-affecting props
+// are constant; only the transition honors reduced motion.
+export function useInViewAnimationProps(transition: Transition = defaultTransition) {
   return {
-    initial: "initial",
-    whileInView: "whileInView",
+    initial: "initial" as const,
+    whileInView: "whileInView" as const,
     viewport: defaultViewport,
-    transition,
-    variants,
+    transition: useMotionTransition(transition),
   }
 }

@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { fadeInUpVariants, shouldReduceMotion } from "@/lib/animations";
+import { instantTransition } from "@/lib/animations";
 import { collection, getDocs, orderBy, query } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { logError } from "@/lib/logger";
@@ -22,6 +22,7 @@ export function FaqSection() {
   const [openItems, setOpenItems] = useState<{ [key: string]: boolean }>({});
   const [faqs, setFaqs] = useState<FAQItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     loadFaqs();
@@ -67,9 +68,9 @@ export function FaqSection() {
     <section className="py-20 bg-background">
       <div className="container mx-auto px-4">
         <motion.div
-          initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
+          initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
+          transition={reduceMotion ? instantTransition : { duration: 0.6 }}
           viewport={{ once: true }}
           className="text-center mb-16"
         >
@@ -97,9 +98,9 @@ export function FaqSection() {
             return (
               <motion.div
                 key={key}
-                initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 10 }}
+                initial={{ opacity: 0, y: 10 }}
                 whileInView={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: index * 0.05 }}
+                transition={reduceMotion ? instantTransition : { duration: 0.3, delay: index * 0.05 }}
                 viewport={{ once: true }}
               >
                 <Card>
@@ -128,7 +129,7 @@ export function FaqSection() {
                         initial={{ height: 0, opacity: 0 }}
                         animate={{ height: "auto", opacity: 1 }}
                         exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: shouldReduceMotion() ? 0 : 0.3 }}
+                        transition={{ duration: reduceMotion ? 0 : 0.3 }}
                       >
                         <CardContent className="pt-0">
                           <p className="text-muted-foreground">

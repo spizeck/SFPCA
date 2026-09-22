@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
-import { shouldReduceMotion } from "@/lib/animations";
+import { motion, useReducedMotion } from "framer-motion";
+import { instantTransition } from "@/lib/animations";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { OptimizedVideo } from "@/components/ui/optimized-video";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ export function AnimalAdoptions({
   const [animals, setAnimals] = useState<Animal[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("all");
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     loadAnimals();
@@ -62,9 +63,9 @@ export function AnimalAdoptions({
         {/* Content */}
         <div className="relative z-10 container mx-auto px-4">
           <motion.div
-            initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
+            initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
+            transition={reduceMotion ? instantTransition : { duration: 0.6 }}
             className="text-center max-w-4xl mx-auto"
           >
             <h1 className="text-4xl md:text-6xl font-bold mb-6 text-white">
@@ -96,9 +97,9 @@ export function AnimalAdoptions({
             {content.successStories.map((story, index) => (
               <motion.div
                 key={index}
-                initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
+                initial={{ opacity: 0, y: 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: index * 0.1 }}
+                transition={reduceMotion ? instantTransition : { duration: 0.5, delay: index * 0.1 }}
                 viewport={{ once: true }}
               >
                 <Card className="h-full">
@@ -165,9 +166,9 @@ export function AnimalAdoptions({
               {filteredAnimals.map((animal, index) => (
                 <motion.div
                   key={animal.id}
-                  initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
+                  initial={{ opacity: 0, y: 20 }}
                   whileInView={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5, delay: index * 0.1 }}
+                  transition={reduceMotion ? instantTransition : { duration: 0.5, delay: index * 0.1 }}
                   viewport={{ once: true }}
                 >
                   <Card className="h-full hover:shadow-lg transition-shadow">
@@ -226,9 +227,9 @@ export function AnimalAdoptions({
             {content.partners.map((partner, index) => (
               <motion.div
                 key={index}
-                initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
+                initial={{ opacity: 0, y: 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: index * 0.1 }}
+                transition={reduceMotion ? instantTransition : { duration: 0.5, delay: index * 0.1 }}
                 viewport={{ once: true }}
                 className="text-center"
               >

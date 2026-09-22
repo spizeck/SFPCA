@@ -97,6 +97,18 @@ export default function RootLayout({
         />
       </head>
       <body className={inter.className}>
+        {/* Framer Motion renders reveal animations as hidden inline styles
+            (e.g. opacity:0) in SSR markup and relies on hydration to reveal
+            them. Without JavaScript that never happens, so restore content
+            visibility here. */}
+        <noscript>
+          <style
+            dangerouslySetInnerHTML={{
+              __html:
+                '[style*="opacity:0;"],[style$="opacity:0"],[style*="opacity: 0;"],[style$="opacity: 0"]{opacity:1 !important;transform:none !important;}',
+            }}
+          />
+        </noscript>
         <a
           href="#main-content"
           className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[100] focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-md focus:outline-none"

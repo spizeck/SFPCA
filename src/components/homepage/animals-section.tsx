@@ -3,29 +3,21 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Animal } from "@/lib/types";
 import Image from "next/image";
-import { motion } from "framer-motion";
-import { fadeInUpVariants, fadeInVariants, staggerContainer, defaultTransition, shouldReduceMotion } from "@/lib/animations";
+import { motion, useReducedMotion } from "framer-motion";
+import { fadeInUpVariants, fadeInVariants, staggerContainer, defaultTransition, instantTransition, useInViewAnimationProps, useMotionTransition } from "@/lib/animations";
 
 interface AnimalsSectionProps {
   animals: Animal[];
 }
 
 export function AnimalsSection({ animals }: AnimalsSectionProps) {
+  const animationProps = useInViewAnimationProps();
+  const delayedTransition = useMotionTransition({ ...defaultTransition, delay: 0.2 });
+  const reduceMotion = useReducedMotion();
+
   if (animals.length === 0) {
     return null;
   }
-
-  const animationProps = shouldReduceMotion() ? {
-    initial: {},
-    whileInView: undefined,
-    viewport: undefined,
-    transition: {},
-  } : {
-    initial: "initial",
-    whileInView: "whileInView",
-    viewport: { once: true, margin: "-100px" },
-    transition: defaultTransition,
-  };
 
   return (
     <motion.section 
@@ -46,7 +38,7 @@ export function AnimalsSection({ animals }: AnimalsSectionProps) {
           className="text-center text-muted-foreground mb-12 max-w-2xl mx-auto"
           variants={fadeInUpVariants}
           {...animationProps}
-          transition={{ ...defaultTransition, delay: 0.2 }}
+          transition={delayedTransition}
         >
           Meet our wonderful animals looking for their forever homes
         </motion.p>
@@ -59,7 +51,7 @@ export function AnimalsSection({ animals }: AnimalsSectionProps) {
             <motion.div
               key={animal.id}
               variants={fadeInUpVariants}
-              transition={{
+              transition={reduceMotion ? instantTransition : {
                 ...defaultTransition,
                 delay: index * 0.1,
               }}
@@ -69,7 +61,7 @@ export function AnimalsSection({ animals }: AnimalsSectionProps) {
                   <motion.div 
                     className="relative h-48 w-full bg-muted"
                     variants={fadeInVariants}
-                    transition={{
+                    transition={reduceMotion ? instantTransition : {
                       ...defaultTransition,
                       delay: index * 0.1 + 0.2,
                     }}
