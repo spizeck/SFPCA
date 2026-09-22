@@ -51,6 +51,22 @@ test.describe("animal publication lifecycle", () => {
       page.getByRole("heading", { name: animalName }),
     ).toBeVisible();
 
+    // The card's "Learn More" link navigates to the public detail page.
+    const detailLink = page.getByRole("link", {
+      name: `Learn More About ${animalName}`,
+    });
+    await expect(detailLink).toBeVisible();
+    const detailHref = await detailLink.getAttribute("href");
+    expect(detailHref).toMatch(/^\/animal-adoptions\/.+/);
+    await detailLink.click();
+    await expect(page).toHaveURL(detailHref as string);
+    await expect(
+      page.getByRole("heading", { name: animalName, exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Contact Us to Adopt" }),
+    ).toBeVisible();
+
     // Transition to a non-public state through the same form.
     await page.goto("/admin/animals");
     await page.getByRole("button", { name: `Edit ${animalName}` }).click();
@@ -76,5 +92,18 @@ test.describe("animal publication lifecycle", () => {
     const adoptedRow = page.getByRole("row", { name: new RegExp(animalName) });
     await expect(adoptedRow).toContainText("Adopted");
     await expect(adoptedRow).toContainText("Not public");
+
+    // Its detail page now 404s — a non-public animal is
+    // indistinguishable from a nonexistent one (force-dynamic render +
+    // rules deny, so there is no stale page to leak through).
+    const detailResponse = await page.goto(detailHref as string);
+    expect(detailResponse?.status()).toBe(404);
+  });
+
+  test("a nonexistent animal id returns a plain 404", async ({ page }) => {
+    const response = await page.goto(
+      "/animal-adoptions/not-a-real-animal-id",
+    );
+    expect(response?.status()).toBe(404);
   });
 });

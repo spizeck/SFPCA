@@ -53,6 +53,19 @@ describe("AnimalAdoptions", () => {
     });
   });
 
+  test("each card links to that animal's public detail page", async () => {
+    mockGetAvailableAnimals.mockResolvedValue([
+      animal({ id: "a1", name: "Buddy" }),
+    ]);
+
+    render(<AnimalAdoptions />);
+
+    const link = await screen.findByRole("link", {
+      name: "Learn More About Buddy",
+    });
+    expect(link).toHaveAttribute("href", "/animal-adoptions/a1");
+  });
+
   test("shows an empty-state message when no animals are available", async () => {
     mockGetAvailableAnimals.mockResolvedValue([]);
 

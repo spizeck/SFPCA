@@ -196,8 +196,10 @@ export function AnimalAdoptions({
                       <p className="text-muted-foreground mb-4">
                         {animal.description}
                       </p>
-                      <Button className="w-full">
-                        Learn More About {animal.name}
+                      <Button className="w-full" asChild>
+                        <Link href={`/animal-adoptions/${animal.id}`}>
+                          Learn More About {animal.name}
+                        </Link>
                       </Button>
                     </CardContent>
                   </Card>
