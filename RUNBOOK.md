@@ -388,17 +388,14 @@ Do not blindly restore old rules if the app's data expectations moved
 restore the rules that match the *deployed app's* expectations, which
 may mean a forward fix instead.
 
-### 11e. Data recovery — honest status
+### 11e. Data recovery
 
-**Code rollback is not data rollback.** Nothing in this repository
-implements backups: no Firestore scheduled exports, no
-point-in-time-recovery config, no Storage backup. Firestore PITR and
-scheduled exports are Google Cloud console settings that cannot be
-verified from the repo — **[console] confirm whether PITR/exports are
-enabled on `saba-sfpca` before you ever need them** (tracked in
-GitHub issue #135). If neither is enabled, deleted/corrupted Firestore data is
-unrecoverable — a reason to treat rules deploys (§8) and admin deletes
-with care.
+**Code rollback is not data rollback.** Firestore recovery is covered in
+§17 — PITR and managed backup state, the audited current posture, and the
+full restore procedure. **As of the §17 audit (2026-09-22) production had
+neither enabled** — until Chad completes §17b, deleted or corrupted
+Firestore data is unrecoverable. Firebase Storage objects are a separate
+boundary (§17e).
 
 ## 12. Multi-system release ordering
 
@@ -710,3 +707,214 @@ direct `gtag` loader to the app — that bypasses the consent boundary.
 **Local testing** — set `NEXT_PUBLIC_GTM_ID=GTM-XXXXXXX` in `.env.local`
 to exercise the accept path (any value works; block/inspect requests in
 DevTools). E2E uses `GTM-E2ETEST` with all Google traffic intercepted.
+
+## 17. Firestore backup & recovery (post-#135)
+
+Firestore resilience uses **Google-managed features only** — PITR plus
+scheduled backups. There is deliberately no application-level backup
+code: no export cron, no JSON dumps in Git, no second database
+maintained by the app. A homemade copy job is a second system to break
+and a second copy of PII to secure; the managed features are strictly
+better here.
+
+### 17a. Audited state
+
+Verified 2026-09-22 with `gcloud` (account `chadnuttall1@gmail.com`,
+explicit `--project=saba-sfpca`) against the production `(default)`
+Firestore Native database in `nam5`:
+
+| Setting | State |
+|---|---|
+| Point-in-time recovery | **DISABLED** |
+| Scheduled backups | **none** (0 schedules, 0 backups) |
+| Database delete protection | **DISABLED** |
+
+Until §17b is completed, **production Firestore data is unrecoverable
+once deleted or corrupted.**
+
+### 17b. Enable protection — manual operator step (Chad)
+
+These are one-time `gcloud` commands run by the project owner. **Before
+any modifying command, verify the target:**
+
+```bash
+gcloud auth list                      # confirm the intended account
+gcloud projects describe saba-sfpca   # confirm the project exists/matches
+gcloud firestore databases describe --database='(default)' \
+  --project=saba-sfpca --format='value(name)'
+# expected: projects/saba-sfpca/databases/(default)
+```
+
+Then:
+
+```bash
+# 1. Point-in-time recovery — keeps 7 days of document versions,
+#    minute granularity. Reversible (--no-enable-pitr), near-zero cost
+#    at this dataset size.
+gcloud firestore databases update --enable-pitr \
+  --database='(default)' --project=saba-sfpca
+
+# 2. Weekly managed backup. Retention is an org policy choice — 8 weeks
+#    is a reasonable default; the platform maximum is 14 weeks.
+gcloud firestore backups schedules create \
+  --database='(default)' --project=saba-sfpca \
+  --recurrence=weekly --day-of-week=SUN --retention=8w
+
+# 3. (Recommended, optional) block accidental database deletion.
+gcloud firestore databases update --delete-protection \
+  --database='(default)' --project=saba-sfpca
+```
+
+Verify afterward (all read-only):
+
+```bash
+gcloud firestore databases describe --database='(default)' \
+  --project=saba-sfpca \
+  --format='yaml(pointInTimeRecoveryEnablement,deleteProtectionState,earliestVersionTime)'
+# expect: POINT_IN_TIME_RECOVERY_ENABLED (+ DELETE_PROTECTION_ENABLED if step 3 done)
+
+gcloud firestore backups schedules list \
+  --database='(default)' --project=saba-sfpca
+# expect: one weekly schedule, retention 8w
+```
+
+Note: PITR only retains versions **from enablement forward** — the
+7-day window fills gradually (`earliestVersionTime` shows the floor).
+A deletion in the first minutes after enabling may still be
+unrecoverable.
+
+### 17c. Recovery model — what each mechanism covers
+
+**PITR (once enabled):** read or clone the database as of any minute in
+the last 7 days. Covers recent accidents — an admin deleting the wrong
+registration, a bad deploy writing corrupt documents, a botched bulk
+edit — as long as it's caught within a week. RPO in practice is ~1
+minute. PITR data is read via a `snapshot-time` clone/read, so recovery
+can be **surgical** (recover just `animalRegistrations/<id>`) rather
+than all-or-nothing.
+
+**Scheduled backups:** whole-database snapshots kept for the configured
+retention (up to 14 weeks). Covers incidents discovered *after* the
+7-day PITR window, and provides a stable long-horizon fallback. Restores
+always create a **new database** — see §17d.
+
+**Neither covers:**
+- **Firebase Storage objects** — `receipts/` (payment receipts, PII)
+  and `team-photos/` are not in Firestore. PITR/backup restores do not
+  bring them back. See §17e.
+- **Incidents older than the PITR window / backup retention** —
+  retention is finite by design.
+- **Deletion of the project itself**, or an attacker/operator who
+  deletes both data and backups — backups live in the same project.
+- **Deployed app logic bugs** — restoring data does not fix the code
+  that corrupted it; contain the cause first (§17d step 1).
+
+### 17d. Restore procedure
+
+> **These steps can overwrite or delete production data.** Verify the
+> project (`--project=saba-sfpca`, `gcloud projects describe saba-sfpca`)
+> before every command. Nothing below is a routine copy/paste
+> operation — read each step before running it.
+
+1. **Contain.** Stop the thing causing corruption: roll back the bad
+   deploy (§11a/§11b), or enable maintenance mode (`SITE_MAINTENANCE_MODE`,
+   §9) so users don't keep writing while you recover. For a one-off
+   admin mistake, just stop making changes.
+2. **Identify the incident window.** Establish the last-known-good
+   timestamp (UTC, minute precision). Check Cloud Logging and admin
+   activity around the event.
+3. **Choose the source.** Within 7 days of the incident → PITR (finest
+   granularity). Older → the newest backup predating the incident:
+   `gcloud firestore backups list --project=saba-sfpca`.
+4. **Preserve current state.** Before any restore, note what exists
+   now — writes since the incident may be valid data you'll want to
+   re-apply. For surgical recovery, record the affected document IDs.
+5. **Recover into a NEW database — never in place.** Both mechanisms
+   create a separate database; verify data there *before* touching
+   production:
+
+   ```bash
+   # PITR: clone (default) as of the last-good minute into a new DB.
+   # snapshot-time must be a whole minute, within the PITR window,
+   # at/after earliestVersionTime.
+   gcloud firestore databases clone \
+     --source-database='projects/saba-sfpca/databases/(default)' \
+     --destination-database='recovery-YYYYMMDD' \
+     --snapshot-time='YYYY-MM-DDTHH:MM:00Z' \
+     --project=saba-sfpca
+
+   # OR from a managed backup (new DB, same location):
+   gcloud firestore databases restore \
+     --source-backup='projects/saba-sfpca/locations/nam5/backups/BACKUP_ID' \
+     --destination-database='recovery-YYYYMMDD' \
+     --project=saba-sfpca
+   ```
+
+6. **Validate in the recovery database** (Firebase console → Firestore →
+   pick `recovery-YYYYMMDD`): confirm the affected collections exist and
+   spot-check known-good documents. **Do not paste recovered values
+   into tickets, chats, or logs** — `animalRegistrations` contains owner
+   PII.
+7. **Get the data back into production.** For this dataset the
+   practical path is surgical: copy the affected documents from the
+   recovery DB into `(default)` via the console, or `gcloud firestore
+   export`/`import` filtered by collection into a GCS bucket. A
+   whole-database cutover (pointing the app at the recovery DB) is
+   possible but means re-pointing config and re-establishing PITR on the
+   new DB — prefer surgical recovery for this application's size.
+   **Restoring over `(default)` itself is destructive — do not do it
+   without first preserving current state and confirming the project.**
+8. **Resume normal operation** — disable maintenance mode / redeploy the
+   fixed build.
+9. **Verify security rules** — restores carry no rules; rules deploy
+   from the repo (§8) and apply to all databases in the project, but
+   confirm the production access paths work after recovery.
+10. **Clean up and record** — delete the recovery database when done
+    (`gcloud firestore databases delete --database='recovery-YYYYMMDD'
+    --project=saba-sfpca` — verify the name twice; this deletes data),
+    and write up the incident: window, cause, what was recovered, follow-ups.
+
+### 17e. Firestore vs Storage — the boundary
+
+PITR and backups protect **Firestore documents only**:
+
+| Data | Covered by PITR/backups |
+|---|---|
+| `homepage/main`, `siteSettings/global`, `animalAdoptions/main`, `animalRegistration/main`, `vetServices/main`, `faq/*` — site content | yes |
+| `animals/*` — animal records | yes |
+| `animalRegistrations/*` — owner PII + receipt references | yes |
+| `admins/*` — admin allowlist | yes |
+| `receipts/*` in Storage — payment receipt images/PDFs | **no** |
+| `team-photos/*` in Storage — public images | **no** |
+
+A restored `animalRegistrations` document may reference a `receipts/`
+object that no longer exists (and vice versa — `sweepOrphanedReceipts`
+deletes Storage objects whose registration document is gone, so an old
+backup's registrations can point at swept receipts). Storage disaster
+recovery is a separate, deliberately unfixed gap — tracked in its own
+issue.
+
+### 17f. Security & privacy
+
+- Backups and PITR clones contain `animalRegistrations` PII (owner
+  names, phones, emails, addresses, payment-receipt references).
+  Restrict restore/backup operations to the project owner and
+  authorized operators; never copy production data into CI, tests,
+  Git, screenshots, or logs.
+- Procedure testing uses **synthetic data only** — never production
+  records as fixtures.
+
+### 17g. Testing status — honest note
+
+The inspection commands in §17a were run read-only against production
+and confirmed the audited state. The managed clone/restore paths were
+**not executed** — exercising them creates real databases in the
+production project, which is an operator action. The emulator does not
+support PITR or managed backups, so there is no local equivalent.
+Until a first restore is rehearsed, treat §17d as untested beyond
+command-surface verification (`gcloud firestore databases clone`,
+`restore`, `backups schedules create` confirmed present in SDK
+548.0.0). Manual verification checklist after enabling: run the §17b
+verify block, confirm `earliestVersionTime` advances, and confirm a
+backup object appears under `gcloud firestore backups list` after the
+first scheduled run.

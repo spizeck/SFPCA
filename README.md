@@ -208,6 +208,13 @@ commands, pre-release and smoke checklists, maintenance mode, rollbacks,
 and incident decision paths — lives in [RUNBOOK.md](RUNBOOK.md). This
 section is the short version.
 
+**Data recovery:** Firestore resilience is Google-managed only — PITR +
+scheduled backups, no application-level backup code. Current production
+state, the enable commands, and the restore procedure are in
+[RUNBOOK.md §17](RUNBOOK.md). Firebase Storage objects (registration
+receipts, team photos) are **not** covered by Firestore backups — see
+§17e for that boundary.
+
 ### Vercel
 
 1. Push code to GitHub

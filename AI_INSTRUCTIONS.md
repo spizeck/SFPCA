@@ -270,6 +270,13 @@ is for erroneous/spam records only.
   inlining (same constraint as the Sentry DSN, #147). Sentry is
   operational monitoring — never gate it behind analytics consent. See
   RUNBOOK §16.
+- Data recovery (post-#135): Firestore resilience is Google-managed
+  only — PITR + scheduled backups on `(default)` in `saba-sfpca`. Never
+  build app-level backup code (no export crons, no JSON dumps in Git,
+  no second database). Restores always create a NEW database — recover
+  surgically, never in place, and verify `--project=saba-sfpca` before
+  any modifying command. Firestore backups do NOT cover Storage objects
+  (`receipts/`, `team-photos/`). See RUNBOOK §17.
 
 ## Testing (commands in `package.json`)
 
