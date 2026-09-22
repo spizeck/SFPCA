@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Homepage } from "@/lib/types";
 import { TeamManager } from "@/components/admin/team-manager";
 import { Button } from "@/components/ui/button";
@@ -15,47 +15,49 @@ import { LoadError } from "@/components/admin/load-error";
 import { saveHomepageData, loadHomepageData } from "./actions";
 import { logError } from "@/lib/logger";
 
+const INITIAL_DATA: Homepage = {
+  hero: {
+    title: "",
+    subtitle: "",
+  },
+  about: {
+    title: "",
+    content: "",
+  },
+  whoWeAre: {
+    title: "",
+    subtitle: "",
+    team: [],
+  },
+  services: {
+    title: "",
+    items: [
+      { title: "", description: "" },
+      { title: "", description: "" },
+      { title: "", description: "" },
+    ],
+  },
+  whereWeAre: {
+    title: "",
+    subtitle: "",
+    address: "",
+    mapEmbedUrl: "",
+    hours: "",
+  },
+  donation: {
+    title: "",
+    content: "",
+    paymentMethods: "",
+  },
+};
+
 export default function HomepageEditor() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const saveMutation = useMutation();
   const { toast } = useToast();
 
-  const [data, setData] = useState<Homepage>({
-    hero: {
-      title: "",
-      subtitle: "",
-    },
-    about: {
-      title: "",
-      content: "",
-    },
-    whoWeAre: {
-      title: "",
-      subtitle: "",
-      team: [],
-    },
-    services: {
-      title: "",
-      items: [
-        { title: "", description: "" },
-        { title: "", description: "" },
-        { title: "", description: "" },
-      ],
-    },
-    whereWeAre: {
-      title: "",
-      subtitle: "",
-      address: "",
-      mapEmbedUrl: "",
-      hours: "",
-    },
-    donation: {
-      title: "",
-      content: "",
-      paymentMethods: "",
-    },
-  });
+  const [data, setData] = useState<Homepage>(INITIAL_DATA);
 
   // Snapshot of the last loaded/saved content; any drift from it means
   // there are unsaved edits worth guarding against accidental navigation.
@@ -64,11 +66,7 @@ export default function HomepageEditor() {
     JSON.stringify(data) !== snapshotRef.current;
   useUnsavedChangesGuard(dirty);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     setLoadError(false);
     try {
@@ -77,7 +75,11 @@ export default function HomepageEditor() {
         setData(result);
         snapshotRef.current = JSON.stringify(result);
       } else {
-        snapshotRef.current = JSON.stringify(data);
+        // The editor only renders after a successful load, so `data`
+        // still equals INITIAL_DATA here — snapshot that constant rather
+        // than closing over state, which would make this callback
+        // unstable and re-run the load effect on every edit.
+        snapshotRef.current = JSON.stringify(INITIAL_DATA);
       }
     } catch (error) {
       logError("admin", "homepage-load", error);
@@ -85,7 +87,11 @@ export default function HomepageEditor() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handleSave = () => {
     saveMutation.run(async () => {

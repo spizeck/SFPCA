@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
@@ -35,11 +35,7 @@ export default function AnimalRegistrationAdminPage() {
     JSON.stringify(data) !== snapshotRef.current;
   useUnsavedChangesGuard(dirty);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     setLoadError(false);
     try {
@@ -50,7 +46,11 @@ export default function AnimalRegistrationAdminPage() {
         setData(docSnap.data() as AnimalRegistrationData);
         snapshotRef.current = JSON.stringify(docSnap.data());
       } else {
-        snapshotRef.current = JSON.stringify(data);
+        // The editor only renders after a successful load, so `data`
+        // still equals DEFAULT_REGISTRATION_CONTENT here — snapshot that
+        // constant rather than closing over state, which would make this
+        // callback unstable and re-run the load effect on every edit.
+        snapshotRef.current = JSON.stringify(DEFAULT_REGISTRATION_CONTENT);
       }
     } catch (error) {
       logError("admin", "registration-content-load", error);
@@ -58,7 +58,11 @@ export default function AnimalRegistrationAdminPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handleSave = () => {
     saveMutation.run(async () => {
