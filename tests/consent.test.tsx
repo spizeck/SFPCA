@@ -11,7 +11,6 @@ import {
   GTM_SERVICE_NAME,
   GTM_SCRIPT_ID,
 } from "@/lib/consent";
-import { ConsentManager } from "@/components/consent/consent-manager";
 import { ConsentSettingsButton } from "@/components/consent/consent-settings-button";
 
 const klaroMocks = vi.hoisted(() => ({
@@ -221,7 +220,17 @@ describe("buildKlaroConfig", () => {
 });
 
 describe("ConsentManager", () => {
+  // `klaroInitialized` is module-level state in the component — re-import a
+  // fresh module per test so mounts actually exercise the one-time guard
+  // instead of inheriting the flag from an earlier test.
+  async function freshConsentManager() {
+    vi.resetModules();
+    return (await import("@/components/consent/consent-manager"))
+      .ConsentManager;
+  }
+
   it("initializes Klaro once and exposes it for the settings control", async () => {
+    const ConsentManager = await freshConsentManager();
     render(<ConsentManager />);
     await waitFor(() => expect(klaroMocks.setup).toHaveBeenCalledTimes(1));
     expect(klaroMocks.setup).toHaveBeenCalledWith(
@@ -232,15 +241,16 @@ describe("ConsentManager", () => {
   });
 
   it("does not re-run setup on a second mount", async () => {
-    // klaroInitialized persists once set (same page lifecycle) — a second
-    // mount must be a no-op rather than a second setup.
+    const ConsentManager = await freshConsentManager();
     render(<ConsentManager />);
+    await waitFor(() => expect(klaroMocks.setup).toHaveBeenCalledTimes(1));
     render(<ConsentManager />);
     await new Promise((r) => setTimeout(r, 50));
-    expect(klaroMocks.setup.mock.calls.length).toBeLessThanOrEqual(1);
+    expect(klaroMocks.setup).toHaveBeenCalledTimes(1);
   });
 
-  it("renders nothing into the React tree — Klaro owns its own DOM", () => {
+  it("renders nothing into the React tree — Klaro owns its own DOM", async () => {
+    const ConsentManager = await freshConsentManager();
     const { container } = render(<ConsentManager />);
     expect(container).toBeEmptyDOMElement();
   });
