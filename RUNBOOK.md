@@ -80,7 +80,7 @@ files is not used by production code.
 | `FIREBASE_ADMIN_CLIENT_EMAIL` | Admin SDK service account | **yes** |
 | `FIREBASE_ADMIN_PRIVATE_KEY` | Admin SDK service account | **yes** |
 | `ADMIN_EMAILS` | Bootstrap admin allowlist (comma-separated) | yes-ish — emails are personal data |
-| `NEXT_PUBLIC_GA_ID` | Google Analytics tag; GA absent when unset | no |
+| `NEXT_PUBLIC_GTM_ID` | Google Tag Manager container; injected only after analytics consent (§16); absent ⇒ no Google traffic | no |
 | `NEXT_PUBLIC_SITE_URL` | Canonical origin for sitemap/OG/canonical | no |
 | `SITE_MAINTENANCE_MODE` | `"true"` gates all public routes (§9) | no, but server-only — never `NEXT_PUBLIC_*` |
 | `NEXT_PUBLIC_SENTRY_DSN` | Sentry runtime DSN — enables error capture; SDK never initializes without it | no — public config by design, not an auth secret |
@@ -649,3 +649,64 @@ carrier, and check whether the same data reached Vercel logs.
 
 **Local development and CI** send nothing: no DSN is configured, so
 the SDK never initializes and no network calls are made.
+
+## 16. Consent & analytics (post-#116)
+
+Klaro (`klaro@0.7.21`, OSS) is the consent layer; Google Tag Manager is
+the only tag-loading mechanism. The app never loads Google resources
+before affirmative analytics consent.
+
+**Architecture** — `src/lib/consent.ts` is the single consent boundary:
+
+- `src/app/layout.tsx` pushes Google Consent Mode v2 defaults (all
+  denied) into `dataLayer` before any script can run.
+- `src/components/consent/consent-manager.tsx` mounts Klaro once;
+  `klaro@0.7.21` is dynamically imported in a client effect (UMD bundle —
+  never imported during SSR).
+- The Klaro service callback pushes `consent update` entries and injects
+  `gtm.js?id=$NEXT_PUBLIC_GTM_ID` exactly once (script id
+  `sfpca-gtm-script`, DOM-checked). Declining later pushes a denied
+  update; an already-loaded container cannot be unloaded, but Consent
+  Mode stops further collection.
+
+**Consent categories** — `necessary` (always on; auth/session cookies)
+and `analytics` (optional; the `google-tag-manager` service). No
+marketing/advertising purpose exists — no such tag is in use. Sentry is
+operational error monitoring (§15), is not a Klaro service, and is not
+gated by analytics consent.
+
+**Consent Mode mapping** — `analytics` granted ⇒
+`analytics_storage=granted`; denied ⇒ `denied`. `ad_storage`,
+`ad_user_data`, `ad_personalization` are always `denied` — the site has
+no ad features. Keep it that way unless a real ad tag is added.
+
+**Storage** — `localStorage` key `sfpca-consent` (no expiry — persists
+until the visitor clears it or changes choice). Bump `version` in
+`buildKlaroConfig()` to re-prompt after consent-semantics changes.
+
+**Persistent control** — footer "Cookie settings" button reopens the
+Klaro modal (`window.klaro.show(config, true)`); privacy policy at
+`/privacy`.
+
+**Operator steps (production)** — Chad must do these manually; nothing
+here is automated:
+
+1. Create the GTM container; configure the GA4 tag inside it. In GTM,
+   require the `analytics_storage` consent signal for the tag (or rely
+   on the app's injection gating — both are in place).
+2. Set `NEXT_PUBLIC_GTM_ID` (Vercel, Production; Preview optional —
+   same consent flow applies).
+3. Redeploy. Verify: first visit shows the notice and zero requests to
+   `googletagmanager.com` in DevTools; "Accept all" loads `gtm.js` once;
+   "I decline" loads nothing; "Cookie settings" in the footer reopens
+   the modal.
+
+**Adding future tags** — create them inside the GTM container and give
+them the matching consent requirement; if a tag isn't analytics, add a
+new Klaro service + purpose in `buildKlaroConfig()` (bump `version`) and
+extend `GoogleConsentState` mapping. Never add `<script>` tags or a
+direct `gtag` loader to the app — that bypasses the consent boundary.
+
+**Local testing** — set `NEXT_PUBLIC_GTM_ID=GTM-XXXXXXX` in `.env.local`
+to exercise the accept path (any value works; block/inspect requests in
+DevTools). E2E uses `GTM-E2ETEST` with all Google traffic intercepted.

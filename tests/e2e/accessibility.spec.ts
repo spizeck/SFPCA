@@ -8,6 +8,7 @@
 // becoming a brittle pseudo-compliance gate.
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
+import { dismissConsentNotice } from "./helpers";
 
 const PUBLIC_ROUTES = [
   "/",
@@ -25,6 +26,9 @@ const PUBLIC_ROUTES = [
 // auto-rotate, and background videos stay inert behind their dark overlay.
 // Axe cannot reliably evaluate text composited over a moving <video>, so
 // this also exercises the reduced-motion code path end to end.
+// The Klaro consent notice auto-focuses on first visit (correct dialog
+// behavior). Route scans dismiss it so they measure the page itself
+// deterministically; the notice/modal get their own dedicated scan below.
 async function gotoAndSettle(
   page: import("@playwright/test").Page,
   route: string,
@@ -33,6 +37,7 @@ async function gotoAndSettle(
   await page.goto(route, { waitUntil: "domcontentloaded" });
   await expect(page.locator("main#main-content")).toBeVisible();
   await expect(page.locator("main h1")).toBeVisible();
+  await dismissConsentNotice(page);
 
   // Client-side Firestore reads: wait for real seeded content.
   if (route === "/") {
@@ -46,8 +51,9 @@ async function gotoAndSettle(
     ).toBeVisible();
   }
   if (route === "/animal-adoptions") {
+    // "Max" appears in both the featured card and the available list.
     await expect(
-      page.getByRole("heading", { name: "Max" }),
+      page.getByRole("heading", { name: "Max" }).first(),
     ).toBeVisible();
   }
 }
@@ -101,10 +107,39 @@ test.describe("public accessibility", () => {
     ).toEqual([]);
   });
 
+  test("consent notice and settings modal pass the axe scan", async ({
+    page,
+  }) => {
+    // Same determinism as the route scans: mid-animation translucency
+    // produces false color-contrast readings.
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/");
+
+    const notice = page.locator(".cookie-notice");
+    await expect(notice).toBeVisible();
+    expect(
+      (await scan(page)).highImpact.map(
+        (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(" | ")}`,
+      ),
+      "axe violations on the consent notice",
+    ).toEqual([]);
+
+    await notice.getByRole("button", { name: "I decline" }).click();
+    await page.getByRole("button", { name: "Cookie settings" }).click();
+    await expect(page.locator(".cookie-modal")).toBeVisible();
+    expect(
+      (await scan(page)).highImpact.map(
+        (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(" | ")}`,
+      ),
+      "axe violations on the consent modal",
+    ).toEqual([]);
+  });
+
   test("skip link is first in tab order and moves focus to main", async ({
     page,
   }) => {
     await page.goto("/");
+    await dismissConsentNotice(page);
 
     await page.keyboard.press("Tab");
     const skipLink = page.getByRole("link", { name: "Skip to main content" });

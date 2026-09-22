@@ -37,6 +37,9 @@ export default defineConfig({
       NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "000000000000",
       NEXT_PUBLIC_FIREBASE_APP_ID: "1:000000000000:web:e2e-demo",
       NEXT_PUBLIC_USE_FIREBASE_EMULATOR: "true",
+      // Fake container for consent-boundary tests — E2E intercepts the
+      // request so no traffic ever reaches Google.
+      NEXT_PUBLIC_GTM_ID: "GTM-E2ETEST",
       // E2E must exercise the full site, never the maintenance gate.
       SITE_MAINTENANCE_MODE: "false",
     },

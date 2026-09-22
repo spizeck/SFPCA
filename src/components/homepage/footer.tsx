@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { Facebook, Instagram, Twitter } from "lucide-react";
+import { ConsentSettingsButton } from "@/components/consent/consent-settings-button";
 
 interface FooterProps {
   social: {
@@ -51,6 +53,18 @@ export function Footer({ social }: FooterProps) {
                 <Twitter className="h-6 w-6" aria-hidden="true" />
               </a>
             )}
+          </div>
+          <div className="flex items-center gap-4 text-sm">
+            <Link
+              href="/privacy"
+              className="hover:text-primary transition-colors underline-offset-4 hover:underline"
+            >
+              Privacy policy
+            </Link>
+            <span aria-hidden="true" className="text-background/40">
+              ·
+            </span>
+            <ConsentSettingsButton className="hover:text-primary transition-colors underline-offset-4 hover:underline" />
           </div>
           <div className="text-sm text-background/80 text-center">
             <p>&copy; {new Date().getFullYear()} SFPCA. All rights reserved.</p>

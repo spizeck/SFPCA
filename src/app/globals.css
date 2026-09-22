@@ -92,3 +92,36 @@
     color: hsl(var(--foreground));
   }
 }
+
+/* Klaro consent manager — fixed dark card in both site themes (Klaro's
+   designed surface), with the site's teal as the affirmative action color.
+   Values are solid (no alpha) and chosen for WCAG AA contrast: axe scans
+   flag both translucent colors and insufficient pairs. */
+.klaro {
+  --dark1: hsl(215 28% 17%);   /* notice/modal surface */
+  --dark2: hsl(215 25% 32%);   /* neutral button */
+  --dark3: hsl(215 20% 70%);   /* muted text on the surface */
+  --light1: hsl(210 40% 98%);  /* text on the surface */
+  --light2: hsl(214 32% 85%);  /* close button / borders */
+  --light3: hsl(215 16% 47%);
+  --white2: hsl(210 40% 96%);  /* slider track */
+  --green1: hsl(174 47% 32%);  /* accept — matches light-theme --primary */
+  --green2: hsl(174 47% 38%);
+  --green3: hsl(174 47% 42%);
+  --blue1: hsl(207 65% 40%);   /* info button */
+  --blue2: hsl(207 80% 72%);   /* links on the dark surface */
+  --font-size: 15px;
+}
+
+/* Klaro colors notice/modal links with --green1 (button teal), which fails
+   contrast on the dark surface — use the light link tone instead. Klaro's
+   stylesheet loads after globals.css, so these need higher specificity
+   than its `.cookie-notice a` / `.cookie-modal a` rules: the notice's
+   stable ID, and an attribute selector for the modal's links. */
+#klaro-cookie-notice a,
+.klaro .cookie-modal a[href],
+.klaro .cookie-modal .cm-modal .cm-footer .cm-powered-by a[href] {
+  color: var(--blue2);
+  /* Links embedded in body text need a non-color cue for WCAG AA. */
+  text-decoration: underline;
+}

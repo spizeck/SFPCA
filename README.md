@@ -442,15 +442,20 @@ Functions` (lint, export validation), `Firebase security rules`
 placeholder-only variable lists. Categories:
 
 - **Public config** (shipped to the browser, not secrets):
-  `NEXT_PUBLIC_FIREBASE_*`, `NEXT_PUBLIC_GA_ID`, `NEXT_PUBLIC_SITE_URL`
+  `NEXT_PUBLIC_FIREBASE_*`, `NEXT_PUBLIC_GTM_ID`, `NEXT_PUBLIC_SITE_URL`
 - **Server-only secrets** (never commit): `FIREBASE_ADMIN_*`,
   `ADMIN_EMAILS`, `VERCEL_TOKEN`, `VERCEL_PROJECT_ID`
 - **Behavior flags** (server-only): `SITE_MAINTENANCE_MODE` (production
   gate, see Deployment); `NEXT_PUBLIC_USE_FIREBASE_EMULATOR` is set only
   by the E2E harness — never set it for real deployments
 
-Google Analytics loads when `NEXT_PUBLIC_GA_ID` is set; there is
-currently no consent-management layer.
+Analytics runs through Google Tag Manager (`NEXT_PUBLIC_GTM_ID`), which
+is injected only after the visitor grants analytics consent in the Klaro
+banner — see `src/lib/consent.ts`. GA4 itself is configured inside the
+GTM container. The old direct `NEXT_PUBLIC_GA_ID` loading was removed in
+#116; do not reintroduce it or add tracking scripts outside the consent
+boundary. Users can revisit their choice via "Cookie settings" in the
+footer, and the privacy policy lives at `/privacy`.
 
 ## License
 
