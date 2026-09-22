@@ -12,6 +12,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useMutation } from "@/hooks/use-mutation";
+import { LoadError } from "@/components/admin/load-error";
 import { AnimalRegistration } from "@/lib/types";
 import { Eye, CheckCircle, Download, XCircle, RotateCcw } from "lucide-react";
 import { collection, getDocs, doc, updateDoc, serverTimestamp } from "firebase/firestore";
@@ -28,7 +30,11 @@ import { logError } from "@/lib/logger";
 export default function RegistrationsPage() {
   const [registrations, setRegistrations] = useState<AnimalRegistration[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [selected, setSelected] = useState<AnimalRegistration | null>(null);
+  // One mutation at a time: status changes and receipt lookups are
+  // serialized so a double-click can never fire the same write twice.
+  const mutation = useMutation();
   const { toast } = useToast();
 
   useEffect(() => {
@@ -36,6 +42,8 @@ export default function RegistrationsPage() {
   }, []);
 
   const loadRegistrations = async () => {
+    setLoading(true);
+    setLoadError(false);
     try {
       // No server-side orderBy: a query ordered on createdAt silently
       // drops documents that lack the field, which would hide malformed
@@ -57,43 +65,41 @@ export default function RegistrationsPage() {
       setRegistrations(registrationsData);
     } catch (error) {
       logError("admin", "registrations-load", error);
-      toast({
-        title: "Error",
-        description: "Failed to load registrations from database.",
-        variant: "destructive",
-      });
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
   };
 
-  const setStatus = async (id: string, status: RegistrationStatus) => {
-    try {
-      const registrationRef = doc(db, "animalRegistrations", id);
-      await updateDoc(registrationRef, {
-        status,
-        updatedAt: serverTimestamp(),
-      });
+  const setStatus = (id: string, status: RegistrationStatus) => {
+    mutation.run(async () => {
+      try {
+        const registrationRef = doc(db, "animalRegistrations", id);
+        await updateDoc(registrationRef, {
+          status,
+          updatedAt: serverTimestamp(),
+        });
 
-      setRegistrations(registrations.map(reg =>
-        reg.id === id ? { ...reg, status } : reg
-      ));
+        setRegistrations((prev) =>
+          prev.map((reg) => (reg.id === id ? { ...reg, status } : reg)),
+        );
 
-      toast({
-        title: "Registration Updated",
-        description: `Status changed to ${status}.`,
-      });
-    } catch (error) {
-      logError("admin", "registration-update", error);
-      toast({
-        title: "Error",
-        description: "Failed to update registration status.",
-        variant: "destructive",
-      });
-    }
+        toast({
+          title: "Registration Updated",
+          description: `Status changed to ${status}.`,
+        });
+      } catch (error) {
+        logError("admin", "registration-update", error);
+        toast({
+          title: "Error",
+          description: "Failed to update registration status. Try again.",
+          variant: "destructive",
+        });
+      }
+    }, `status-${id}`);
   };
 
-  const handleViewReceipt = async (registration: AnimalRegistration) => {
+  const handleViewReceipt = (registration: AnimalRegistration) => {
     const receipt = registration.paymentReceipt;
     if (!receipt) {
       toast({
@@ -104,25 +110,35 @@ export default function RegistrationsPage() {
       return;
     }
 
-    try {
-      // New submissions store a storage path ("receipts/<id>"); older
-      // documents may hold a full download URL.
-      const url = receipt.startsWith("http")
-        ? receipt
-        : await getDownloadURL(ref(storage, receipt));
-      window.open(url, "_blank");
-    } catch (error) {
-      logError("admin", "receipt-view", error);
-      toast({
-        title: "Error",
-        description: "Could not load the payment receipt.",
-        variant: "destructive",
-      });
-    }
+    mutation.run(async () => {
+      try {
+        // New submissions store a storage path ("receipts/<id>"); older
+        // documents may hold a full download URL.
+        const url = receipt.startsWith("http")
+          ? receipt
+          : await getDownloadURL(ref(storage, receipt));
+        window.open(url, "_blank");
+      } catch (error) {
+        logError("admin", "receipt-view", error);
+        toast({
+          title: "Error",
+          description: "Could not load the payment receipt. Try again.",
+          variant: "destructive",
+        });
+      }
+    }, `receipt-${registration.id}`);
   };
 
   if (loading) {
     return <div className="p-8">Loading...</div>;
+  }
+
+  if (loadError) {
+    return (
+      <div className="p-8">
+        <LoadError label="registrations" onRetry={loadRegistrations} />
+      </div>
+    );
   }
 
   return (
@@ -229,6 +245,7 @@ export default function RegistrationsPage() {
                             variant="outline"
                             size="sm"
                             aria-label="View payment receipt"
+                            disabled={mutation.pending}
                             onClick={() => handleViewReceipt(registration)}
                           >
                             <Download className="h-4 w-4" />
@@ -239,6 +256,7 @@ export default function RegistrationsPage() {
                             <Button
                               size="sm"
                               aria-label="Verify registration"
+                              disabled={mutation.pending}
                               onClick={() => setStatus(registration.id, "approved")}
                             >
                               <CheckCircle className="h-4 w-4" />
@@ -247,6 +265,7 @@ export default function RegistrationsPage() {
                               variant="destructive"
                               size="sm"
                               aria-label="Reject registration"
+                              disabled={mutation.pending}
                               onClick={() => setStatus(registration.id, "rejected")}
                             >
                               <XCircle className="h-4 w-4" />
@@ -258,6 +277,7 @@ export default function RegistrationsPage() {
                             variant="outline"
                             size="sm"
                             aria-label="Reopen registration as pending"
+                            disabled={mutation.pending}
                             onClick={() => setStatus(registration.id, "pending")}
                           >
                             <RotateCcw className="h-4 w-4" />
@@ -315,10 +335,13 @@ export default function RegistrationsPage() {
                     <Button
                       variant="outline"
                       size="sm"
+                      disabled={mutation.pending}
                       onClick={() => handleViewReceipt(selected)}
                     >
                       <Download className="h-4 w-4 mr-2" />
-                      View Receipt
+                      {mutation.pendingKey === `receipt-${selected.id}`
+                        ? "Loading…"
+                        : "View Receipt"}
                     </Button>
                   )}
                 </div>

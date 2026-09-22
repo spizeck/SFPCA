@@ -9,7 +9,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Upload, X, Plus, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import { logError } from "@/lib/logger";
+
+// Mirrors the storage.rules isImageUpload() check for team-photos:
+// image content type, strictly under 5 MB.
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
 interface TeamMember {
   id?: string;
@@ -26,6 +31,7 @@ interface TeamManagerProps {
 
 export function TeamManager({ team, onChange }: TeamManagerProps) {
   const [uploadingId, setUploadingId] = useState<string | null>(null);
+  const { toast } = useToast();
 
   const addMember = () => {
     const newMember: TeamMember = {
@@ -53,6 +59,25 @@ export function TeamManager({ team, onChange }: TeamManagerProps) {
   };
 
   const handlePhotoUpload = async (index: number, file: File) => {
+    // Client-side check aligned with the Storage rules (image/*, <5MB)
+    // so a rejected file fails here, not as an opaque rules error.
+    if (!file.type.startsWith("image/")) {
+      toast({
+        title: "Invalid file",
+        description: "Choose an image file (JPG, PNG, or GIF).",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (file.size >= MAX_PHOTO_BYTES) {
+      toast({
+        title: "File too large",
+        description: "Photos must be under 5MB. Choose a smaller image.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const memberId = team[index]?.id || `member-${index}`;
     setUploadingId(memberId);
 
@@ -60,30 +85,33 @@ export function TeamManager({ team, onChange }: TeamManagerProps) {
       // Create a unique filename
       const timestamp = Date.now();
       const filename = `team-photos/${memberId}-${timestamp}-${file.name}`;
-      
+
       // Create storage reference
       const storageRef = ref(storage, filename);
-      
+
       // Upload file
       await uploadBytes(storageRef, file);
-      
+
       // Get download URL
       const downloadUrl = await getDownloadURL(storageRef);
-      
+
       // Update member with the storage URL
       updateMember(index, { photo: downloadUrl });
+      toast({
+        title: "Photo uploaded",
+        description: "Remember to save the page to keep this change.",
+      });
     } catch (error) {
+      // No base64 fallback: embedding a multi-MB data URL in the homepage
+      // document exceeds Firestore's 1MiB document limit and turns a
+      // failed upload into a failed save later.
       logError("admin", "team-photo-upload", error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      alert(`Upload failed: ${errorMessage}. Falling back to local storage.`);
-      
-      // Fallback to base64 if upload fails
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const base64Url = e.target?.result as string;
-        updateMember(index, { photo: base64Url });
-      };
-      reader.readAsDataURL(file);
+      toast({
+        title: "Upload failed",
+        description:
+          "The photo could not be uploaded. Try again or choose a different image.",
+        variant: "destructive",
+      });
     } finally {
       setUploadingId(null);
     }
@@ -107,6 +135,7 @@ export function TeamManager({ team, onChange }: TeamManagerProps) {
               <Button
                 variant="ghost"
                 size="sm"
+                aria-label={`Remove team member ${index + 1}`}
                 onClick={() => removeMember(index)}
               >
                 <X className="h-4 w-4" />
@@ -160,6 +189,7 @@ export function TeamManager({ team, onChange }: TeamManagerProps) {
                       variant="destructive"
                       size="sm"
                       className="absolute -top-2 -right-2 h-6 w-6 rounded-full p-0"
+                      aria-label={`Remove photo for team member ${index + 1}`}
                       onClick={() => updateMember(index, { photo: undefined })}
                     >
                       <X className="h-3 w-3" />
@@ -178,6 +208,8 @@ export function TeamManager({ team, onChange }: TeamManagerProps) {
                     accept="image/*"
                     onChange={(e) => {
                       const file = e.target.files?.[0];
+                      // Reset so re-picking the same file re-fires change.
+                      e.target.value = "";
                       if (file) {
                         handlePhotoUpload(index, file);
                       }

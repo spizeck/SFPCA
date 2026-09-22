@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { SiteSettings } from "@/lib/types";
@@ -10,13 +10,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { useMutation } from "@/hooks/use-mutation";
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes";
+import { LoadError } from "@/components/admin/load-error";
 import { logError } from "@/lib/logger";
 
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const saveMutation = useMutation();
   const { toast } = useToast();
-  
+
   const [data, setData] = useState<SiteSettings>({
     contact: {
       phone: "",
@@ -34,62 +38,73 @@ export default function SettingsPage() {
     locationCode: "",
   });
 
+  // Snapshot of the last loaded/saved content; drift means unsaved edits.
+  const snapshotRef = useRef("");
+  const dirty = snapshotRef.current !== "" &&
+    JSON.stringify(data) !== snapshotRef.current;
+  useUnsavedChangesGuard(dirty);
+
   useEffect(() => {
     loadData();
   }, []);
 
   const loadData = async () => {
+    setLoading(true);
+    setLoadError(false);
     try {
       const docRef = doc(db, "siteSettings", "global");
       const docSnap = await getDoc(docRef);
-      
+
       if (docSnap.exists()) {
         setData(docSnap.data() as SiteSettings);
+        snapshotRef.current = JSON.stringify(docSnap.data());
+      } else {
+        snapshotRef.current = JSON.stringify(data);
       }
     } catch (error) {
       logError("admin", "settings-load", error);
-      toast({
-        title: "Error",
-        description: "Failed to load settings",
-        variant: "destructive",
-      });
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      const docRef = doc(db, "siteSettings", "global");
-      await setDoc(docRef, data);
-      
-      toast({
-        title: "Success",
-        description: "Settings saved successfully",
-      });
-    } catch (error) {
-      logError("admin", "settings-save", error);
-      toast({
-        title: "Error",
-        description: "Failed to save settings",
-        variant: "destructive",
-      });
-    } finally {
-      setSaving(false);
-    }
+  const handleSave = () => {
+    saveMutation.run(async () => {
+      try {
+        const docRef = doc(db, "siteSettings", "global");
+        await setDoc(docRef, data);
+        snapshotRef.current = JSON.stringify(data);
+        toast({
+          title: "Success",
+          description: "Settings saved successfully",
+        });
+      } catch (error) {
+        logError("admin", "settings-save", error);
+        toast({
+          title: "Error",
+          description:
+            "Failed to save settings. Your changes are still here — try again.",
+          variant: "destructive",
+        });
+      }
+    });
   };
 
   if (loading) {
     return <div>Loading...</div>;
   }
 
+  if (loadError) {
+    return <LoadError label="site settings" onRetry={loadData} />;
+  }
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Site Settings</h1>
-        <Button onClick={handleSave} disabled={saving}>
-          {saving ? "Saving..." : "Save Changes"}
+        <Button onClick={handleSave} disabled={saveMutation.pending}>
+          {saveMutation.pending ? "Saving..." : "Save Changes"}
         </Button>
       </div>
 
@@ -243,8 +258,8 @@ export default function SettingsPage() {
       </Card>
 
       <div className="flex justify-end">
-        <Button onClick={handleSave} disabled={saving} size="lg">
-          {saving ? "Saving..." : "Save All Changes"}
+        <Button onClick={handleSave} disabled={saveMutation.pending} size="lg">
+          {saveMutation.pending ? "Saving..." : "Save All Changes"}
         </Button>
       </div>
     </div>
