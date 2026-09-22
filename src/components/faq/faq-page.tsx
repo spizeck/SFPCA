@@ -3,11 +3,11 @@
 import { useState, useEffect } from "react";
 import { collection, getDocs, orderBy, query } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronUp, Phone, Mail, MapPin } from "lucide-react";
-import { fadeInUpVariants, shouldReduceMotion } from "@/lib/animations";
+import { instantTransition } from "@/lib/animations";
 import Link from "next/link";
 import { logError } from "@/lib/logger";
 
@@ -23,6 +23,7 @@ export function FAQ() {
   const [openItems, setOpenItems] = useState<string[]>([]);
   const [faqs, setFaqs] = useState<FAQItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     loadFaqs();
@@ -98,9 +99,9 @@ export function FAQ() {
       <section className="py-20 bg-primary text-primary-foreground">
         <div className="container mx-auto px-4">
           <motion.div
-            initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
+            initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
+            transition={reduceMotion ? instantTransition : { duration: 0.6 }}
             className="text-center"
           >
             <h1 className="text-4xl md:text-5xl font-bold mb-4">
@@ -120,9 +121,9 @@ export function FAQ() {
             {Object.entries(groupedFaqs).map(([category, categoryFaqs], categoryIndex) => (
               <motion.div
                 key={category}
-                initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
+                initial={{ opacity: 0, y: 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: categoryIndex * 0.1 }}
+                transition={reduceMotion ? instantTransition : { duration: 0.5, delay: categoryIndex * 0.1 }}
                 viewport={{ once: true }}
               >
                 <Card>
@@ -141,9 +142,9 @@ export function FAQ() {
                       return (
                         <motion.div
                           key={faq.id}
-                          initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 10 }}
+                          initial={{ opacity: 0, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
-                          transition={{ duration: 0.3, delay: index * 0.05 }}
+                          transition={reduceMotion ? instantTransition : { duration: 0.3, delay: index * 0.05 }}
                         >
                           <Card>
                             <h3 id={headingId}>
@@ -171,7 +172,7 @@ export function FAQ() {
                                   initial={{ height: 0, opacity: 0 }}
                                   animate={{ height: "auto", opacity: 1 }}
                                   exit={{ height: 0, opacity: 0 }}
-                                  transition={{ duration: shouldReduceMotion() ? 0 : 0.3 }}
+                                  transition={{ duration: reduceMotion ? 0 : 0.3 }}
                                 >
                                   <CardContent className="pt-0">
                                     <p className="text-muted-foreground whitespace-pre-wrap">
@@ -208,9 +209,9 @@ export function FAQ() {
       <section className="py-16 bg-muted">
         <div className="container mx-auto px-4">
           <motion.div
-            initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
+            initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
+            transition={reduceMotion ? instantTransition : { duration: 0.6 }}
             viewport={{ once: true }}
             className="text-center"
           >

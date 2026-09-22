@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { motion, Transition, AnimatePresence } from "framer-motion";
-import { fadeInUpVariants, shouldReduceMotion } from "@/lib/animations";
+import { motion, Transition, AnimatePresence, useReducedMotion } from "framer-motion";
+import { fadeInUpVariants, instantTransition } from "@/lib/animations";
 import { Card, CardContent } from "@/components/ui/card";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,7 @@ interface WhoWeAreSectionProps {
 export function WhoWeAreSection({ data }: WhoWeAreSectionProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
+  const reduceMotion = useReducedMotion();
   
   // Add fallback data with made up team members
   const fallbackData = {
@@ -79,14 +80,14 @@ export function WhoWeAreSection({ data }: WhoWeAreSectionProps) {
 
   // Auto-rotate carousel; paused by user control or reduced-motion preference
   useEffect(() => {
-    if (isPaused || shouldReduceMotion() || totalSlides <= 1) return;
+    if (isPaused || reduceMotion || totalSlides <= 1) return;
 
     const timer = setInterval(() => {
       setCurrentIndex((prev) => (prev + 1) % totalSlides);
     }, 5000); // Change every 5 seconds
 
     return () => clearInterval(timer);
-  }, [totalSlides, isPaused]);
+  }, [totalSlides, isPaused, reduceMotion]);
 
   const goToSlide = (index: number) => {
     setCurrentIndex(index);
@@ -100,14 +101,10 @@ export function WhoWeAreSection({ data }: WhoWeAreSectionProps) {
     setCurrentIndex((prev) => (prev + 1) % totalSlides);
   };
 
-  const animationProps = shouldReduceMotion() ? {
-    initial: {},
-    animate: {},
-    transition: {},
-  } : {
+  const animationProps = {
     initial: { opacity: 0 },
     animate: { opacity: 1 },
-    transition: { duration: 0.8, ease: "easeInOut" } as Transition,
+    transition: reduceMotion ? instantTransition : { duration: 0.8, ease: "easeInOut" } as Transition,
   };
 
   return (
@@ -144,10 +141,10 @@ export function WhoWeAreSection({ data }: WhoWeAreSectionProps) {
             <AnimatePresence mode="wait">
               <motion.div
                 key={currentIndex}
-                initial={shouldReduceMotion() ? { opacity: 1, x: 0 } : { opacity: 0, x: 100 }}
+                initial={{ opacity: 0, x: 100 }}
                 animate={{ opacity: 1, x: 0 }}
-                exit={shouldReduceMotion() ? { opacity: 1, x: 0 } : { opacity: 0, x: -100 }}
-                transition={{ duration: 0.5 }}
+                exit={{ opacity: 0, x: -100 }}
+                transition={reduceMotion ? instantTransition : { duration: 0.5 }}
                 className="grid md:grid-cols-3 gap-8"
                 role="group"
                 aria-roledescription="slide"
@@ -158,9 +155,9 @@ export function WhoWeAreSection({ data }: WhoWeAreSectionProps) {
                   .map((member, index) => (
                     <motion.div
                       key={`${currentIndex}-${index}`}
-                      initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
+                      initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: index * 0.1 }}
+                      transition={reduceMotion ? instantTransition : { delay: index * 0.1 }}
                     >
                       <Card className="h-full bg-card shadow-lg hover:shadow-xl transition-shadow">
                         <CardContent className="p-6 text-center">

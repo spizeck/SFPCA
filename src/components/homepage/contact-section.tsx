@@ -3,8 +3,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { OptimizedVideo } from "@/components/ui/optimized-video";
 import { Phone, Mail, MessageCircle, MapPin, Clock } from "lucide-react";
-import { motion } from "framer-motion";
-import { fadeInUpVariants, staggerContainer, defaultTransition, shouldReduceMotion } from "@/lib/animations";
+import { motion, useReducedMotion } from "framer-motion";
+import { fadeInUpVariants, staggerContainer, defaultTransition, instantTransition, useInViewAnimationProps } from "@/lib/animations";
 
 interface ContactSectionProps {
   contact?: {
@@ -31,17 +31,8 @@ export function ContactSection({ contact, mapEmbedUrl, whereWeAre }: ContactSect
   const sectionAddress = whereWeAre?.address || contact?.address || "";
   const sectionHours = whereWeAre?.hours || contact?.hours || "";
   const sectionMapEmbedUrl = whereWeAre?.mapEmbedUrl || mapEmbedUrl || "";
-  const animationProps = shouldReduceMotion() ? {
-    initial: {},
-    whileInView: undefined,
-    viewport: undefined,
-    transition: {},
-  } : {
-    initial: "initial",
-    whileInView: "whileInView",
-    viewport: { once: true, margin: "-100px" },
-    transition: defaultTransition,
-  };
+  const animationProps = useInViewAnimationProps();
+  const reduceMotion = useReducedMotion();
 
   const contactCards = [
     {
@@ -169,7 +160,7 @@ export function ContactSection({ contact, mapEmbedUrl, whereWeAre }: ContactSect
             <motion.div
               key={card.title}
               variants={fadeInUpVariants}
-              transition={{
+              transition={reduceMotion ? instantTransition : {
                 ...defaultTransition,
                 delay: index * 0.1,
               }}

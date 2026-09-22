@@ -1,8 +1,8 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { motion } from "framer-motion";
-import { shouldReduceMotion } from "@/lib/animations";
+import { motion, useReducedMotion } from "framer-motion";
+import { instantTransition } from "@/lib/animations";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +37,7 @@ export function AnimalRegistration({
 }: {
   content?: AnimalRegistrationContent;
 }) {
+  const reduceMotion = useReducedMotion();
   const [isSubmitting, setIsSubmitting] = useState(false);
   // Synchronous re-entrancy guard: state updates flush after the event
   // handler runs, so a fast double-submit could slip past a state check.
@@ -274,9 +275,9 @@ export function AnimalRegistration({
         {/* Content */}
         <div className="relative z-10 container mx-auto px-4">
           <motion.div
-            initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
+            initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
+            transition={reduceMotion ? instantTransition : { duration: 0.6 }}
             className="text-center max-w-4xl mx-auto"
           >
             <h1 className="text-4xl md:text-6xl font-bold mb-6 text-white">
@@ -307,9 +308,9 @@ export function AnimalRegistration({
       <section id="form" className="py-20">
         <div className="container mx-auto px-4 max-w-2xl">
           <motion.div
-            initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
+            initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
+            transition={reduceMotion ? instantTransition : { duration: 0.6 }}
             viewport={{ once: true }}
           >
             <Card>
