@@ -257,6 +257,19 @@ is for erroneous/spam records only.
   re-checks `requireAdmin()` itself — server actions are POST
   endpoints, never rely on layout auth. See README's Observability &
   troubleshooting section and RUNBOOK §15.
+- Consent & analytics (post-#116): Klaro is the consent layer; GTM is
+  the only tag-loading mechanism and is injected only after affirmative
+  analytics consent. `src/lib/consent.ts` owns Consent Mode v2
+  defaults/updates (`analytics_storage` only; `ad_*` always denied),
+  the `sfpca-consent` localStorage key, and the one-shot
+  `sfpca-gtm-script` injector. Never add direct `gtag`/GA scripts or
+  third-party tags outside this boundary; future tags go inside the GTM
+  container. Consent UI mounts once in `layout.tsx`; users reopen it via
+  the footer "Cookie settings" button. `NEXT_PUBLIC_GTM_ID` must be a
+  direct `process.env.NEXT_PUBLIC_GTM_ID` reference for client-side
+  inlining (same constraint as the Sentry DSN, #147). Sentry is
+  operational monitoring — never gate it behind analytics consent. See
+  RUNBOOK §16.
 
 ## Testing (commands in `package.json`)
 

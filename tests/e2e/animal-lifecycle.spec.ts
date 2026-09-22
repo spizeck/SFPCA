@@ -4,6 +4,7 @@
 // emulators (seeded by tests/e2e/global-setup) — never production.
 import { expect, test } from "@playwright/test";
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./global-setup";
+import { dismissConsentNotice } from "./helpers";
 
 async function signInAsAdmin(page: import("@playwright/test").Page) {
   await page.goto("/login");
@@ -23,6 +24,9 @@ test.describe("animal publication lifecycle", () => {
 
     await signInAsAdmin(page);
     await page.goto("/admin/animals");
+    // The Klaro notice is role="dialog" and would collide with the admin
+    // form dialog's getByRole("dialog") locator below.
+    await dismissConsentNotice(page);
 
     // Create a public (available) animal through the real admin form.
     await page.getByRole("button", { name: "Add Animal" }).click();

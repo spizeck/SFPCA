@@ -65,6 +65,7 @@ test("live sitemap contains exactly the indexable public routes", () => {
     `${PRODUCTION_SITE_URL}/animal-registration`,
     `${PRODUCTION_SITE_URL}/contact`,
     `${PRODUCTION_SITE_URL}/faq`,
+    `${PRODUCTION_SITE_URL}/privacy`,
     `${PRODUCTION_SITE_URL}/vet-services`,
   ]);
 });

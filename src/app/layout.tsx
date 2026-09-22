@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import "klaro/dist/klaro.css";
+import { ConsentManager } from "@/components/consent/consent-manager";
+import { GOOGLE_CONSENT_DENIED } from "@/lib/consent";
 import { Toaster } from "@/components/ui/toaster";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
@@ -80,24 +83,18 @@ export default function RootLayout({
             __html: JSON.stringify(organizationJsonLd()).replace(/</g, "\\u003c"),
           }}
         />
-        {process.env.NEXT_PUBLIC_GA_ID && (
-          <>
-            <script
-              async
-              src={`https://www.googletagmanager.com/gtag/js?id=${process.env.NEXT_PUBLIC_GA_ID}`}
-            />
-            <script
-              dangerouslySetInnerHTML={{
-                __html: `
-                  window.dataLayer = window.dataLayer || [];
-                  function gtag(){dataLayer.push(arguments);}
-                  gtag('js', new Date());
-                  gtag('config', '${process.env.NEXT_PUBLIC_GA_ID}');
-                `,
-              }}
-            />
-          </>
-        )}
+        {/* Google Consent Mode v2: deny optional storage before any Google
+            tag can load. GTM itself is injected by the consent manager only
+            after affirmative analytics consent (src/lib/consent.ts). */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: [
+              "window.dataLayer = window.dataLayer || [];",
+              "window.gtag = window.gtag || function(){window.dataLayer.push(arguments);};",
+              `window.gtag('consent','default',${JSON.stringify(GOOGLE_CONSENT_DENIED)});`,
+            ].join("\n"),
+          }}
+        />
       </head>
       <body className={inter.className}>
         <a
@@ -115,6 +112,7 @@ export default function RootLayout({
           <Breadcrumbs />
           {children}
           <Toaster />
+          <ConsentManager />
         </ThemeProvider>
       </body>
     </html>

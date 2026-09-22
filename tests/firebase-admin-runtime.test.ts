@@ -20,8 +20,12 @@ const ADMIN_MODULES = [
   "firebase-admin/firestore",
 ] as const;
 
+// Spawning Node and loading firebase-admin takes a few seconds — allow
+// headroom so a loaded CI machine can't flake this guard.
+const SPAWN_TIMEOUT_MS = 30_000;
+
 describe("firebase-admin server runtime (#144)", () => {
-  test("admin entry points load under a CommonJS-only runtime", () => {
+  test("admin entry points load under a CommonJS-only runtime", { timeout: SPAWN_TIMEOUT_MS }, () => {
     const script = [
       ...ADMIN_MODULES.map((m) => `require(${JSON.stringify(m)});`),
       'console.log("loaded");',
@@ -34,7 +38,7 @@ describe("firebase-admin server runtime (#144)", () => {
     expect(out.trim()).toBe("loaded");
   });
 
-  test("the auth API surface the app uses is present", () => {
+  test("the auth API surface the app uses is present", { timeout: SPAWN_TIMEOUT_MS }, () => {
     // verifyIdToken/createSessionCookie/verifySessionCookie are the
     // only admin-auth calls in src/ — guard the pin against a future
     // version that loads but renames them.

@@ -103,6 +103,7 @@ const INDEXABLE_PATHS = [
   "/animal-registration",
   "/contact",
   "/faq",
+  "/privacy",
   "/vet-services",
 ] as const;
 
