@@ -15,7 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@/hooks/use-mutation";
 import { LoadError } from "@/components/admin/load-error";
 import { AnimalRegistration } from "@/lib/types";
-import { Eye, CheckCircle, Download, XCircle, RotateCcw } from "lucide-react";
+import { Eye, CircleCheckBig, Download, CircleX, RotateCcw } from "lucide-react";
 import { collection, getDocs, doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { ref, getDownloadURL } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
@@ -259,7 +259,7 @@ export default function RegistrationsPage() {
                               disabled={mutation.pending}
                               onClick={() => setStatus(registration.id, "approved")}
                             >
-                              <CheckCircle className="h-4 w-4" />
+                              <CircleCheckBig className="h-4 w-4" />
                             </Button>
                             <Button
                               variant="destructive"
@@ -268,7 +268,7 @@ export default function RegistrationsPage() {
                               disabled={mutation.pending}
                               onClick={() => setStatus(registration.id, "rejected")}
                             >
-                              <XCircle className="h-4 w-4" />
+                              <CircleX className="h-4 w-4" />
                             </Button>
                           </>
                         )}

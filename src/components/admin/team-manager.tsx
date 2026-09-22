@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Upload, X, Plus, Loader2 } from "lucide-react";
+import { Upload, X, Plus, LoaderCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { logError } from "@/lib/logger";
 
@@ -225,7 +225,7 @@ export function TeamManager({ team, onChange }: TeamManagerProps) {
                   >
                     {uploadingId === (team[index]?.id || `member-${index}`) ? (
                       <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        <LoaderCircle className="h-4 w-4 mr-2 animate-spin" />
                         Uploading...
                       </>
                     ) : (

@@ -1,5 +1,9 @@
 import Link from "next/link";
-import { Facebook, Instagram, Twitter } from "lucide-react";
+import {
+  FacebookIcon,
+  InstagramIcon,
+  TwitterIcon,
+} from "@/components/ui/brand-icons";
 import { ConsentSettingsButton } from "@/components/consent/consent-settings-button";
 
 interface FooterProps {
@@ -28,7 +32,7 @@ export function Footer({ social }: FooterProps) {
                 className="hover:text-primary transition-colors"
                 aria-label="Facebook"
               >
-                <Facebook className="h-6 w-6" aria-hidden="true" />
+                <FacebookIcon className="h-6 w-6" aria-hidden="true" />
               </a>
             )}
             {social.instagram && (
@@ -39,7 +43,7 @@ export function Footer({ social }: FooterProps) {
                 className="hover:text-primary transition-colors"
                 aria-label="Instagram"
               >
-                <Instagram className="h-6 w-6" aria-hidden="true" />
+                <InstagramIcon className="h-6 w-6" aria-hidden="true" />
               </a>
             )}
             {social.twitter && (
@@ -50,7 +54,7 @@ export function Footer({ social }: FooterProps) {
                 className="hover:text-primary transition-colors"
                 aria-label="Twitter"
               >
-                <Twitter className="h-6 w-6" aria-hidden="true" />
+                <TwitterIcon className="h-6 w-6" aria-hidden="true" />
               </a>
             )}
           </div>

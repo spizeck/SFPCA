@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash } from "lucide-react";
 import { AnimalRegistrationData } from "@/lib/types";
 import { collection, doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { ref, uploadBytes, deleteObject } from "firebase/storage";
@@ -407,7 +407,7 @@ export function AnimalRegistration({
                               onClick={() => removeAnimal(index)}
                               className="flex items-center gap-2"
                             >
-                              <Trash2 className="h-4 w-4" aria-hidden="true" />
+                              <Trash className="h-4 w-4" aria-hidden="true" />
                               Remove<span className="sr-only"> animal {index + 1}</span>
                             </Button>
                           )}

@@ -4,7 +4,12 @@ import { motion, useReducedMotion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { OptimizedVideo } from "@/components/ui/optimized-video";
-import { Phone, Mail, MessageCircle, MapPin, Clock, Facebook, Instagram, Twitter } from "lucide-react";
+import { Phone, Mail, MessageCircle, MapPin, Clock } from "lucide-react";
+import {
+  FacebookIcon,
+  InstagramIcon,
+  TwitterIcon,
+} from "@/components/ui/brand-icons";
 import { instantTransition } from "@/lib/animations";
 
 interface ContactPageProps {
@@ -218,7 +223,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
                     className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-4 transition-colors"
                     aria-label="Facebook"
                   >
-                    <Facebook className="h-6 w-6" aria-hidden="true" />
+                    <FacebookIcon className="h-6 w-6" aria-hidden="true" />
                   </a>
                 )}
                 {social.instagram && (
@@ -229,7 +234,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
                     className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-4 transition-colors"
                     aria-label="Instagram"
                   >
-                    <Instagram className="h-6 w-6" aria-hidden="true" />
+                    <InstagramIcon className="h-6 w-6" aria-hidden="true" />
                   </a>
                 )}
                 {social.twitter && (
@@ -240,7 +245,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
                     className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-4 transition-colors"
                     aria-label="Twitter"
                   >
-                    <Twitter className="h-6 w-6" aria-hidden="true" />
+                    <TwitterIcon className="h-6 w-6" aria-hidden="true" />
                   </a>
                 )}
               </div>

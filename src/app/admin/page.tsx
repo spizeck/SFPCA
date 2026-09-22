@@ -1,7 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { FileText, PawPrint, Settings, ClipboardList, HelpCircle } from "lucide-react";
+import { FileText, PawPrint, Settings, ClipboardList, CircleQuestionMark } from "lucide-react";
 
 export default function AdminDashboard() {
   return (
@@ -63,7 +63,7 @@ export default function AdminDashboard() {
         <Card>
           <CardHeader>
             <div className="flex items-center gap-3 mb-2">
-              <HelpCircle className="h-8 w-8 text-primary" />
+              <CircleQuestionMark className="h-8 w-8 text-primary" />
               <CardTitle>FAQ</CardTitle>
             </div>
             <CardDescription>
