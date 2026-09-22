@@ -276,7 +276,8 @@ is for erroneous/spam records only.
   no second database). Restores always create a NEW database — recover
   surgically, never in place, and verify `--project=saba-sfpca` before
   any modifying command. Firestore backups do NOT cover Storage objects
-  (`receipts/`, `team-photos/`). See RUNBOOK §17.
+  (`receipts/`, `team-photos/`) — the bucket's native soft-delete covers
+  those; never add versioning/copy jobs alongside it. See RUNBOOK §17-18.
 
 ## Testing (commands in `package.json`)
 
