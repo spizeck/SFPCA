@@ -8,7 +8,8 @@
 //
 // | Status      | Meaning                                         | Public? |
 // |-------------|-------------------------------------------------|---------|
-// | available   | Ready for adoption; listed on /animal-adoptions | yes     |
+// | available   | Ready for adoption; homepage preview +             | yes     |
+// |             | /animal-adoptions listing                          |         |
 // | pending     | Not currently adoptable (e.g. an adoption is in | no      |
 // |             | progress or the animal is temporarily held)     |         |
 // | adopted     | Permanently homed; kept for historical record   | no      |

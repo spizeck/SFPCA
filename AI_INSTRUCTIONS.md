@@ -122,7 +122,7 @@ module's predicates (`isAnimalStatus`, `isPublicAnimalStatus`).
 
 | Status | Meaning | Public? |
 |--------|---------|---------|
-| `available` | Ready for adoption; listed on `/animal-adoptions` | yes — the only public state |
+| `available` | Ready for adoption; homepage preview + listed on `/animal-adoptions` | yes — the only public state |
 | `pending` | Not currently adoptable (adoption in progress or temporary hold) | no |
 | `adopted` | Permanently homed; retained for historical record | no |
 | unknown/missing | Malformed or unrecognized value | never — fails closed |
