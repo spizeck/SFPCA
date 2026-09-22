@@ -1105,3 +1105,129 @@ checklist in §18d; if a live rehearsal is ever wanted, create a
 synthetic object under a documented test name (e.g.
 `team-photos/recovery-test.txt` containing no real data), delete it,
 restore it, delete it again — never use a real `receipts/` object.
+
+## 19. Neon Postgres operations (post-#165/#180)
+
+### 19a. Audited topology (verified 2026-09 via Neon API + live deploys)
+
+- Vercel project `sfpca` (`prj_KHekqzSJKLYErZ0RbATE8BHNpFgJ`) is linked to
+  Neon project `sfpca-db` (`withered-sound-26167673`) via the native
+  Vercel integration resource `store_Z35KM1ryj86s4YOG`, plan **Free**,
+  connected for **Preview + Production** environments only.
+  Development receives no Neon variables.
+- The integration provisions 16 env vars (all Secret type). The app
+  canonically uses two:
+  - `DATABASE_URL` — pooled runtime endpoint (`-pooler` host, PgBouncer)
+  - `DATABASE_URL_UNPOOLED` — direct endpoint for schema/data migrations
+  The remaining aliases (`POSTGRES_*`, `PG*`, `NEON_PROJECT_ID`) are
+  integration-managed conveniences; do not add more consumers.
+- Region `aws-us-east-1`, PostgreSQL 18.6 — verified live.
+- **Production** resolves to primary branch `main`
+  (`br-patient-flower-aw6fjpk6`) → endpoint `ep-soft-wind-awarztez`,
+  database `neondb`, role `neondb_owner`.
+- **Preview isolation is real and verified**: the integration creates a
+  Neon branch `preview/<git-branch>` per git branch (copy-on-write child
+  of `main`), each with its own endpoint. Two consecutive preview
+  deploys of `ops/180-neon-integration` both resolved to endpoint
+  `ep-lucky-dawn-awycnd8u` on branch `br-ancient-block-aw2loajx`
+  (`preview/ops/180-neon-integration`) — never `ep-soft-wind-awarztez`.
+  Preview credentials are physically incapable of writing to
+  Production's branch.
+- Stale preview branches (e.g. old PRs, dependabot) can accumulate —
+  Neon Free allows **10 branches per project**; delete obsolete
+  `preview/*` branches from the Neon console if provisioning slows.
+- See ARCHITECTURE.md §10–§13 for the variable/table reference.
+
+### 19b. Schema migration lifecycle
+
+**Preview — automatic.** `npm run build` runs `prebuild` →
+`scripts/preview-migrate.ts`, which applies `drizzle/` migrations to the
+preview branch via `DATABASE_URL_UNPOOLED`. It no-ops everywhere except
+`VERCEL_ENV=preview`; in preview it fails the deployment if the target
+is missing/unreachable/migration fails. Verified live: a fresh preview
+build applied all 15 tables.
+
+**Production — deliberate operator step.** Migrations never run during
+production builds or from application requests. To apply a migration:
+
+1. Vercel dashboard → project `sfpca` → Settings → Environment
+   Variables → reveal `DATABASE_URL_UNPOOLED` (Production scope).
+2. Paste it into local `.env.local` (gitignored — never in shell
+   history, tickets, or chat).
+3. Run `npm run db:migrate`. The script prints
+   `host=… db=… user=…` — confirm it is the **production** branch
+   endpoint before trusting the result. It exits non-zero on failure.
+4. Remove the line from `.env.local` when done.
+
+Replay is idempotent: `__drizzle_migrations` makes re-runs no-ops.
+
+### 19c. Migration failure / bad-migration recovery
+
+- A failed migration aborts the script non-zero; drizzle applies each
+  migration file atomically and records only completed files in
+  `__drizzle_migrations`. **Fix-forward is the default**: correct the
+  checked-in SQL, re-run `db:migrate`.
+- If a migration caused damage beyond fix-forward (destructive DDL on
+  real data): use Neon **instant restore** on the affected branch
+  (Neon console → branch → Restore → choose a timestamp just before the
+  migration) — this creates/restores into a branch; verify, then repoint
+  `DATABASE_URL*` to the restored endpoint or promote the branch.
+  On the Free plan the instant-restore history window is **6 hours**
+  (1 GB cap, project-level setting) — a bad migration must be caught
+  quickly, or a snapshot taken beforehand (Free allows 1 manual
+  snapshot; no scheduled snapshots). PITR applies to **root branches**
+  — `main` qualifies; preview branches don't need it. The drill in
+  §19e is the tested procedure.
+- Always take a Neon snapshot before intentionally destructive
+  migrations once Postgres holds real data (post-#183).
+
+### 19d. Credential handling & rotation
+
+- DB credentials exist only in: Vercel env vars (Secret), Neon, and
+  transiently in operator `.env.local`. None are in git; CI has none.
+- Rotation: Neon console → branch → Roles → reset `neondb_owner`
+  password → update the Vercel env var values → redeploy Production and
+  one Preview to verify. (The native integration may propagate role
+  changes automatically — verify rather than assume.)
+- If a value is ever exposed (log, ticket, screenshot): rotate
+  immediately — the endpoint hostnames are stable, so the password is
+  the secret that matters.
+- **Least privilege:** the integration provisions a single
+  `neondb_owner` role used for both runtime and migrations. A reduced
+  runtime role (no DDL) is a legitimate hardening follow-up but is not
+  required while the registry is non-authoritative — revisit at the
+  #183 cutover alongside the independent-backup decision.
+
+### 19e. Recovery drill record (executed 2026-09-22)
+
+Verified end-to-end against a disposable branch — no Production data
+touched:
+
+1. `POST /projects/{id}/branches` → created `recovery-drill-180`
+   (`br-solitary-poetry-awljh0l0`) off `main` with a read_write endpoint.
+2. `GET .../roles/neondb_owner/reveal_password` → transient connection
+   string (deleted after use).
+3. Created `recovery_drill` table, inserted `drill-marker-180`, recorded
+   `now()` → T0, waited, dropped the table.
+4. `POST /branches/{id}/restore` with `source_branch_id`=self,
+   `source_timestamp`=T0, `preserve_under_name=drill-pre-restore-backup`
+   → HTTP 200, branch reset to T0 (old head preserved as a backup
+   branch, then deleted).
+5. Reconnected: marker row present — **point-in-time restore works** on
+   this project. Drill branch + backup branch deleted via API.
+
+The exact API calls above are the documented bad-migration recovery
+procedure for Neon; substitute the target branch id. Note self-restore
+requires `preserve_under_name` (the pre-restore state is kept as a
+new child branch — clean it up after confirming recovery).
+
+### 19f. Independent-backup decision
+
+Neon native recovery (instant restore + snapshots + branch rollback)
+is sufficient **while Firestore remains authoritative** — the registry
+database is empty schema until #181 and non-authoritative until #183.
+Revisit before Phase G (#183, Firestore retirement): once Postgres
+holds sole payment/audit history, evaluate scheduled `pg_dump` exports
+to the existing Storage bucket and/or a paid Neon tier for a longer
+restore window. Decision recorded: no independent backup system for
+now; trigger for re-evaluation is the #183 cutover checklist.

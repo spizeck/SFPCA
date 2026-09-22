@@ -4,7 +4,7 @@ import { defineConfig } from "drizzle-kit";
 // `drizzle-kit generate` emits deterministic SQL into drizzle/; replay is
 // done by src/lib/db/migrate.ts (scripts or tests), never by this CLI
 // against production — production applies run through db:migrate, which
-// requires DIRECT_DATABASE_URL and refuses to run without it.
+// requires DATABASE_URL_UNPOOLED and refuses to run without it.
 export default defineConfig({
   dialect: "postgresql",
   schema: "./src/lib/db/schema.ts",

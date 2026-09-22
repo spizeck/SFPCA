@@ -183,7 +183,7 @@ authority, failure semantics, and exit criteria in its own issue.
 - requires explicit `--project=<id>` matching the configured Firebase
   project; mismatch aborts before reads
 - `--execute` additionally requires `MIGRATION_CONFIRM_PROJECT=<same id>`
-- Postgres target must come from `DIRECT_DATABASE_URL`/`DATABASE_URL`
+- Postgres target must come from `DATABASE_URL_UNPOOLED`/`DATABASE_URL`
 - idempotent: upserts keyed on `legacy_id` / normalized email
 - **logs counts only — never owner PII or receipt contents**
 
@@ -210,12 +210,13 @@ Verified Neon capabilities (2026-09):
 - **`pg_dump`** for external/long-term backups if retention beyond the
   history window is ever required
 
-Plan: enable the Launch-tier 7-day history window (or Scale 30d) on the
-production project before Phase C; take a manual snapshot immediately
-before any bulk import; rehearse restore on a branch. Neon restores
-create a backup branch automatically — the rollback path is revert to
-the pre-import snapshot/branch while Firestore remains untouched until
-Phase G anyway.
+The actual provisioned project (`sfpca-db`, Vercel integration resource
+`store_Z35KM1ryj86s4YOG`) is on the **Free** plan — 6-hour instant-restore
+window. That is acceptable while Postgres holds only empty schema and
+Firestore remains authoritative, but **before Phase C (#181) production
+import, upgrade to Launch or take an explicit snapshot** so a bad import
+can be undone beyond 6 hours. Rollback path: revert to the pre-import
+snapshot/branch while Firestore remains untouched until Phase G anyway.
 
 ## 11. Local dev & tests
 
@@ -224,7 +225,12 @@ Phase G anyway.
   all migrations from empty and exercises constraints + the registry
   seam. Works on Windows/Node 24, CI-friendly.
 - Migrations: `npm run db:generate` (schema → SQL), `npm run db:migrate`
-  (apply to `DIRECT_DATABASE_URL` — local Neon branch or local Postgres).
+  (apply to `DATABASE_URL_UNPOOLED` — operator-supplied Neon endpoint).
+- Vercel Preview builds self-migrate: `prebuild` →
+  `scripts/preview-migrate.ts` applies `drizzle/` to the preview branch
+  via `DATABASE_URL_UNPOOLED` and fails the deployment on error.
+  Production builds and local builds skip it — production schema changes
+  are a deliberate operator step (RUNBOOK.md §19b).
 - Developers without a Neon branch need nothing: the registry is not on
   any runtime path yet.
 
@@ -237,13 +243,28 @@ jobs unchanged.
 
 ## 13. Environment variables
 
+The Vercel–Neon integration (resource `sfpca-db`) provisions 16
+Secret-typed variables, all scoped to **Preview + Production** only —
+Development/local and CI receive none. The application canonically
+uses two; the rest are integration-managed aliases kept for ecosystem
+compatibility:
+
 | Var | Scope | Source |
 |---|---|---|
-| `DATABASE_URL` | server-only runtime queries (pooled Neon `-pooler` host) | Vercel Neon integration or manual env |
-| `DIRECT_DATABASE_URL` | schema/data migrations (unpooled) | same |
+| `DATABASE_URL` | server-only runtime queries (pooled Neon `-pooler` host) | Vercel–Neon integration |
+| `DATABASE_URL_UNPOOLED` | schema/data migrations (unpooled direct host) | Vercel–Neon integration |
 | `MIGRATION_CONFIRM_PROJECT` | `migrate:firestore --execute` guard | operator-set |
 
+Integration-provided aliases (unused by app code): `POSTGRES_URL`,
+`POSTGRES_URL_NON_POOLING`, `POSTGRES_URL_NO_SSL`,
+`POSTGRES_PRISMA_URL`, `POSTGRES_HOST`, `POSTGRES_USER`,
+`POSTGRES_PASSWORD`, `POSTGRES_DATABASE`, `PGHOST`,
+`PGHOST_UNPOOLED`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`,
+`NEON_PROJECT_ID`.
+
 No `NEXT_PUBLIC_` database variables ever. Tests require none.
+Actual topology, migration lifecycle, and recovery procedures are in
+RUNBOOK.md §19.
 
 ## 14. Observability
 

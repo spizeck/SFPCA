@@ -74,3 +74,6 @@ firebase-export-*/
 
 # Firebase
 *-firebase-adminsdk-*.json
+
+.vercel
+.env*

@@ -22,9 +22,10 @@
 //   so a stray --execute cannot bulk-write production by accident
 // - re-runnable: upserts keyed on legacy_id / normalized email
 // - logs counts only — never owner PII or receipt contents
-// - Postgres target comes from DIRECT_DATABASE_URL (or DATABASE_URL for
+// - Postgres target comes from DATABASE_URL_UNPOOLED (or DATABASE_URL for
 //   local/dev); the script refuses to run without one
 
+import { config } from "dotenv";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { sql as dsql } from "drizzle-orm";
@@ -33,6 +34,10 @@ import {
   adminUsers,
   registrationSubmissions,
 } from "../src/lib/db/schema";
+
+// Credentials (FIREBASE_ADMIN_*, DATABASE_URL_UNPOOLED) live in
+// .env.local — gitignored — so they never appear in command lines.
+config({ path: ".env.local" });
 
 const KNOWN_STATUSES = new Set(["available", "pending", "adopted"]);
 
@@ -78,10 +83,10 @@ async function main() {
     process.exit(1);
   }
 
-  const dbUrl = process.env.DIRECT_DATABASE_URL ?? process.env.DATABASE_URL;
+  const dbUrl = process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
   if (!dbUrl || !/^postgres(ql)?:\/\//.test(dbUrl)) {
     console.error(
-      "Set DIRECT_DATABASE_URL (or DATABASE_URL for local dev) to a Postgres " +
+      "Set DATABASE_URL_UNPOOLED (or DATABASE_URL for local dev) to a Postgres " +
         "connection string. Refusing to run.",
     );
     process.exit(1);

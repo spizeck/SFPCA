@@ -5,7 +5,7 @@ import "server-only";
 // domain services in src/lib/registry/* which return DTOs.
 //
 // DATABASE_URL is the pooled Neon endpoint (PgBouncer) for runtime
-// queries. Migrations use DIRECT_DATABASE_URL instead (see
+// queries. Migrations use DATABASE_URL_UNPOOLED instead (see
 // src/lib/db/migrate.ts) — PgBouncer transaction pooling is not safe for
 // schema migration DDL sessions.
 

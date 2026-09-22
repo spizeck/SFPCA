@@ -2,40 +2,51 @@
 //
 //   npx tsx scripts/db-migrate.ts
 //
-// Requires DIRECT_DATABASE_URL — Neon's UNPOOLED endpoint. Schema DDL
-// must not go through the PgBouncer transaction pooler (session-level
-// migration bookkeeping is unreliable there). The runtime app uses the
-// pooled DATABASE_URL instead; the two point at the same database.
+// Requires DATABASE_URL_UNPOOLED — Neon's unpooled endpoint, provided
+// by the Vercel–Neon integration. Schema DDL must not go through the
+// PgBouncer transaction pooler (session-level migration bookkeeping is
+// unreliable there). The runtime app uses the pooled DATABASE_URL
+// instead; the two point at the same database.
 //
 // Safety:
-// - fails fast when DIRECT_DATABASE_URL is unset (never guesses)
+// - fails fast when DATABASE_URL_UNPOOLED is unset (never guesses)
 // - refuses hostnames that do not look like Postgres URLs at all
 // - idempotent: drizzle's __drizzle_migrations journal makes replay a
 //   no-op when the database is already current
 // - prints which migrations were applied, never row data
 
+import { config } from "dotenv";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { runMigrationsOnPostgres } from "../src/lib/db/migrate";
 
+// Operators paste the target's DATABASE_URL_UNPOOLED into .env.local
+// (gitignored) so the value never has to appear in a command line,
+// ticket, or chat. Existing process env still wins if already set.
+config({ path: ".env.local" });
+
 async function main() {
-  const url = process.env.DIRECT_DATABASE_URL;
+  const url = process.env.DATABASE_URL_UNPOOLED;
   if (!url) {
     console.error(
-      "DIRECT_DATABASE_URL is not set. Point it at the Neon unpooled " +
-        "endpoint for the target project (see docs/architecture/persistence.md).",
+      "DATABASE_URL_UNPOOLED is not set. Point it at the Neon unpooled " +
+        "endpoint for the target project (see ARCHITECTURE.md §11).",
     );
     process.exit(1);
   }
   if (!/^postgres(ql)?:\/\//.test(url)) {
     console.error(
-      "DIRECT_DATABASE_URL does not look like a Postgres connection string. Refusing to run.",
+      "DATABASE_URL_UNPOOLED does not look like a Postgres connection string. Refusing to run.",
     );
     process.exit(1);
   }
 
-  const host = new URL(url).hostname;
-  console.log(`Applying migrations to ${host} (drizzle/ journal is the source of truth)...`);
+  const parsed = new URL(url);
+  console.log(
+    `Applying migrations to host=${parsed.hostname} ` +
+      `db=${parsed.pathname.replace("/", "")} user=${parsed.username} ` +
+      "(drizzle/ journal is the source of truth)...",
+  );
 
   const sql = postgres(url, { max: 1, prepare: false });
   try {
