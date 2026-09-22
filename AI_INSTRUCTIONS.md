@@ -60,10 +60,16 @@ when the token is unset.
 - **Roles are recorded, not enforced.** `admins/` docs carry `role`
   (`admin`/`editor`); nothing distinguishes them today — authorization
   is binary. Don't pretend granularity that doesn't exist.
-- **Firestore is the content authority.** Page content, site settings,
-  animals, FAQs, and registrations live in Firestore. Do not duplicate
-  business/content data into source; `scripts/seed-data.json` is the
-  fixture for local/test seeding.
+- **Two authorities, by domain.** Firestore remains the CMS/content
+  authority (page content, site settings, FAQs). Postgres (Neon, via
+  Drizzle) is the foundation for the **registry domain** — animals,
+  people/households, ownership, registrations, payments, chips, vet
+  events, follow-ups, communications, audit. The boundary and migration
+  plan are in `ARCHITECTURE.md`. New registry-domain data goes to
+  `src/lib/db`/`src/lib/registry` — **never into Firestore**. During the
+  staged cutover (Phases C–G) Firestore `animals`/`animalRegistrations`/
+  `admins` remain authoritative until their explicit cutover issues land.
+  `scripts/seed-data.json` is the fixture for local/test seeding.
 - **Tests never touch production.** Vitest mocks boundaries; rules tests
   and Playwright E2E run against Firebase emulators only. Client
   emulator connection is gated by `NEXT_PUBLIC_USE_FIREBASE_EMULATOR`
@@ -291,6 +297,10 @@ is for erroneous/spam records only.
 
 - `npm test` — Vitest unit/component (`tests/*.test.ts(x)`)
 - `npm run test:rules` — Firestore/Storage rules via emulators
+- `npm run test:db` — Postgres registry schema/migration tests via
+  PGlite (in-process real Postgres; no Docker or credentials needed)
+- `npm run db:generate` / `npm run db:migrate` — drizzle schema → SQL /
+  apply to `DIRECT_DATABASE_URL`
   (`tests/*.test.mjs`, needs Java)
 - `npm run test:e2e` — Playwright Chromium smoke suite (`tests/e2e/`),
   orchestrates emulators + dev server + fixtures itself (needs Java)
