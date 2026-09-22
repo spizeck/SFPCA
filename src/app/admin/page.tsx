@@ -104,7 +104,7 @@ export default function AdminDashboard() {
             • Changes to the homepage and settings are reflected immediately on the public site
           </p>
           <p className="text-sm text-muted-foreground">
-            • Only animals with status &ldquo;Available&rdquo; appear on the public adoptions page; &ldquo;Pending&rdquo; and &ldquo;Adopted&rdquo; animals stay hidden but keep their records
+            • Only animals with status &ldquo;Available&rdquo; appear publicly (homepage preview and the adoptions page); &ldquo;Pending&rdquo; and &ldquo;Adopted&rdquo; animals stay hidden but keep their records
           </p>
           <p className="text-sm text-muted-foreground">
             • Use the &ldquo;View Site&rdquo; button in the navigation to preview your changes

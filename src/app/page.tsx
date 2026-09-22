@@ -6,6 +6,8 @@ import { pageMetadata, SITE_DESCRIPTION } from "@/lib/seo";
 import { HeroSection } from "@/components/homepage/hero-section";
 import { AboutSection } from "@/components/homepage/about-section";
 import { ServicesSection } from "@/components/homepage/services-section";
+import { AnimalsSection } from "@/components/homepage/animals-section";
+import { getAvailableAnimals } from "@/lib/animals";
 import { DonationSection } from "@/components/homepage/donation-section";
 import { WhoWeAreSection } from "@/components/homepage/who-we-are-section";
 import { FaqSection } from "@/components/homepage/faq-section";
@@ -51,10 +53,17 @@ async function getSiteSettings(): Promise<SiteSettings | null> {
   }
 }
 
+// The preview is one row of the section's lg:grid-cols-3 layout; the
+// full listing lives at /animal-adoptions.
+const ANIMAL_PREVIEW_COUNT = 3;
+
 export default async function HomePage() {
-  const [homepage, settings] = await Promise.all([
+  const [homepage, settings, animals] = await Promise.all([
     getHomepageData(),
     getSiteSettings(),
+    // Fails closed to [] on error — a Firestore hiccup omits the preview
+    // section rather than breaking the homepage.
+    getAvailableAnimals(),
   ]);
 
   if (!homepage || !settings) {
@@ -75,6 +84,7 @@ export default async function HomePage() {
       <HeroSection data={homepage.hero} />
       <AboutSection data={homepage.about} />
       <ServicesSection data={homepage.services} />
+      <AnimalsSection animals={animals.slice(0, ANIMAL_PREVIEW_COUNT)} />
       <DonationSection data={homepage.donation} />
       <WhoWeAreSection data={homepage.whoWeAre} />
       <FaqSection />
