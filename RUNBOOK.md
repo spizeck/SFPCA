@@ -391,11 +391,10 @@ may mean a forward fix instead.
 ### 11e. Data recovery
 
 **Code rollback is not data rollback.** Firestore recovery is covered in
-§17 — PITR and managed backup state, the audited current posture, and the
-full restore procedure. **As of the §17 audit (2026-09-22) production had
-neither enabled** — until Chad completes §17b, deleted or corrupted
-Firestore data is unrecoverable. Firebase Storage objects are a separate
-boundary (§17e).
+§17 — PITR and managed backups are enabled in production, and §17
+documents the audited posture and the full restore procedure. Firebase
+Storage objects are a separate boundary covered by bucket soft-delete
+(§17e, §18).
 
 ## 12. Multi-system release ordering
 
@@ -729,10 +728,12 @@ Firestore Native database in `nam5`:
 | Scheduled backups | **none** (0 schedules, 0 backups) |
 | Database delete protection | **DISABLED** |
 
-Until §17b is completed, **production Firestore data is unrecoverable
-once deleted or corrupted.**
+**Current state — protection is now enabled.** The §17b steps were
+completed and verified in production: PITR on (7-day window,
+`retentionPeriod: 604800s`), a weekly Sunday managed backup schedule
+(`retention: 4838400s` = 8 weeks), and database delete protection on.
 
-### 17b. Enable protection — manual operator step (Chad)
+### 17b. Enable protection — manual operator step (Chad) — **COMPLETED**
 
 These are one-time `gcloud` commands run by the project owner. **Before
 any modifying command, verify the target:**
@@ -947,7 +948,7 @@ gcloud storage buckets describe gs://saba-sfpca.firebasestorage.app
 |---|---|
 | App bucket | `saba-sfpca.firebasestorage.app` |
 | Location / class | `US-CENTRAL1` (region) / REGIONAL |
-| **Soft delete** | **ENABLED — 7-day retention** (platform default since bucket creation) |
+| **Soft delete** | **ENABLED — 56-day retention** (`retentionDurationSeconds: 4838400`, extended from the 7-day platform default per §18b) |
 | Object Versioning | disabled |
 | Lifecycle rules | none |
 | Retention policy / bucket lock | none |
@@ -955,11 +956,13 @@ gcloud storage buckets describe gs://saba-sfpca.firebasestorage.app
 | Uniform bucket-level access | off (fine-grained — normal for Firebase) |
 | Bucket ACL | project team only — no public/allUsers entries |
 
-### 18b. Production change — manual operator step (Chad)
+### 18b. Production change — manual operator step (Chad) — **COMPLETED**
 
-Soft delete is already on; the only recommended change is **extending
-the retention window to 56 days** so it matches the 8-week Firestore
-backup horizon (§17b). A Firestore backup restore can resurrect a
+The retention extension below has been run and verified in production
+(`retentionDurationSeconds: 4838400`). The commands remain here as the
+reference for any future window change. Soft delete was already on; the
+change **extended the retention window to 56 days** so it matches the
+8-week Firestore backup horizon (§17b). A Firestore backup restore can resurrect a
 registration whose receipt was deleted weeks ago — a 7-day Storage
 window would leave that receipt unrecoverable while the document is
 not. Storage cost for the extra window is negligible at this dataset
