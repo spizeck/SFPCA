@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@/hooks/use-mutation";
-import { Plus, Pencil, Trash2, GripVertical } from "lucide-react";
+import { Plus, Pencil, Trash, GripVertical } from "lucide-react";
 import { logError } from "@/lib/logger";
 import { ConfirmDialog } from "@/components/admin/confirm-dialog";
 import { LoadError } from "@/components/admin/load-error";
@@ -359,7 +359,7 @@ export default function FAQManager() {
                           aria-label={`Delete FAQ: ${faq.question}`}
                           onClick={() => setDeleteTarget(faq)}
                         >
-                          <Trash2 className="h-4 w-4 text-red-500" />
+                          <Trash className="h-4 w-4 text-red-500" />
                         </Button>
                       </div>
                     </div>

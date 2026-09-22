@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Home, FileText, PawPrint, Settings, LogOut, Menu, ClipboardList, Stethoscope, Heart, HelpCircle } from "lucide-react";
+import { Home, FileText, PawPrint, Settings, LogOut, Menu, ClipboardList, Stethoscope, Heart, CircleQuestionMark } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AdminThemeToggle } from "@/components/admin-theme-toggle";
 import { useState } from "react";
@@ -16,7 +16,7 @@ const navItems = [
   { href: "/admin/registrations", label: "Registrations", icon: ClipboardList },
   { href: "/admin/animal-registration", label: "Reg. Page", icon: FileText },
   { href: "/admin/animals", label: "Animals", icon: PawPrint },
-  { href: "/admin/faq", label: "FAQ", icon: HelpCircle },
+  { href: "/admin/faq", label: "FAQ", icon: CircleQuestionMark },
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ];
 
