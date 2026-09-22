@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
@@ -29,26 +29,28 @@ interface VetServicesData {
   services: VetService[];
 }
 
+const INITIAL_DATA: VetServicesData = {
+  heroTitle: "Veterinary Services",
+  heroDescription: "Professional and affordable veterinary care for your beloved pets",
+  ctaTitle: "Ready to Book an Appointment?",
+  ctaDescription: "Contact us today to schedule a visit for your pet. Our caring team is ready to help!",
+  services: [
+    { title: "", description: "", price: "", icon: "" },
+    { title: "", description: "", price: "", icon: "" },
+    { title: "", description: "", price: "", icon: "" },
+    { title: "", description: "", price: "", icon: "" },
+    { title: "", description: "", price: "", icon: "" },
+    { title: "", description: "", price: "", icon: "" },
+  ],
+};
+
 export default function VetServicesAdminPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const saveMutation = useMutation();
   const { toast } = useToast();
 
-  const [data, setData] = useState<VetServicesData>({
-    heroTitle: "Veterinary Services",
-    heroDescription: "Professional and affordable veterinary care for your beloved pets",
-    ctaTitle: "Ready to Book an Appointment?",
-    ctaDescription: "Contact us today to schedule a visit for your pet. Our caring team is ready to help!",
-    services: [
-      { title: "", description: "", price: "", icon: "" },
-      { title: "", description: "", price: "", icon: "" },
-      { title: "", description: "", price: "", icon: "" },
-      { title: "", description: "", price: "", icon: "" },
-      { title: "", description: "", price: "", icon: "" },
-      { title: "", description: "", price: "", icon: "" },
-    ],
-  });
+  const [data, setData] = useState<VetServicesData>(INITIAL_DATA);
 
   // Snapshot of the last loaded/saved content; drift means unsaved edits.
   const snapshotRef = useRef("");
@@ -56,11 +58,7 @@ export default function VetServicesAdminPage() {
     JSON.stringify(data) !== snapshotRef.current;
   useUnsavedChangesGuard(dirty);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     setLoadError(false);
     try {
@@ -71,7 +69,11 @@ export default function VetServicesAdminPage() {
         setData(docSnap.data() as VetServicesData);
         snapshotRef.current = JSON.stringify(docSnap.data());
       } else {
-        snapshotRef.current = JSON.stringify(data);
+        // The editor only renders after a successful load, so `data`
+        // still equals INITIAL_DATA here — snapshot that constant rather
+        // than closing over state, which would make this callback
+        // unstable and re-run the load effect on every edit.
+        snapshotRef.current = JSON.stringify(INITIAL_DATA);
       }
     } catch (error) {
       logError("admin", "vet-content-load", error);
@@ -79,7 +81,11 @@ export default function VetServicesAdminPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handleSave = () => {
     saveMutation.run(async () => {

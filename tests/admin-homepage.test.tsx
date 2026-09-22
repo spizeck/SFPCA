@@ -80,6 +80,22 @@ describe("admin homepage editor", () => {
     );
   });
 
+  test("editing content does not retrigger the load effect", async () => {
+    // loadData is a stable useCallback dep of the mount effect; if it
+    // closed over `data`, every keystroke would re-run the load.
+    render(<HomepageEditor />);
+    await waitFor(() => screen.getByDisplayValue("Welcome"));
+    expect(mockLoad).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(screen.getByDisplayValue("Welcome"), {
+      target: { value: "Edited title" },
+    });
+    fireEvent.change(screen.getByDisplayValue("To SFPCA"), {
+      target: { value: "Edited subtitle" },
+    });
+    expect(mockLoad).toHaveBeenCalledTimes(1);
+  });
+
   test("double-clicking Save only calls the server action once", async () => {
     let resolveSave: () => void = () => {};
     mockSave.mockImplementation(

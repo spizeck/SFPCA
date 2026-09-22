@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { SiteSettings } from "@/lib/types";
@@ -15,28 +15,30 @@ import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes";
 import { LoadError } from "@/components/admin/load-error";
 import { logError } from "@/lib/logger";
 
+const INITIAL_DATA: SiteSettings = {
+  contact: {
+    phone: "",
+    email: "",
+    whatsapp: "",
+    address: "",
+    hours: "",
+  },
+  social: {
+    facebook: "",
+    instagram: "",
+    twitter: "",
+  },
+  mapEmbedUrl: "",
+  locationCode: "",
+};
+
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const saveMutation = useMutation();
   const { toast } = useToast();
 
-  const [data, setData] = useState<SiteSettings>({
-    contact: {
-      phone: "",
-      email: "",
-      whatsapp: "",
-      address: "",
-      hours: "",
-    },
-    social: {
-      facebook: "",
-      instagram: "",
-      twitter: "",
-    },
-    mapEmbedUrl: "",
-    locationCode: "",
-  });
+  const [data, setData] = useState<SiteSettings>(INITIAL_DATA);
 
   // Snapshot of the last loaded/saved content; drift means unsaved edits.
   const snapshotRef = useRef("");
@@ -44,11 +46,7 @@ export default function SettingsPage() {
     JSON.stringify(data) !== snapshotRef.current;
   useUnsavedChangesGuard(dirty);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     setLoadError(false);
     try {
@@ -59,7 +57,11 @@ export default function SettingsPage() {
         setData(docSnap.data() as SiteSettings);
         snapshotRef.current = JSON.stringify(docSnap.data());
       } else {
-        snapshotRef.current = JSON.stringify(data);
+        // The editor only renders after a successful load, so `data`
+        // still equals INITIAL_DATA here — snapshot that constant rather
+        // than closing over state, which would make this callback
+        // unstable and re-run the load effect on every edit.
+        snapshotRef.current = JSON.stringify(INITIAL_DATA);
       }
     } catch (error) {
       logError("admin", "settings-load", error);
@@ -67,7 +69,11 @@ export default function SettingsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handleSave = () => {
     saveMutation.run(async () => {
