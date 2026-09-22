@@ -866,9 +866,13 @@ always create a **new database** — see §17d.
    without first preserving current state and confirming the project.**
 8. **Resume normal operation** — disable maintenance mode / redeploy the
    fixed build.
-9. **Verify security rules** — restores carry no rules; rules deploy
-   from the repo (§8) and apply to all databases in the project, but
-   confirm the production access paths work after recovery.
+9. **Verify security rules** — Firestore rules are **per-database**:
+   `firebase deploy --only firestore:rules` targets `(default)` only
+   (`firebase.json` → `firestore.database`). A `recovery-*` database has
+   no rules — default-deny for client SDK access, which is fine for
+   console/`gcloud` reads during recovery. Deploy rules to the recovery
+   DB only if you ever point the app at it. Separately, confirm
+   production access paths still work on `(default)` after recovery.
 10. **Clean up and record** — delete the recovery database when done
     (`gcloud firestore databases delete --database='recovery-YYYYMMDD'
     --project=saba-sfpca` — verify the name twice; this deletes data),
