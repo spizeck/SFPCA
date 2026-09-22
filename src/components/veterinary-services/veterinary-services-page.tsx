@@ -1,7 +1,7 @@
 "use client";
 
-import { motion } from "framer-motion";
-import { shouldReduceMotion } from "@/lib/animations";
+import { motion, useReducedMotion } from "framer-motion";
+import { instantTransition } from "@/lib/animations";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { OptimizedVideo } from "@/components/ui/optimized-video";
 import { Button } from "@/components/ui/button";
@@ -52,6 +52,8 @@ const data = {
 };
 
 export function VeterinaryServices() {
+  const reduceMotion = useReducedMotion();
+
   return (
     <div className="min-h-screen bg-background">
       {/* Hero Section with Full Page Video Background */}
@@ -70,9 +72,9 @@ export function VeterinaryServices() {
         {/* Content */}
         <div className="relative z-10 container mx-auto px-4">
           <motion.div
-            initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
+            initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
+            transition={reduceMotion ? instantTransition : { duration: 0.6 }}
             className="text-center max-w-4xl mx-auto"
           >
             <h1 className="text-4xl md:text-6xl font-bold mb-6 text-white">
@@ -104,9 +106,9 @@ export function VeterinaryServices() {
             {services.map((service, index) => (
               <motion.div
                 key={index}
-                initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
+                initial={{ opacity: 0, y: 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: index * 0.1 }}
+                transition={reduceMotion ? instantTransition : { duration: 0.5, delay: index * 0.1 }}
                 viewport={{ once: true }}
               >
                 <Card className="h-full hover:shadow-lg transition-shadow">

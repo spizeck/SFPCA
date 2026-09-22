@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { shouldReduceMotion } from "@/lib/animations";
+import { useReducedMotion } from "framer-motion";
 
 interface OptimizedVideoProps {
   src: string;
@@ -28,6 +28,7 @@ export function OptimizedVideo({
 }: OptimizedVideoProps) {
   const [isLoaded, setIsLoaded] = useState(false);
   const [isInView, setIsInView] = useState(false);
+  const reduceMotion = useReducedMotion();
   const videoRef = useRef<HTMLVideoElement>(null);
 
   // Intersection Observer for lazy loading
@@ -71,7 +72,7 @@ export function OptimizedVideo({
           inset: 0,
           ...style,
         }}
-        autoPlay={autoPlay && isInView && !shouldReduceMotion()}
+        autoPlay={autoPlay && isInView && !reduceMotion}
         muted={muted}
         loop={loop}
         playsInline={playsInline}

@@ -1,7 +1,7 @@
 "use client"
 
 import { motion } from "framer-motion";
-import { fadeInUpVariants, defaultTransition, shouldReduceMotion } from "@/lib/animations";
+import { fadeInUpVariants, defaultTransition, useInViewAnimationProps, useMotionTransition } from "@/lib/animations";
 
 interface AboutSectionProps {
   data: {
@@ -11,17 +11,7 @@ interface AboutSectionProps {
 }
 
 export function AboutSection({ data }: AboutSectionProps) {
-  const animationProps = shouldReduceMotion() ? {
-    initial: {},
-    whileInView: undefined,
-    viewport: undefined,
-    transition: {},
-  } : {
-    initial: "initial",
-    whileInView: "whileInView",
-    viewport: { once: true, margin: "-100px" },
-    transition: defaultTransition,
-  };
+  const animationProps = useInViewAnimationProps();
 
   return (
     <motion.section 
@@ -43,7 +33,7 @@ export function AboutSection({ data }: AboutSectionProps) {
             className="text-lg text-muted-foreground leading-relaxed whitespace-pre-line"
             variants={fadeInUpVariants}
             {...animationProps}
-            transition={{ ...defaultTransition, delay: 0.2 }}
+            transition={useMotionTransition({ ...defaultTransition, delay: 0.2 })}
           >
             {data.content}
           </motion.p>

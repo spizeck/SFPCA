@@ -2,7 +2,7 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { motion } from "framer-motion";
-import { fadeInUpVariants, scaleInVariants, defaultTransition, shouldReduceMotion } from "@/lib/animations";
+import { fadeInUpVariants, scaleInVariants, defaultTransition, useInViewAnimationProps, useMotionTransition } from "@/lib/animations";
 
 interface DonationSectionProps {
   data: {
@@ -13,17 +13,7 @@ interface DonationSectionProps {
 }
 
 export function DonationSection({ data }: DonationSectionProps) {
-  const animationProps = shouldReduceMotion() ? {
-    initial: {},
-    whileInView: undefined,
-    viewport: undefined,
-    transition: {},
-  } : {
-    initial: "initial",
-    whileInView: "whileInView",
-    viewport: { once: true, margin: "-100px" },
-    transition: defaultTransition,
-  };
+  const animationProps = useInViewAnimationProps();
 
   return (
     <motion.section 
@@ -51,7 +41,7 @@ export function DonationSection({ data }: DonationSectionProps) {
                 className="text-base text-muted-foreground mt-4"
                 variants={fadeInUpVariants}
                 {...animationProps}
-                transition={{ ...defaultTransition, delay: 0.2 }}
+                transition={useMotionTransition({ ...defaultTransition, delay: 0.2 })}
               >
                 {data.content}
               </motion.p>
@@ -61,7 +51,7 @@ export function DonationSection({ data }: DonationSectionProps) {
                 className="bg-secondary/50 p-6 rounded-lg"
                 variants={fadeInUpVariants}
                 {...animationProps}
-                transition={{ ...defaultTransition, delay: 0.4 }}
+                transition={useMotionTransition({ ...defaultTransition, delay: 0.4 })}
               >
                 <h3 className="font-semibold text-lg mb-3 text-foreground">Payment Methods</h3>
                 <p className="text-foreground/80 whitespace-pre-line">{data.paymentMethods}</p>

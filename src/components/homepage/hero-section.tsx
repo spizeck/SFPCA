@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { OptimizedVideo } from "@/components/ui/optimized-video";
 import Link from "next/link";
 import { motion, Transition } from "framer-motion";
-import { fadeInUpVariants, scaleInVariants, shouldReduceMotion } from "@/lib/animations";
+import { useMotionTransition } from "@/lib/animations";
 
 interface HeroSectionProps {
   data: {
@@ -14,14 +14,10 @@ interface HeroSectionProps {
 }
 
 export function HeroSection({ data }: HeroSectionProps) {
-  const animationProps = shouldReduceMotion() ? {
-    initial: {},
-    animate: {},
-    transition: {},
-  } : {
+  const animationProps = {
     initial: { opacity: 0 },
     animate: { opacity: 1 },
-    transition: { duration: 1, ease: "easeInOut" } as Transition,
+    transition: useMotionTransition({ duration: 1, ease: "easeInOut" } as Transition),
   };
 
   return (
@@ -46,25 +42,25 @@ export function HeroSection({ data }: HeroSectionProps) {
         <div className="max-w-3xl mx-auto text-center">
           <motion.h1
             className="text-4xl md:text-6xl font-bold text-white mb-6 drop-shadow-lg"
-            initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 30 }}
+            initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, ease: "easeInOut", delay: 0.2 } as Transition}
+            transition={useMotionTransition({ duration: 0.6, ease: "easeInOut", delay: 0.2 } as Transition)}
           >
             {data.title}
           </motion.h1>
           <motion.p
             className="text-xl md:text-2xl text-white/90 mb-8 drop-shadow-md"
-            initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
+            initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, ease: "easeInOut", delay: 0.5 } as Transition}
+            transition={useMotionTransition({ duration: 0.6, ease: "easeInOut", delay: 0.5 } as Transition)}
           >
             {data.subtitle}
           </motion.p>
           <motion.div
             className="flex flex-col sm:flex-row gap-4 justify-center"
-            initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
+            initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, ease: "easeInOut", delay: 0.8 } as Transition}
+            transition={useMotionTransition({ duration: 0.6, ease: "easeInOut", delay: 0.8 } as Transition)}
           >
             <Button size="lg" asChild className="shadow-xl">
               <Link href="#services">Our Services</Link>
