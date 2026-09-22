@@ -10,9 +10,17 @@ import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import { Animal } from "@/lib/types";
 import { getAvailableAnimals } from "@/lib/animals";
+import {
+  AnimalAdoptionsContent,
+  DEFAULT_ADOPTIONS_CONTENT,
+} from "@/lib/page-content";
 import { logError } from "@/lib/logger";
 
-export function AnimalAdoptions() {
+export function AnimalAdoptions({
+  content = DEFAULT_ADOPTIONS_CONTENT,
+}: {
+  content?: AnimalAdoptionsContent;
+}) {
   const [animals, setAnimals] = useState<Animal[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("all");
@@ -60,10 +68,10 @@ export function AnimalAdoptions() {
             className="text-center max-w-4xl mx-auto"
           >
             <h1 className="text-4xl md:text-6xl font-bold mb-6 text-white">
-              Animal Adoptions
+              {content.heroTitle}
             </h1>
             <p className="text-xl md:text-2xl mb-8 text-white/90">
-              Find your perfect companion. Give a loving animal their forever home.
+              {content.heroDescription}
             </p>
             <Button size="lg" variant="secondary" asChild>
               <Link href="#available">View Available Animals</Link>
@@ -77,31 +85,15 @@ export function AnimalAdoptions() {
         <div className="container mx-auto px-4">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
-              Success Stories
+              {content.successTitle}
             </h2>
             <p className="text-xl text-foreground/80 max-w-2xl mx-auto">
-              Heartwarming stories of animals who found their forever homes
+              {content.successDescription}
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {[
-              {
-                name: "Bella",
-                story: "Bella was found abandoned but now lives with a loving family who adores her.",
-                image: "🐕",
-              },
-              {
-                name: "Max",
-                story: "Max spent 6 months in our shelter before finding his perfect match.",
-                image: "🐈",
-              },
-              {
-                name: "Luna",
-                story: "Luna was rescued from the streets and is now living her best life.",
-                image: "🐕",
-              },
-            ].map((story, index) => (
+            {content.successStories.map((story, index) => (
               <motion.div
                 key={index}
                 initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
@@ -131,10 +123,10 @@ export function AnimalAdoptions() {
         <div className="container mx-auto px-4">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
-              Available for Adoption
+              {content.availableTitle}
             </h2>
             <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-              These loving animals are waiting for their forever homes
+              {content.availableDescription}
             </p>
           </div>
 
@@ -221,20 +213,15 @@ export function AnimalAdoptions() {
         <div className="container mx-auto px-4">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
-              Partner Organizations
+              {content.partnerTitle}
             </h2>
             <p className="text-xl text-foreground/80 max-w-2xl mx-auto">
-              We work with these amazing organizations to help more animals
+              {content.partnerDescription}
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-            {[
-              { name: "Local Pet Rescue", logo: "🏥" },
-              { name: "Animal Welfare Society", logo: "🐾" },
-              { name: "Community Pet Network", logo: "🐕" },
-              { name: "SABA Animal Control", logo: "🚐" },
-            ].map((partner, index) => (
+            {content.partners.map((partner, index) => (
               <motion.div
                 key={index}
                 initial={{ opacity: shouldReduceMotion() ? 1 : 0, y: shouldReduceMotion() ? 0 : 20 }}
@@ -257,10 +244,10 @@ export function AnimalAdoptions() {
       <section className="py-20 bg-muted">
         <div className="container mx-auto px-4 text-center">
           <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
-            Ready to Adopt?
+            {content.ctaTitle}
           </h2>
           <p className="text-xl text-foreground/80 mb-8 max-w-2xl mx-auto">
-            Take the first step in giving an animal a loving home. Contact us to start the adoption process.
+            {content.ctaDescription}
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Button size="lg" asChild>

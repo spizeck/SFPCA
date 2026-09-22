@@ -84,15 +84,16 @@ admin status on every request.
 ## Data model (collections, from `firestore.rules`/`src/lib/types.ts`)
 
 - `homepage/main`, `siteSettings/global`, `faq`, `vetServices`,
-  `animalAdoptions` — public read, admin write
+  `animalAdoptions`, `animalRegistration` — public read, admin write
+  (page-content docs; copy only — fees/workflows live in code)
 - `animals` — public reads only `status == "available"`; admin read/write.
   Admin writes must carry a supported `status` value (see lifecycle below)
 - `animalRegistrations` — private submissions. Public **create**
   (unauthenticated, shape-validated, forced `status="pending"`); admin
   read/update/delete. See the submission section below
-- `animalRegistration` — *different collection*: admin-only page-content
-  doc that nothing currently reads (the public form hardcodes its copy
-  and fees). Singular vs plural matters — do not confuse them
+- `animalRegistration` — *different collection* from the plural:
+  page-content doc read by the public registration page. Singular vs
+  plural matters — do not confuse them
 - `admins` — admin-only read/write
 - Storage: `team-photos/` public read; admin-only image uploads
   (<5 MB, `image/*`). `images/` has **no** rule — no active workflow

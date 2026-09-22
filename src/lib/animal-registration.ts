@@ -84,12 +84,11 @@ export const REGISTRATION_FIELD_LIMITS = {
 } as const;
 
 // --- Fee schedule ------------------------------------------------------
-// The public form quotes registration fees from these constants. The
-// admin "animal registration page" editor writes fixedFee/notFixedFee to
-// a page-content document that nothing currently reads — editing those
-// values does not change the form (tracked as a follow-up issue). The
-// quoted totalFee is informational: staff verify actual payment during
-// review, so a tampered client-computed fee grants nothing.
+// The public form quotes registration fees from these constants. Fees
+// are business logic, not CMS content — the admin page-content editor
+// (`animalRegistration/main`, src/lib/page-content.ts) deliberately has
+// no fee fields, and staff verify actual payment during review, so a
+// tampered client-computed totalFee grants nothing.
 
 export const REGISTRATION_FEE_FIXED = 10;
 export const REGISTRATION_FEE_NOT_FIXED = 100;
