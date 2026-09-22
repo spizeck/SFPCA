@@ -894,9 +894,9 @@ PITR and backups protect **Firestore documents only**:
 A restored `animalRegistrations` document may reference a `receipts/`
 object that no longer exists (and vice versa — `sweepOrphanedReceipts`
 deletes Storage objects whose registration document is gone, so an old
-backup's registrations can point at swept receipts). Storage disaster
-recovery is a separate, deliberately unfixed gap — tracked in its own
-issue.
+backup's registrations can point at swept receipts). Storage recovery
+is covered by the bucket's native soft-delete — see §18 (audited state,
+window, restore procedure, and the sweeper ordering warning).
 
 ### 17f. Security & privacy
 
@@ -922,3 +922,183 @@ command-surface verification (`gcloud firestore databases clone`,
 verify block, confirm `earliestVersionTime` advances, and confirm a
 backup object appears under `gcloud firestore backups list` after the
 first scheduled run.
+
+## 18. Firebase Storage backup & recovery (post-#149)
+
+Storage resilience uses the bucket's **native soft-delete** feature —
+no versioning, no second bucket, no copy jobs. This section covers the
+two prefixes the app actually uses: `receipts/` (private registration
+payment receipts — PII) and `team-photos/` (public site images). The
+two `gcf-v2-*` buckets in the project are Cloud Functions platform
+plumbing, not application data — ignore them for recovery purposes.
+
+### 18a. Audited state
+
+Verified 2026-09-22 with `gcloud storage` (account
+`chadnuttall1@gmail.com`, `--project=saba-sfpca`), metadata only — no
+object contents were listed, downloaded, or displayed:
+
+```
+gcloud storage buckets list --project=saba-sfpca
+gcloud storage buckets describe gs://saba-sfpca.firebasestorage.app
+```
+
+| Setting | State |
+|---|---|
+| App bucket | `saba-sfpca.firebasestorage.app` |
+| Location / class | `US-CENTRAL1` (region) / REGIONAL |
+| **Soft delete** | **ENABLED — 7-day retention** (platform default since bucket creation) |
+| Object Versioning | disabled |
+| Lifecycle rules | none |
+| Retention policy / bucket lock | none |
+| Public access prevention | inherited (project); receipts stay private via Storage rules |
+| Uniform bucket-level access | off (fine-grained — normal for Firebase) |
+| Bucket ACL | project team only — no public/allUsers entries |
+
+### 18b. Production change — manual operator step (Chad)
+
+Soft delete is already on; the only recommended change is **extending
+the retention window to 56 days** so it matches the 8-week Firestore
+backup horizon (§17b). A Firestore backup restore can resurrect a
+registration whose receipt was deleted weeks ago — a 7-day Storage
+window would leave that receipt unrecoverable while the document is
+not. Storage cost for the extra window is negligible at this dataset
+size, and 56 days is still bounded — deleted PII is not kept forever.
+
+Run in **PowerShell** (single-line commands — verify the target first):
+
+```powershell
+gcloud auth list
+gcloud projects describe saba-sfpca
+gcloud storage buckets describe gs://saba-sfpca.firebasestorage.app
+# confirm: this is the app bucket, soft_delete_policy present
+
+gcloud storage buckets update gs://saba-sfpca.firebasestorage.app --soft-delete-duration=56d
+
+# verify afterward (read-only):
+gcloud storage buckets describe gs://saba-sfpca.firebasestorage.app
+# expect: soft_delete_policy.retentionDurationSeconds = '4838400'
+```
+
+**Deliberately not enabled:** Object Versioning. Soft delete already
+preserves the prior object state on overwrite or delete, so versioning
+would stack a second mechanism that adds lifecycle complexity without
+covering a scenario soft delete misses at this scale.
+
+### 18c. What soft delete covers — and what it does not
+
+**Covered (within the retention window):**
+- Accidental object deletion (admin delete, client cleanup, sweeper)
+- Accidental overwrite — the pre-overwrite state is restorable
+- A bad app deploy or function bug that deletes objects
+- `sweepOrphanedReceipts` false-positive deletions (see §18e)
+
+**Not covered:**
+- Anything older than the retention window (soft-deleted objects are
+  permanently deleted when it expires — this is the desired behavior
+  for PII, not a gap to close)
+- **Early permanent deletion**: an operator/attacker with
+  `storage.objects.delete` can purge a soft-deleted object before the
+  window ends — credential compromise is not solved by retention
+- **Bucket or project deletion** — soft delete protects objects, not
+  the bucket or project container
+- **Region loss** — the bucket is single-region (`US-CENTRAL1`);
+  multi-region replication is disproportionate for this app
+- Data that was never uploaded
+
+### 18d. Restore procedure
+
+> Receipt object names are registration document IDs — treat them as
+> sensitive. Query a specific object path; do **not** dump whole-prefix
+> listings into terminals, tickets, or logs. Never download a receipt
+> just to check it exists — validate via metadata.
+
+1. **Identify the object.** From the `animalRegistrations` document,
+   the `paymentReceipt` field holds the path `receipts/<doc id>`.
+   For team photos, the member record stores the `team-photos/...`
+   URL.
+2. **Confirm it is soft-deleted** (metadata only):
+
+   ```powershell
+   gcloud storage ls gs://saba-sfpca.firebasestorage.app/receipts/<REGISTRATION_DOC_ID> --soft-deleted
+   ```
+
+   No output = the object is outside the recovery window (or never
+   existed) — see step 5.
+3. **Restore it** (mutating — verify project first with
+   `gcloud config get-value project` or an explicit
+   `gcloud projects describe saba-sfpca`):
+
+   ```powershell
+   gcloud storage restore gs://saba-sfpca.firebasestorage.app/receipts/<REGISTRATION_DOC_ID>
+   ```
+
+   For a bulk incident (many objects deleted in a window), restore by
+   time bounds — still scoped to the prefix, never a blind bucket-wide
+   restore:
+
+   ```powershell
+   gcloud storage restore gs://saba-sfpca.firebasestorage.app/receipts/ --deleted-after-time=<ISO8601> --deleted-before-time=<ISO8601>
+   ```
+4. **Validate without exposing contents.** Check metadata only
+   (`gcloud storage objects describe gs://.../receipts/<id>` — size,
+   md5Hash, updated). Functional check: open the registration in the
+   admin UI — the receipt link should resolve again.
+5. **Outside the window / never uploaded:** the object is gone.
+   Operationally, re-collect the receipt from the registrant; there is
+   no deeper copy to reach for.
+
+### 18e. Orphan-sweeper interaction (`sweepOrphanedReceipts`)
+
+The sweeper (functions, every 24 h) deletes `receipts/<id>` objects
+whose `animalRegistrations/<id>` document does not exist and which are
+older than one hour. Two properties matter for recovery:
+
+- **Soft-deleted receipts are invisible to the sweeper** — its listing
+  sees live objects only. A swept receipt stays recoverable for the
+  whole soft-delete window.
+- **Firestore restore ordering hazard:** while a Firestore restore is
+  in progress, a receipt can look orphaned if its registration document
+  is absent from `(default)`. With delete protection now on,
+  `(default)` cannot be removed — restores create *new* databases — so
+  `(default)` stays populated. Still, as cheap insurance during any
+  §17d restore that leaves registrations temporarily missing: **pause
+  the sweeper's Cloud Scheduler job first** (Google Cloud console →
+  Cloud Scheduler → `firebase-schedule-sweepOrphanedReceipts-*` →
+  Pause), and resume it after recovery completes.
+
+**Combined incident ordering** (registration doc + receipt both gone):
+
+1. Pause the sweeper job (above).
+2. Recover the Firestore document first per §17d — the document's
+   `paymentReceipt` field tells you the exact object name.
+3. Restore the Storage object per §18d, then resume the sweeper.
+4. Validate the pair in the admin UI before reopening the site.
+
+If the document is restored but its receipt is beyond the soft-delete
+window, the registration record remains valid — only the attachment is
+unrecoverable (re-collect from the registrant).
+
+### 18f. Privacy & retention boundary
+
+- Soft-deleted `receipts/` objects are PII held for the recovery
+  window only — this is **recovery retention, not business retention**.
+  When #130 defines a registration retention policy, deliberate
+  deletions still age out of soft delete on the same 56-day clock; the
+  mechanism cannot turn a deletion decision into permanent storage.
+  If #130 ever requires immediate PII destruction, an operator must
+  explicitly purge the soft-deleted object — document that in the
+  retention policy.
+- Restore access inherits bucket IAM (project editors/owners) — keep it
+  that way; never grant receipt reads to satisfy a recovery workflow.
+
+### 18g. Testing status — honest note
+
+Configuration was verified read-only against the live bucket
+(`buckets describe`). The `gcloud storage restore` path was **not
+executed against production** — no real receipt was deleted to prove
+recovery, by design. First-restore confidence comes from the operator
+checklist in §18d; if a live rehearsal is ever wanted, create a
+synthetic object under a documented test name (e.g.
+`team-photos/recovery-test.txt` containing no real data), delete it,
+restore it, delete it again — never use a real `receipts/` object.

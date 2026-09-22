@@ -212,8 +212,9 @@ section is the short version.
 scheduled backups, no application-level backup code. Current production
 state, the enable commands, and the restore procedure are in
 [RUNBOOK.md §17](RUNBOOK.md). Firebase Storage objects (registration
-receipts, team photos) are **not** covered by Firestore backups — see
-§17e for that boundary.
+receipts, team photos) are **not** covered by Firestore backups — they
+rely on the bucket's native soft-delete instead; see §17e for the
+boundary and §18 for the Storage procedure.
 
 ### Vercel
 
