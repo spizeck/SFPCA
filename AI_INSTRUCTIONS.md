@@ -87,7 +87,10 @@ admin status on every request.
   `animalAdoptions`, `animalRegistration` — public read, admin write
   (page-content docs; copy only — fees/workflows live in code)
 - `animals` — public reads only `status == "available"`; admin read/write.
-  Admin writes must carry a supported `status` value (see lifecycle below)
+  Admin writes must carry a supported `status` value (see lifecycle below).
+  The public detail route `/animal-adoptions/[id]` renders per-request and
+  404s any non-`available` animal — never reveal that a private animal
+  exists
 - `animalRegistrations` — private submissions. Public **create**
   (unauthenticated, shape-validated, forced `status="pending"`); admin
   read/update/delete. See the submission section below
