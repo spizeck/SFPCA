@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Homepage } from "@/lib/types";
 import { TeamManager } from "@/components/admin/team-manager";
 import { Button } from "@/components/ui/button";
@@ -9,14 +9,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { useMutation } from "@/hooks/use-mutation";
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes";
+import { LoadError } from "@/components/admin/load-error";
 import { saveHomepageData, loadHomepageData } from "./actions";
 import { logError } from "@/lib/logger";
 
 export default function HomepageEditor() {
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const saveMutation = useMutation();
   const { toast } = useToast();
-  
+
   const [data, setData] = useState<Homepage>({
     hero: {
       title: "",
@@ -53,60 +57,72 @@ export default function HomepageEditor() {
     },
   });
 
+  // Snapshot of the last loaded/saved content; any drift from it means
+  // there are unsaved edits worth guarding against accidental navigation.
+  const snapshotRef = useRef("");
+  const dirty = snapshotRef.current !== "" &&
+    JSON.stringify(data) !== snapshotRef.current;
+  useUnsavedChangesGuard(dirty);
+
   useEffect(() => {
     loadData();
   }, []);
 
   const loadData = async () => {
+    setLoading(true);
+    setLoadError(false);
     try {
       const result = await loadHomepageData();
       if (result) {
         setData(result);
+        snapshotRef.current = JSON.stringify(result);
+      } else {
+        snapshotRef.current = JSON.stringify(data);
       }
     } catch (error) {
       logError("admin", "homepage-load", error);
-      toast({
-        title: "Error",
-        description: "Failed to load homepage data",
-        variant: "destructive",
-      });
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await saveHomepageData(data);
-      
-      toast({
-        title: "Success",
-        description: "Homepage content saved successfully. Changes will appear on the live site within 1-2 minutes.",
-        duration: 5000,
-      });
-    } catch (error) {
-      logError("admin", "homepage-save", error);
-      toast({
-        title: "Error",
-        description: "Failed to save homepage data",
-        variant: "destructive",
-      });
-    } finally {
-      setSaving(false);
-    }
+  const handleSave = () => {
+    saveMutation.run(async () => {
+      try {
+        await saveHomepageData(data);
+        snapshotRef.current = JSON.stringify(data);
+        toast({
+          title: "Success",
+          description: "Homepage content saved successfully. Changes will appear on the live site within 1-2 minutes.",
+          duration: 5000,
+        });
+      } catch (error) {
+        logError("admin", "homepage-save", error);
+        toast({
+          title: "Error",
+          description:
+            "Failed to save homepage data. Your changes are still here — try again.",
+          variant: "destructive",
+        });
+      }
+    });
   };
 
   if (loading) {
     return <div>Loading...</div>;
   }
 
+  if (loadError) {
+    return <LoadError label="homepage content" onRetry={loadData} />;
+  }
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Edit Homepage</h1>
-        <Button onClick={handleSave} disabled={saving}>
-          {saving ? "Saving..." : "Save Changes"}
+        <Button onClick={handleSave} disabled={saveMutation.pending}>
+          {saveMutation.pending ? "Saving..." : "Save Changes"}
         </Button>
       </div>
 
@@ -331,8 +347,8 @@ export default function HomepageEditor() {
       </Card>
 
       <div className="flex justify-end">
-        <Button onClick={handleSave} disabled={saving} size="lg">
-          {saving ? "Saving..." : "Save All Changes"}
+        <Button onClick={handleSave} disabled={saveMutation.pending} size="lg">
+          {saveMutation.pending ? "Saving..." : "Save All Changes"}
         </Button>
       </div>
     </div>

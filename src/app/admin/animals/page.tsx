@@ -21,33 +21,47 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { useMutation } from "@/hooks/use-mutation";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { logError } from "@/lib/logger";
+import { ConfirmDialog } from "@/components/admin/confirm-dialog";
+import { LoadError } from "@/components/admin/load-error";
+
+const EMPTY_FORM = {
+  name: "",
+  species: "dog" as "dog" | "cat" | "other",
+  sex: "unknown" as "male" | "female" | "unknown",
+  approxAge: "",
+  description: "",
+  // Empty string means "no valid status chosen" — used when editing an
+  // animal whose stored status is unrecognized so staff must pick one.
+  status: "available" as AnimalStatus | "",
+  photos: [] as string[],
+};
 
 export default function AnimalsManager() {
   const [animals, setAnimals] = useState<Animal[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingAnimal, setEditingAnimal] = useState<Animal | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Animal | null>(null);
+  const [statusError, setStatusError] = useState("");
+  const [initialFormJson, setInitialFormJson] = useState(() =>
+    JSON.stringify(EMPTY_FORM),
+  );
+  const mutation = useMutation();
   const { toast } = useToast();
 
-  const [formData, setFormData] = useState({
-    name: "",
-    species: "dog" as "dog" | "cat" | "other",
-    sex: "unknown" as "male" | "female" | "unknown",
-    approxAge: "",
-    description: "",
-    // Empty string means "no valid status chosen" — used when editing an
-    // animal whose stored status is unrecognized so staff must pick one.
-    status: "available" as AnimalStatus | "",
-    photos: [] as string[],
-  });
+  const [formData, setFormData] = useState({ ...EMPTY_FORM });
 
   useEffect(() => {
     loadAnimals();
   }, []);
 
   const loadAnimals = async () => {
+    setLoading(true);
+    setLoadError(false);
     try {
       const querySnapshot = await getDocs(collection(db, "animals"));
       const animalsData = querySnapshot.docs.map((doc) => {
@@ -62,119 +76,127 @@ export default function AnimalsManager() {
       setAnimals(animalsData);
     } catch (error) {
       logError("animals", "admin-load", error);
-      toast({
-        title: "Error",
-        description: "Failed to load animals",
-        variant: "destructive",
-      });
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     // Never write an unrecognized status: unknown values fail closed
     // publicly but would corrupt the admin lifecycle view.
     if (!isAnimalStatus(formData.status)) {
-      toast({
-        title: "Choose a status",
-        description: "Select a valid animal status before saving.",
-        variant: "destructive",
-      });
+      setStatusError("Select a valid animal status before saving.");
       return;
     }
 
-    try {
-      if (editingAnimal) {
-        const docRef = doc(db, "animals", editingAnimal.id);
-        await updateDoc(docRef, {
-          ...formData,
-          updatedAt: new Date(),
+    mutation.run(async () => {
+      try {
+        if (editingAnimal) {
+          const docRef = doc(db, "animals", editingAnimal.id);
+          await updateDoc(docRef, {
+            ...formData,
+            updatedAt: new Date(),
+          });
+          toast({ title: "Success", description: "Animal updated successfully" });
+        } else {
+          await addDoc(collection(db, "animals"), {
+            ...formData,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+          toast({ title: "Success", description: "Animal added successfully" });
+        }
+
+        setDialogOpen(false);
+        resetForm();
+        loadAnimals();
+      } catch (error) {
+        logError("animals", "admin-save", error);
+        toast({
+          title: "Error",
+          description:
+            "Failed to save animal. Your entries are kept — try again.",
+          variant: "destructive",
         });
-        toast({ title: "Success", description: "Animal updated successfully" });
-      } else {
-        await addDoc(collection(db, "animals"), {
-          ...formData,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        });
-        toast({ title: "Success", description: "Animal added successfully" });
       }
-      
-      setDialogOpen(false);
-      resetForm();
-      loadAnimals();
-    } catch (error) {
-      logError("animals", "admin-save", error);
-      toast({
-        title: "Error",
-        description: "Failed to save animal",
-        variant: "destructive",
-      });
-    }
+    });
   };
 
   const handleEdit = (animal: Animal) => {
     setEditingAnimal(animal);
-    setFormData({
+    const editForm = {
       name: animal.name,
       species: animal.species,
       sex: animal.sex,
       approxAge: animal.approxAge,
       description: animal.description,
-      status: isAnimalStatus(animal.status) ? animal.status : "",
+      status: isAnimalStatus(animal.status) ? animal.status : ("" as const),
       photos: animal.photos || [],
-    });
+    };
+    setFormData(editForm);
+    setInitialFormJson(JSON.stringify(editForm));
+    setStatusError("");
     setDialogOpen(true);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm(
-      "Permanently delete this animal record? This cannot be undone.\n\n" +
-      "If the animal was adopted or is temporarily unavailable, choose a " +
-      "different status instead — that hides it from the public site while " +
-      "keeping the record."
-    )) return;
-    
-    try {
-      await deleteDoc(doc(db, "animals", id));
-      toast({ title: "Success", description: "Animal deleted successfully" });
-      loadAnimals();
-    } catch (error) {
-      logError("animals", "admin-delete", error);
-      toast({
-        title: "Error",
-        description: "Failed to delete animal",
-        variant: "destructive",
-      });
-    }
+  const handleDelete = () => {
+    const target = deleteTarget;
+    if (!target) return;
+    mutation.run(async () => {
+      try {
+        await deleteDoc(doc(db, "animals", target.id));
+        setDeleteTarget(null);
+        toast({ title: "Success", description: "Animal deleted successfully" });
+        loadAnimals();
+      } catch (error) {
+        logError("animals", "admin-delete", error);
+        toast({
+          title: "Error",
+          description: "Failed to delete animal. Try again.",
+          variant: "destructive",
+        });
+      }
+    });
   };
+
+  // Dirty check compares against the form state as it was when the
+  // dialog opened, so closing with edits can warn before discarding.
+  const formDirty = JSON.stringify(formData) !== initialFormJson;
 
   const resetForm = () => {
     setEditingAnimal(null);
-    setFormData({
-      name: "",
-      species: "dog",
-      sex: "unknown",
-      approxAge: "",
-      description: "",
-      status: "available",
-      photos: [],
-    });
+    setStatusError("");
+    setFormData({ ...EMPTY_FORM });
+    setInitialFormJson(JSON.stringify(EMPTY_FORM));
   };
 
   if (loading) {
     return <div>Loading...</div>;
   }
 
+  if (loadError) {
+    return <LoadError label="animals" onRetry={loadAnimals} />;
+  }
+
+  const closeDialog = (open: boolean) => {
+    if (open) {
+      setDialogOpen(true);
+      return;
+    }
+    // Closing the dialog discards the form — warn when edits exist.
+    if (formDirty && !window.confirm("Discard unsaved changes to this animal?")) {
+      return;
+    }
+    setDialogOpen(false);
+    resetForm();
+  };
+
   return (
     <div className="max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold">Manage Animals</h1>
-        <Dialog open={dialogOpen} onOpenChange={(open) => {
-          setDialogOpen(open);
-          if (!open) resetForm();
-        }}>
+        <Dialog open={dialogOpen} onOpenChange={closeDialog}>
           <DialogTrigger asChild>
             <Button>
               <Plus className="h-4 w-4 mr-2" />
@@ -245,8 +267,14 @@ export default function AnimalsManager() {
               </div>
               <div>
                 <Label htmlFor="status">Status</Label>
-                <Select value={formData.status} onValueChange={(value: any) => setFormData({ ...formData, status: value })}>
-                  <SelectTrigger id="status">
+                <Select
+                  value={formData.status}
+                  onValueChange={(value: any) => {
+                    setFormData({ ...formData, status: value });
+                    setStatusError("");
+                  }}
+                >
+                  <SelectTrigger id="status" aria-invalid={!!statusError} aria-describedby={statusError ? "status-error" : undefined}>
                     <SelectValue placeholder="Choose a status" />
                   </SelectTrigger>
                   <SelectContent>
@@ -257,9 +285,15 @@ export default function AnimalsManager() {
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {getAnimalStatusVisibilityHint(formData.status)}
-                </p>
+                {statusError ? (
+                  <p id="status-error" role="alert" className="text-xs text-red-600 mt-1">
+                    {statusError}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {getAnimalStatusVisibilityHint(formData.status)}
+                  </p>
+                )}
               </div>
               <div>
                 <Label htmlFor="photos">Photo URL (optional)</Label>
@@ -273,8 +307,12 @@ export default function AnimalsManager() {
                   Enter a direct URL to the animal photo
                 </p>
               </div>
-              <Button onClick={handleSubmit} className="w-full">
-                {editingAnimal ? "Update Animal" : "Add Animal"}
+              <Button onClick={handleSubmit} className="w-full" disabled={mutation.pending}>
+                {mutation.pending
+                  ? "Saving…"
+                  : editingAnimal
+                    ? "Update Animal"
+                    : "Add Animal"}
               </Button>
             </div>
           </DialogContent>
@@ -328,7 +366,7 @@ export default function AnimalsManager() {
                         variant="ghost"
                         size="sm"
                         aria-label={`Delete ${animal.name}`}
-                        onClick={() => handleDelete(animal.id)}
+                        onClick={() => setDeleteTarget(animal)}
                       >
                         <Trash2 className="h-4 w-4 text-red-500" />
                       </Button>
@@ -340,6 +378,25 @@ export default function AnimalsManager() {
           </Table>
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Delete animal"
+        description={
+          deleteTarget ? (
+            <>
+              Permanently delete the record for{" "}
+              <strong>{deleteTarget.name || "this unnamed animal"}</strong>?
+              This cannot be undone. If the animal was adopted or is
+              temporarily unavailable, set a different status instead — that
+              hides it from the public site while keeping the record.
+            </>
+          ) : null
+        }
+        pending={mutation.pending}
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

@@ -55,4 +55,15 @@ if (typeof window !== "undefined") {
     writable: true,
     value: ResizeObserverStub,
   });
+
+  // jsdom lacks scrollIntoView and pointer capture; Radix Dialog/Select
+  // call them when portals open.
+  if (!Element.prototype.scrollIntoView) {
+    Element.prototype.scrollIntoView = () => {};
+  }
+  if (!Element.prototype.hasPointerCapture) {
+    Element.prototype.hasPointerCapture = () => false;
+    Element.prototype.setPointerCapture = () => {};
+    Element.prototype.releasePointerCapture = () => {};
+  }
 }

@@ -24,10 +24,17 @@ export function AdminNav() {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const handleLogout = async () => {
-    await fetch("/api/auth/session", { method: "DELETE" });
-    router.push("/login");
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await fetch("/api/auth/session", { method: "DELETE" });
+      router.push("/login");
+    } finally {
+      setLoggingOut(false);
+    }
   };
 
   return (
@@ -70,7 +77,7 @@ export function AdminNav() {
                 </Link>
               </Button>
               <AdminThemeToggle />
-              <Button variant="ghost" size="sm" onClick={handleLogout}>
+              <Button variant="ghost" size="sm" onClick={handleLogout} disabled={loggingOut}>
                 <LogOut className="h-4 w-4 mr-2" />
                 <span className="hidden sm:inline">Logout</span>
               </Button>
@@ -79,6 +86,8 @@ export function AdminNav() {
               variant="ghost"
               size="sm"
               className="md:hidden"
+              aria-label="Toggle navigation menu"
+              aria-expanded={mobileMenuOpen}
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             >
               <Menu className="h-4 w-4" />
@@ -120,7 +129,7 @@ export function AdminNav() {
                   <AdminThemeToggle />
                   <span className="text-sm text-muted-foreground">Theme</span>
                 </div>
-                <Button variant="ghost" size="sm" onClick={handleLogout} className="w-full justify-start">
+                <Button variant="ghost" size="sm" onClick={handleLogout} disabled={loggingOut} className="w-full justify-start">
                   <LogOut className="h-4 w-4 mr-2" />
                   Logout
                 </Button>

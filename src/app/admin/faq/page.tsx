@@ -11,8 +11,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { useMutation } from "@/hooks/use-mutation";
 import { Plus, Pencil, Trash2, GripVertical } from "lucide-react";
 import { logError } from "@/lib/logger";
+import { ConfirmDialog } from "@/components/admin/confirm-dialog";
+import { LoadError } from "@/components/admin/load-error";
 
 interface FAQ {
   id: string;
@@ -34,21 +37,31 @@ const CATEGORIES = [
   "Other"
 ];
 
+const EMPTY_FORM = { category: "", question: "", answer: "", order: "0" };
+
 export default function FAQManager() {
   const [faqs, setFaqs] = useState<FAQ[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingFaq, setEditingFaq] = useState<FAQ | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<FAQ | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{
+    category?: string;
+    question?: string;
+    answer?: string;
+  }>({});
+  const [initialFormJson, setInitialFormJson] = useState(() =>
+    JSON.stringify(EMPTY_FORM),
+  );
+  const mutation = useMutation();
   const { toast } = useToast();
 
-  const [formData, setFormData] = useState({
-    category: "",
-    question: "",
-    answer: "",
-    order: "0",
-  });
+  const [formData, setFormData] = useState({ ...EMPTY_FORM });
 
   const loadFaqs = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
     try {
       const querySnapshot = await getDocs(collection(db, "faq"));
       
@@ -82,32 +95,29 @@ export default function FAQManager() {
       setFaqs(faqsData);
     } catch (error) {
       logError("admin", "faq-load", error);
-      toast({
-        title: "Error",
-        description: `Failed to load FAQs: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        variant: "destructive",
-      });
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, []);
 
   useEffect(() => {
     loadFaqs();
   }, [loadFaqs]);
 
-  const handleSubmit = async () => {
-    try {
-      // Validate form data
-      if (!formData.category || !formData.question || !formData.answer) {
-        toast({
-          title: "Validation Error",
-          description: "Please fill in all required fields",
-          variant: "destructive",
-        });
-        return;
-      }
+  const handleSubmit = () => {
+    // Field-level validation: name each missing field and keep the
+    // dialog open so entered data is preserved.
+    const errors: typeof fieldErrors = {};
+    if (!formData.category) errors.category = "Choose a category.";
+    if (!formData.question.trim()) errors.question = "Enter a question.";
+    if (!formData.answer.trim()) errors.answer = "Enter an answer.";
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      return;
+    }
 
+    mutation.run(async () => {
       const submitData = {
         category: formData.category,
         question: formData.question,
@@ -115,76 +125,80 @@ export default function FAQManager() {
         order: parseInt(formData.order, 10) || 0,
       };
 
-      if (editingFaq) {
-        const docRef = doc(db, "faq", editingFaq.id);
-        await updateDoc(docRef, {
-          ...submitData,
-          updatedAt: new Date(),
-        });
-        toast({ title: "Success", description: "FAQ updated successfully" });
-      } else {
-        await addDoc(collection(db, "faq"), {
-          ...submitData,
-          order: faqs.filter(f => f.category === formData.category).length,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        });
-        toast({ title: "Success", description: "FAQ added successfully" });
-      }
-      
-      setDialogOpen(false);
-      resetForm();
-      
-      // Reload FAQs after a short delay to ensure Firestore has updated
-      setTimeout(() => {
+      try {
+        if (editingFaq) {
+          const docRef = doc(db, "faq", editingFaq.id);
+          await updateDoc(docRef, {
+            ...submitData,
+            updatedAt: new Date(),
+          });
+          toast({ title: "Success", description: "FAQ updated successfully" });
+        } else {
+          await addDoc(collection(db, "faq"), {
+            ...submitData,
+            order: faqs.filter((f) => f.category === formData.category).length,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+          toast({ title: "Success", description: "FAQ added successfully" });
+        }
+
+        setDialogOpen(false);
+        resetForm();
         loadFaqs();
-      }, 500);
-    } catch (error) {
-      logError("admin", "faq-save", error);
-      toast({
-        title: "Error",
-        description: `Failed to save FAQ: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        variant: "destructive",
-      });
-    }
+      } catch (error) {
+        logError("admin", "faq-save", error);
+        toast({
+          title: "Error",
+          description:
+            "Failed to save FAQ. Your entries are kept — try again.",
+          variant: "destructive",
+        });
+      }
+    });
   };
 
   const handleEdit = (faq: FAQ) => {
     setEditingFaq(faq);
-    setFormData({
+    const editForm = {
       category: faq.category,
       question: faq.question,
       answer: faq.answer,
       order: faq.order.toString(),
-    });
+    };
+    setFormData(editForm);
+    setInitialFormJson(JSON.stringify(editForm));
+    setFieldErrors({});
     setDialogOpen(true);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this FAQ?")) return;
-    
-    try {
-      await deleteDoc(doc(db, "faq", id));
-      toast({ title: "Success", description: "FAQ deleted successfully" });
-      loadFaqs();
-    } catch (error) {
-      logError("admin", "faq-delete", error);
-      toast({
-        title: "Error",
-        description: "Failed to delete FAQ",
-        variant: "destructive",
-      });
-    }
+  const handleDelete = () => {
+    const target = deleteTarget;
+    if (!target) return;
+    mutation.run(async () => {
+      try {
+        await deleteDoc(doc(db, "faq", target.id));
+        setDeleteTarget(null);
+        toast({ title: "Success", description: "FAQ deleted successfully" });
+        loadFaqs();
+      } catch (error) {
+        logError("admin", "faq-delete", error);
+        toast({
+          title: "Error",
+          description: "Failed to delete FAQ. Try again.",
+          variant: "destructive",
+        });
+      }
+    });
   };
+
+  const formDirty = JSON.stringify(formData) !== initialFormJson;
 
   const resetForm = () => {
     setEditingFaq(null);
-    setFormData({
-      category: "",
-      question: "",
-      answer: "",
-      order: "0",
-    });
+    setFieldErrors({});
+    setFormData({ ...EMPTY_FORM });
+    setInitialFormJson(JSON.stringify(EMPTY_FORM));
   };
 
   const groupedFaqs = faqs.reduce((acc, faq) => {
@@ -199,14 +213,27 @@ export default function FAQManager() {
     return <div className="p-8">Loading...</div>;
   }
 
+  if (loadError) {
+    return <LoadError label="FAQs" onRetry={loadFaqs} />;
+  }
+
+  const closeDialog = (open: boolean) => {
+    if (open) {
+      setDialogOpen(true);
+      return;
+    }
+    if (formDirty && !window.confirm("Discard unsaved changes to this FAQ?")) {
+      return;
+    }
+    setDialogOpen(false);
+    resetForm();
+  };
+
   return (
     <div className="max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold">Manage FAQs</h1>
-        <Dialog open={dialogOpen} onOpenChange={(open) => {
-          setDialogOpen(open);
-          if (!open) resetForm();
-        }}>
+        <Dialog open={dialogOpen} onOpenChange={closeDialog}>
           <DialogTrigger asChild>
             <Button>
               <Plus className="h-4 w-4 mr-2" />
@@ -223,9 +250,19 @@ export default function FAQManager() {
             <div className="space-y-4 py-4">
               <div>
                 <Label htmlFor="category">Category</Label>
-                <Select value={formData.category} onValueChange={(value) => setFormData({ ...formData, category: value })}>
-                  <SelectTrigger>
-                    <SelectValue />
+                <Select
+                  value={formData.category}
+                  onValueChange={(value) => {
+                    setFormData({ ...formData, category: value });
+                    setFieldErrors((prev) => ({ ...prev, category: undefined }));
+                  }}
+                >
+                  <SelectTrigger
+                    id="category"
+                    aria-invalid={!!fieldErrors.category}
+                    aria-describedby={fieldErrors.category ? "category-error" : undefined}
+                  >
+                    <SelectValue placeholder="Choose a category" />
                   </SelectTrigger>
                   <SelectContent>
                     {CATEGORIES.map((category) => (
@@ -235,15 +272,30 @@ export default function FAQManager() {
                     ))}
                   </SelectContent>
                 </Select>
+                {fieldErrors.category && (
+                  <p id="category-error" role="alert" className="text-xs text-red-600 mt-1">
+                    {fieldErrors.category}
+                  </p>
+                )}
               </div>
               <div>
                 <Label htmlFor="question">Question</Label>
                 <Input
                   id="question"
                   value={formData.question}
-                  onChange={(e) => setFormData({ ...formData, question: e.target.value })}
+                  onChange={(e) => {
+                    setFormData({ ...formData, question: e.target.value });
+                    setFieldErrors((prev) => ({ ...prev, question: undefined }));
+                  }}
                   placeholder="Enter the question"
+                  aria-invalid={!!fieldErrors.question}
+                  aria-describedby={fieldErrors.question ? "question-error" : undefined}
                 />
+                {fieldErrors.question && (
+                  <p id="question-error" role="alert" className="text-xs text-red-600 mt-1">
+                    {fieldErrors.question}
+                  </p>
+                )}
               </div>
               <div>
                 <Label htmlFor="answer">Answer</Label>
@@ -251,12 +303,22 @@ export default function FAQManager() {
                   id="answer"
                   rows={4}
                   value={formData.answer}
-                  onChange={(e) => setFormData({ ...formData, answer: e.target.value })}
+                  onChange={(e) => {
+                    setFormData({ ...formData, answer: e.target.value });
+                    setFieldErrors((prev) => ({ ...prev, answer: undefined }));
+                  }}
                   placeholder="Enter the answer"
+                  aria-invalid={!!fieldErrors.answer}
+                  aria-describedby={fieldErrors.answer ? "answer-error" : undefined}
                 />
+                {fieldErrors.answer && (
+                  <p id="answer-error" role="alert" className="text-xs text-red-600 mt-1">
+                    {fieldErrors.answer}
+                  </p>
+                )}
               </div>
-              <Button onClick={handleSubmit} className="w-full">
-                {editingFaq ? "Update FAQ" : "Add FAQ"}
+              <Button onClick={handleSubmit} className="w-full" disabled={mutation.pending}>
+                {mutation.pending ? "Saving…" : editingFaq ? "Update FAQ" : "Add FAQ"}
               </Button>
             </div>
           </DialogContent>
@@ -283,10 +345,20 @@ export default function FAQManager() {
                         <p className="text-sm text-muted-foreground whitespace-pre-wrap">{faq.answer}</p>
                       </div>
                       <div className="flex gap-2 ml-4">
-                        <Button variant="ghost" size="sm" onClick={() => handleEdit(faq)}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Edit FAQ: ${faq.question}`}
+                          onClick={() => handleEdit(faq)}
+                        >
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={() => handleDelete(faq.id)}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Delete FAQ: ${faq.question}`}
+                          onClick={() => setDeleteTarget(faq)}
+                        >
                           <Trash2 className="h-4 w-4 text-red-500" />
                         </Button>
                       </div>
@@ -316,6 +388,23 @@ export default function FAQManager() {
           </CardContent>
         </Card>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Delete FAQ"
+        description={
+          deleteTarget ? (
+            <>
+              Permanently delete the FAQ{" "}
+              <strong>&ldquo;{deleteTarget.question}&rdquo;</strong>? This
+              cannot be undone.
+            </>
+          ) : null
+        }
+        pending={mutation.pending}
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { useMutation } from "@/hooks/use-mutation";
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes";
+import { LoadError } from "@/components/admin/load-error";
 import { logError } from "@/lib/logger";
 import {
   AnimalAdoptionsContent,
@@ -21,9 +24,10 @@ type AnimalAdoptionsData = AnimalAdoptionsContent;
 
 export default function AnimalAdoptionsAdminPage() {
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const saveMutation = useMutation();
   const { toast } = useToast();
-  
+
   const [data, setData] = useState<AnimalAdoptionsData>({
     ...DEFAULT_ADOPTIONS_CONTENT,
     // Start new installs with empty story/partner slots to fill in; the
@@ -41,50 +45,57 @@ export default function AnimalAdoptionsAdminPage() {
     ],
   });
 
+  // Snapshot of the last loaded/saved content; drift means unsaved edits.
+  const snapshotRef = useRef("");
+  const dirty = snapshotRef.current !== "" &&
+    JSON.stringify(data) !== snapshotRef.current;
+  useUnsavedChangesGuard(dirty);
+
   useEffect(() => {
     loadData();
   }, []);
 
   const loadData = async () => {
+    setLoading(true);
+    setLoadError(false);
     try {
       const docRef = doc(db, "animalAdoptions", "main");
       const docSnap = await getDoc(docRef);
-      
+
       if (docSnap.exists()) {
         setData(docSnap.data() as AnimalAdoptionsData);
+        snapshotRef.current = JSON.stringify(docSnap.data());
+      } else {
+        snapshotRef.current = JSON.stringify(data);
       }
     } catch (error) {
       logError("admin", "adoptions-content-load", error);
-      toast({
-        title: "Error",
-        description: "Failed to load data",
-        variant: "destructive",
-      });
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      const docRef = doc(db, "animalAdoptions", "main");
-      await setDoc(docRef, data);
-      
-      toast({
-        title: "Success",
-        description: "Animal adoptions page updated successfully",
-      });
-    } catch (error) {
-      logError("admin", "adoptions-content-save", error);
-      toast({
-        title: "Error",
-        description: "Failed to save data",
-        variant: "destructive",
-      });
-    } finally {
-      setSaving(false);
-    }
+  const handleSave = () => {
+    saveMutation.run(async () => {
+      try {
+        const docRef = doc(db, "animalAdoptions", "main");
+        await setDoc(docRef, data);
+        snapshotRef.current = JSON.stringify(data);
+        toast({
+          title: "Success",
+          description: "Animal adoptions page updated successfully",
+        });
+      } catch (error) {
+        logError("admin", "adoptions-content-save", error);
+        toast({
+          title: "Error",
+          description:
+            "Failed to save. Your changes are still here — try again.",
+          variant: "destructive",
+        });
+      }
+    });
   };
 
   const updateSuccessStory = (index: number, field: keyof SuccessStory, value: string) => {
@@ -103,12 +114,16 @@ export default function AnimalAdoptionsAdminPage() {
     return <div>Loading...</div>;
   }
 
+  if (loadError) {
+    return <LoadError label="adoptions page content" onRetry={loadData} />;
+  }
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Edit Animal Adoptions Page</h1>
-        <Button onClick={handleSave} disabled={saving}>
-          {saving ? "Saving..." : "Save Changes"}
+        <Button onClick={handleSave} disabled={saveMutation.pending}>
+          {saveMutation.pending ? "Saving..." : "Save Changes"}
         </Button>
       </div>
 
@@ -292,8 +307,8 @@ export default function AnimalAdoptionsAdminPage() {
       </Card>
 
       <div className="flex justify-end">
-        <Button onClick={handleSave} disabled={saving} size="lg">
-          {saving ? "Saving..." : "Save All Changes"}
+        <Button onClick={handleSave} disabled={saveMutation.pending} size="lg">
+          {saveMutation.pending ? "Saving..." : "Save All Changes"}
         </Button>
       </div>
     </div>
