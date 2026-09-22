@@ -60,7 +60,7 @@ rollbacks). `functions/README.md` covers the Cloud Functions project.
 | Language | TypeScript |
 | Styling | Tailwind CSS + shadcn/ui |
 | Animation | Framer Motion |
-| Backend | Firebase (Auth, Firestore, Storage) |
+| Backend | Firebase (Auth, Firestore, Storage) + Neon Postgres (registry — foundation in progress, see `ARCHITECTURE.md`) |
 | Icons | Lucide React |
 | Deployment | Vercel |
 
@@ -186,6 +186,14 @@ SFPCA/
 | `admins` | Admin user allowlist (email as document ID) |
 | `vetServices` | Veterinary services page content |
 | `animalAdoptions` | Animal adoptions page content |
+
+> **Registry migration (#165):** operational collections (`animals`,
+> `animalRegistrations`, `admins`) have a relational target schema in
+> `src/lib/db/schema.ts` and will migrate to Neon Postgres in staged
+> phases. CMS/page-content collections stay in Firestore. The ownership
+> boundary, entity model, and cutover plan are documented in
+> [ARCHITECTURE.md](ARCHITECTURE.md). Until a domain's cutover lands,
+> Firestore remains its authority.
 
 ## Admin Access
 
