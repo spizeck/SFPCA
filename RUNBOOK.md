@@ -1221,13 +1221,45 @@ procedure for Neon; substitute the target branch id. Note self-restore
 requires `preserve_under_name` (the pre-restore state is kept as a
 new child branch — clean it up after confirming recovery).
 
-### 19f. Independent-backup decision
+### 19f. Accepted interim posture & hard gates
 
-Neon native recovery (instant restore + snapshots + branch rollback)
-is sufficient **while Firestore remains authoritative** — the registry
-database is empty schema until #181 and non-authoritative until #183.
-Revisit before Phase G (#183, Firestore retirement): once Postgres
-holds sole payment/audit history, evaluate scheduled `pg_dump` exports
-to the existing Storage bucket and/or a paid Neon tier for a longer
-restore window. Decision recorded: no independent backup system for
-now; trigger for re-evaluation is the #183 cutover checklist.
+**Decision (recorded 2026-09):** the Neon **Free** plan is intentionally
+retained for now. Its instant-restore history window is **6 hours**
+(1 GB cap), with 1 manual snapshot and 10 branches per project. This
+is acceptable **only because**:
+
+- Firestore remains authoritative — Postgres currently contains
+  schema only, no imported registry data;
+- the verified rollback source during #181/#182 is Firestore itself;
+- no runtime path reads or writes Postgres yet.
+
+The 6-hour window does **not** meet the ≥7-day recovery target for
+eventual authoritative Postgres use (Firestore-side PITR is 7 days).
+That gap stays open on #180 and must be resolved **before #183** —
+see the hard gate below. Do not treat the current window as satisfying
+the original #180 recovery objective.
+
+**#181 precondition — snapshot before every production import.** A
+manual Neon snapshot of `main` is a hard operator precondition before
+*every* production `migrate:firestore --execute` run — not just the
+first planned import:
+
+1. Take a manual snapshot of the `main` branch (Neon console or API).
+2. Verify the snapshot exists and its timestamp predates the run.
+3. Run the import; reconcile source/destination counts + integrity.
+4. If the import is bad, restore/revert the Postgres side while
+   Firestore is still authoritative.
+
+Free allows exactly **1 manual snapshot**: before a later controlled
+run, replace/delete the previous disposable import snapshot so a fresh
+one can be taken — the snapshot must always reflect the state
+immediately before *that* run, not an older import.
+
+**#183 hard gate.** #183 must not retire Firestore authority until the
+Postgres recovery posture is **at least equivalent to the current
+Firestore protection** (7-day PITR + weekly 8-week-retained backups +
+delete protection). Acceptable resolutions include a Neon tier with
+≥7-day PITR or another verified mechanism providing equivalent or
+better recoverability — the exact mechanism is deliberately not
+decided here. No independent backup system is built now; the
+re-evaluation trigger is the #183 cutover checklist.

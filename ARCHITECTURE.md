@@ -211,12 +211,18 @@ Verified Neon capabilities (2026-09):
   history window is ever required
 
 The actual provisioned project (`sfpca-db`, Vercel integration resource
-`store_Z35KM1ryj86s4YOG`) is on the **Free** plan — 6-hour instant-restore
-window. That is acceptable while Postgres holds only empty schema and
-Firestore remains authoritative, but **before Phase C (#181) production
-import, upgrade to Launch or take an explicit snapshot** so a bad import
-can be undone beyond 6 hours. Rollback path: revert to the pre-import
-snapshot/branch while Firestore remains untouched until Phase G anyway.
+`store_Z35KM1ryj86s4YOG`) is on the **Free** plan — intentionally
+retained — with a 6-hour instant-restore window (1 GB cap), 1 manual
+snapshot, 10 branches. That is acceptable **only while** Postgres holds
+schema-only and Firestore remains authoritative; it does **not** meet
+the ≥7-day recovery target for authoritative Postgres use. Rules:
+
+- **#181:** a manual snapshot of `main` is a precondition before every
+  production `migrate:firestore --execute` run (RUNBOOK.md §19f).
+- **#183 hard gate:** Firestore must not be retired until Postgres
+  recovery is at least equivalent to Firestore's 7-day PITR posture —
+  via a Neon tier upgrade or another verified equivalent mechanism
+  (decision deferred; tracked on #180).
 
 ## 11. Local dev & tests
 
