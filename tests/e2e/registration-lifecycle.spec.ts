@@ -5,6 +5,7 @@
 // synthetic.
 import { expect, test } from "@playwright/test";
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./global-setup";
+import { dismissConsentNotice } from "./helpers";
 
 async function signInAsAdmin(page: import("@playwright/test").Page) {
   await page.goto("/login");
@@ -26,6 +27,7 @@ test.describe("animal registration lifecycle", () => {
 
     // Anonymous submission through the real public form.
     await page.goto("/animal-registration");
+    await dismissConsentNotice(page);
     await page.getByLabel("Full Name").fill(ownerName);
     await page
       .getByRole("textbox", { name: "Address", exact: true })

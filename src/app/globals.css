@@ -93,35 +93,267 @@
   }
 }
 
-/* Klaro consent manager — fixed dark card in both site themes (Klaro's
-   designed surface), with the site's teal as the affirmative action color.
-   Values are solid (no alpha) and chosen for WCAG AA contrast: axe scans
-   flag both translucent colors and insufficient pairs. */
-.klaro {
-  --dark1: hsl(215 28% 17%);   /* notice/modal surface */
-  --dark2: hsl(215 25% 32%);   /* neutral button */
-  --dark3: hsl(215 20% 70%);   /* muted text on the surface */
-  --light1: hsl(210 40% 98%);  /* text on the surface */
-  --light2: hsl(214 32% 85%);  /* close button / borders */
-  --light3: hsl(215 16% 47%);
-  --white2: hsl(210 40% 96%);  /* slider track */
-  --green1: hsl(174 47% 32%);  /* accept — matches light-theme --primary */
-  --green2: hsl(174 47% 38%);
-  --green3: hsl(174 47% 42%);
-  --blue1: hsl(207 65% 40%);   /* info button */
-  --blue2: hsl(207 80% 72%);   /* links on the dark surface */
-  --font-size: 15px;
+/* ---------- Klaro consent UI ----------
+
+   The notice and modal are themed from the site's semantic tokens so they
+   render as native surfaces in both light and dark mode (the `.dark` class
+   swaps the tokens; no separate Klaro theme is needed).
+
+   `klaro.css` is imported after this file in layout.tsx, so overrides below
+   must beat Klaro's specificity without `!important`: every rule is scoped
+   under `#klaro` (the mount element from `elementID` in src/lib/consent.ts),
+   which outranks all of Klaro's class-only selectors. klaro.css only
+   *consumes* its variables (`var(--dark1, #333)` fallbacks) — declaring them
+   on `#klaro` keeps that true even if a future Klaro release starts
+   declaring defaults. */
+#klaro .klaro {
+  --dark1: hsl(var(--card));               /* notice/modal surface */
+  --dark2: hsl(var(--border));             /* hairlines; also neutral button
+                                              bg + powered-by link, both of
+                                              which are overridden below */
+  --dark3: hsl(var(--muted-foreground));   /* muted description text */
+  --light1: hsl(var(--card-foreground));   /* text on the surface */
+  --light2: hsl(var(--border));            /* close button / switch borders */
+  --light3: hsl(var(--muted-foreground));  /* caret + purposes text */
+  --white2: hsl(var(--muted));             /* unchecked slider track */
+  --white3: hsl(0 0% 100%);                /* slider thumb */
+  --green1: hsl(var(--primary));           /* checked slider + accept */
+  --green2: hsl(var(--primary));           /* required/locked slider */
+  --green3: hsl(var(--ring));              /* slider focus ring */
+  /* "Accept selected" is dual-classed cm-btn-success + cm-btn-info and
+     Klaro's info rule wins on order — keep affirmative actions on-brand. */
+  --blue1: hsl(var(--primary));
+  --blue2: hsl(var(--primary));
+  --button-text-color: hsl(var(--secondary-foreground));
+  --border-radius: var(--radius);
+  --font-size: 0.875rem;
 }
 
-/* Klaro colors notice/modal links with --green1 (button teal), which fails
-   contrast on the dark surface — use the light link tone instead. Klaro's
-   stylesheet loads after globals.css, so these need higher specificity
-   than its `.cookie-notice a` / `.cookie-modal a` rules: the notice's
-   stable ID, and an attribute selector for the modal's links. */
-#klaro-cookie-notice a,
-.klaro .cookie-modal a[href],
-.klaro .cookie-modal .cm-modal .cm-footer .cm-powered-by a[href] {
-  color: var(--blue2);
-  /* Links embedded in body text need a non-color cue for WCAG AA. */
+/* Surfaces: native card treatment — site border token, radius, and a
+   standard floating shadow instead of Klaro's heavy default. */
+#klaro .cookie-notice,
+#klaro .cookie-modal .cm-modal.cm-klaro {
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  box-shadow:
+    0 10px 15px -3px rgb(0 0 0 / 0.1),
+    0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+
+/* Below 1024px Klaro renders the notice as an edge-to-edge bottom bar (kept:
+   it sits above mobile browser chrome) — keep only the top hairline. */
+@media (max-width: 1023px) {
+  #klaro .cookie-notice {
+    border-width: 1px 0 0;
+    border-radius: 0;
+  }
+}
+
+/* Buttons mirror the site's hierarchy: filled primary for the affirmative
+   action, soft secondary for decline, and a plain link for Customize. */
+#klaro .cm-btn {
+  min-height: 2.5rem;
+  padding: 0.5rem 1rem;
+  margin-right: 0;
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 2px);
+  background-color: hsl(var(--secondary));
+  color: hsl(var(--secondary-foreground));
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  transition:
+    background-color 150ms,
+    color 150ms,
+    border-color 150ms;
+}
+#klaro .cm-btn:hover {
+  background-color: hsl(var(--secondary) / 0.8);
+}
+#klaro .cm-btn.cm-btn-success,
+#klaro .cm-btn.cm-btn-info {
+  border-color: hsl(var(--primary));
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+#klaro .cm-btn.cm-btn-success:hover,
+#klaro .cm-btn.cm-btn-info:hover {
+  background-color: hsl(var(--primary) / 0.9);
+}
+#klaro .cm-btn:focus-visible,
+#klaro a:focus-visible,
+#klaro .cookie-modal .hide:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+/* Links: site primary. Links inside prose keep an underline (WCAG non-color
+   cue); standalone action links underline on hover/focus like the site's
+   link button variant. */
+#klaro .cookie-notice p a[href],
+#klaro .cookie-modal p a[href] {
+  color: hsl(var(--primary));
   text-decoration: underline;
+  text-underline-offset: 2px;
+}
+#klaro .cookie-notice a.cm-link,
+#klaro .cookie-modal a.cm-link,
+#klaro .cookie-modal .cm-services a,
+#klaro .cookie-modal .cm-powered-by a {
+  color: hsl(var(--primary));
+  text-decoration: none;
+  text-underline-offset: 3px;
+}
+#klaro .cookie-notice a.cm-link:hover,
+#klaro .cookie-notice a.cm-link:focus-visible,
+#klaro .cookie-modal a.cm-link:hover,
+#klaro .cookie-modal a.cm-link:focus-visible,
+#klaro .cookie-modal .cm-services a:hover,
+#klaro .cookie-modal .cm-services a:focus-visible,
+#klaro .cookie-modal .cm-powered-by a:hover,
+#klaro .cookie-modal .cm-powered-by a:focus-visible {
+  text-decoration: underline;
+}
+
+/* Notice layout — tighten the defaults and lay the two-button row out with
+   a flex gap instead of Klaro's negative-margin offsets. */
+#klaro .cookie-notice .cn-body {
+  padding: 1.25rem;
+}
+#klaro .cookie-notice .cn-body p {
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+}
+#klaro .cookie-notice .cn-ok {
+  gap: 0.75rem 1rem;
+  margin-top: 0;
+  align-items: center;
+}
+#klaro .cookie-notice .cn-ok a,
+#klaro .cookie-notice .cn-ok div {
+  margin-top: 0;
+}
+#klaro .cookie-notice .cn-buttons {
+  display: flex;
+  gap: 0.5rem;
+  width: 100%;
+}
+#klaro .cookie-notice .cn-buttons .cm-btn {
+  flex: 1;
+  width: auto;
+  margin-top: 0;
+}
+
+/* Modal — sized like a site dialog: narrower than Klaro's 640px default,
+   capped height, inset on small screens, tighter header. */
+#klaro .cookie-modal .cm-modal.cm-klaro {
+  max-height: min(90vh, 36rem);
+}
+@media (min-width: 660px) {
+  #klaro .cookie-modal .cm-modal.cm-klaro {
+    max-width: 34rem;
+  }
+}
+@media (max-width: 659px) {
+  #klaro .cookie-modal .cm-modal.cm-klaro {
+    left: 1rem;
+    right: 1rem;
+    width: auto;
+  }
+}
+#klaro .cookie-modal .cm-modal .cm-header {
+  padding: 1.25rem 3rem 1rem;
+}
+#klaro .cookie-modal .cm-modal .cm-header h1 {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+#klaro .cookie-modal .cm-modal .cm-header p {
+  margin-top: 0.5rem;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.875rem;
+}
+#klaro .cookie-modal .cm-modal .hide {
+  top: 1rem;
+  right: 1rem;
+  padding: 0.25rem;
+  border-radius: calc(var(--radius) - 4px);
+}
+#klaro .cookie-modal .cm-modal .cm-body {
+  padding: 1rem 1.25rem;
+}
+#klaro .cookie-modal .cm-modal .cm-body ul.cm-purposes li.cm-purpose,
+#klaro .cookie-modal .cm-modal .cm-body ul.cm-services li.cm-service {
+  padding-left: 3.5rem;
+}
+#klaro .cookie-modal .cm-modal .cm-footer {
+  padding: 1rem 1.25rem 1.25rem;
+}
+#klaro .cookie-modal .cm-modal .cm-footer-buttons {
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+#klaro .cookie-modal .cm-modal .cm-footer-buttons .cm-btn-decline {
+  margin-right: auto;
+}
+@media (max-width: 480px) {
+  #klaro .cookie-modal .cm-modal .cm-footer-buttons {
+    flex-direction: column;
+  }
+  #klaro .cookie-modal .cm-modal .cm-footer-buttons .cm-btn {
+    width: 100%;
+  }
+}
+
+/* Klaro attribution stays visible but quiet — site muted text at caption
+   size rather than the default link color. */
+#klaro .cookie-modal .cm-modal .cm-footer .cm-powered-by {
+  padding-top: 0.75rem;
+  padding-right: 0;
+  font-size: 0.75rem;
+}
+#klaro .cookie-modal .cm-modal .cm-footer .cm-powered-by a[href] {
+  color: hsl(var(--muted-foreground));
+}
+/* --dark2 doubles as the "required" badge text — keep it legible too. */
+#klaro .cookie-modal .cm-modal .cm-body span.cm-required {
+  color: hsl(var(--muted-foreground));
+}
+
+/* Analytics switch — same control, restyled like a site toggle: 44×24
+   track, white thumb, primary when on, ring on focus. Klaro positions the
+   thumb with translateX, so track/thumb geometry changes together. */
+#klaro .cookie-modal .cm-switch {
+  width: 2.75rem;
+  height: 1.5rem;
+}
+#klaro .cookie-modal .cm-list-input {
+  width: 2.75rem;
+  height: 1.5rem;
+}
+#klaro .cookie-modal .cm-list-label .slider {
+  width: 2.75rem;
+  border: 1px solid hsl(var(--input));
+  box-shadow: none;
+  /* Klaro's `transition: 0.4s` animates every property including the focus
+     ring — keep the colour swap only. */
+  transition: background-color 150ms;
+}
+#klaro .cookie-modal .cm-list-label .slider::before {
+  left: 2px;
+  bottom: 2px;
+  height: 1.125rem;
+  width: 1.125rem;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+}
+#klaro .cookie-modal .cm-list-input:checked + .cm-list-label .slider::before {
+  transform: translateX(1.25rem);
+}
+#klaro .cookie-modal .cm-list-input.half-checked:checked + .cm-list-label .slider::before {
+  transform: translateX(0.625rem);
+}
+#klaro .cookie-modal .cm-list-input:focus + .cm-list-label .slider {
+  box-shadow:
+    0 0 0 2px hsl(var(--card)),
+    0 0 0 4px hsl(var(--ring));
 }
