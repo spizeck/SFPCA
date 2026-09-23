@@ -1,17 +1,9 @@
-// Rendering tests for the public adoptions listing. The data layer is
-// mocked at the module boundary; the tests assert that publicly returned
-// animals render and that an empty result set produces a clear empty
-// state rather than a blank grid.
-import { render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, test, vi } from "vitest";
-
-const { mockGetAvailableAnimals } = vi.hoisted(() => ({
-  mockGetAvailableAnimals: vi.fn(),
-}));
-
-vi.mock("@/lib/animals", () => ({
-  getAvailableAnimals: mockGetAvailableAnimals,
-}));
+// Rendering tests for the public adoptions listing. Animals arrive as a
+// server-fetched prop (#182 — the registry read seam is server-side), so
+// the tests assert that provided animals render and that an empty list
+// produces a clear empty state rather than a blank grid.
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, test } from "vitest";
 
 import { AnimalAdoptions } from "@/components/animal-adoptions/animal-adoptions-page";
 import type { Animal } from "@/lib/types";
@@ -32,61 +24,52 @@ function animal(overrides: Partial<Animal>): Animal {
   };
 }
 
-beforeEach(() => {
-  mockGetAvailableAnimals.mockReset();
-});
-
 describe("AnimalAdoptions", () => {
-  test("renders each animal returned by the public query", async () => {
+  test("renders each animal provided by the server", () => {
     // Names must not collide with the page's static Success Stories
     // cards (Bella, Max, Luna).
-    mockGetAvailableAnimals.mockResolvedValue([
-      animal({ id: "a1", name: "Buddy" }),
-      animal({ id: "a2", name: "Whiskers", species: "cat" }),
-    ]);
+    render(
+      <AnimalAdoptions
+        animals={[
+          animal({ id: "a1", name: "Buddy" }),
+          animal({ id: "a2", name: "Whiskers", species: "cat" }),
+        ]}
+      />,
+    );
 
-    render(<AnimalAdoptions />);
-
-    await waitFor(() => {
-      expect(screen.getByText("Buddy")).toBeInTheDocument();
-      expect(screen.getByText("Whiskers")).toBeInTheDocument();
-    });
+    expect(screen.getByText("Buddy")).toBeInTheDocument();
+    expect(screen.getByText("Whiskers")).toBeInTheDocument();
   });
 
-  test("each card links to that animal's public detail page", async () => {
-    mockGetAvailableAnimals.mockResolvedValue([
-      animal({ id: "a1", name: "Buddy" }),
-    ]);
+  test("each card links to that animal's public detail page", () => {
+    render(<AnimalAdoptions animals={[animal({ id: "a1", name: "Buddy" })]} />);
 
-    render(<AnimalAdoptions />);
-
-    const link = await screen.findByRole("link", {
+    const link = screen.getByRole("link", {
       name: "Learn More About Buddy",
     });
     expect(link).toHaveAttribute("href", "/animal-adoptions/a1");
   });
 
-  test("shows an empty-state message when no animals are available", async () => {
-    mockGetAvailableAnimals.mockResolvedValue([]);
+  test("species filter narrows the rendered cards", () => {
+    render(
+      <AnimalAdoptions
+        animals={[
+          animal({ id: "a1", name: "Buddy", species: "dog" }),
+          animal({ id: "a2", name: "Whiskers", species: "cat" }),
+        ]}
+      />,
+    );
 
-    render(<AnimalAdoptions />);
-
-    await waitFor(() => {
-      expect(
-        screen.getByText(/No animals are currently listed for adoption/i),
-      ).toBeInTheDocument();
-    });
+    fireEvent.click(screen.getByRole("button", { name: "Cats" }));
+    expect(screen.queryByText("Buddy")).not.toBeInTheDocument();
+    expect(screen.getByText("Whiskers")).toBeInTheDocument();
   });
 
-  test("shows the empty state when the public query fails closed", async () => {
-    // getAvailableAnimals catches errors and returns [] — visitors see a
-    // friendly empty state, never an error or leaked data.
-    mockGetAvailableAnimals.mockResolvedValue([]);
+  test("shows an empty-state message when no animals are available", () => {
+    render(<AnimalAdoptions animals={[]} />);
 
-    render(<AnimalAdoptions />);
-
-    await waitFor(() => {
-      expect(screen.queryByText(/error/i)).not.toBeInTheDocument();
-    });
+    expect(
+      screen.getByText(/No animals are currently listed for adoption/i),
+    ).toBeInTheDocument();
   });
 });

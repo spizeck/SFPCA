@@ -9,6 +9,7 @@ import {
 } from "@/lib/page-content";
 import { pageMetadata } from "@/lib/seo";
 import { logError } from "@/lib/logger";
+import { getAvailableAnimals } from "@/lib/registry/public-animals";
 
 export const metadata: Metadata = pageMetadata({
   path: "/animal-adoptions",
@@ -16,6 +17,12 @@ export const metadata: Metadata = pageMetadata({
   description:
     "Adopt a pet from SFPCA on Saba. Browse available dogs, cats, and other animals looking for loving forever homes in the Caribbean.",
 });
+
+// Rendered per request: the animal list must reflect the current read
+// authority at request time. Before #182 the browser fetched Firestore
+// directly; now the server reads through the registry seam, so a static
+// prerender would freeze the list at build time.
+export const dynamic = "force-dynamic";
 
 async function getAdoptionsContent(): Promise<AnimalAdoptionsContent> {
   try {
@@ -31,11 +38,16 @@ async function getAdoptionsContent(): Promise<AnimalAdoptionsContent> {
 }
 
 export default async function AnimalAdoptionsPage() {
-  const content = await getAdoptionsContent();
+  const [content, animals] = await Promise.all([
+    getAdoptionsContent(),
+    // Fails closed to [] on error — the listing shows its empty state
+    // rather than breaking the page.
+    getAvailableAnimals(),
+  ]);
 
   return (
     <main id="main-content" tabIndex={-1} className="min-h-screen">
-      <AnimalAdoptions content={content} />
+      <AnimalAdoptions content={content} animals={animals} />
     </main>
   );
 }

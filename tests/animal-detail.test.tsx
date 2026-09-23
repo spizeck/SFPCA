@@ -9,7 +9,9 @@ const { mockGetPublicAnimal } = vi.hoisted(() => ({
   mockGetPublicAnimal: vi.fn(),
 }));
 
-vi.mock("@/lib/animals", () => ({
+// The page reads through the registry seam (#182) — mock that boundary so
+// the test is independent of which datastore the seam delegates to.
+vi.mock("@/lib/registry/public-animals", () => ({
   getPublicAnimal: mockGetPublicAnimal,
 }));
 
@@ -25,7 +27,7 @@ import AnimalDetailPage, {
   generateMetadata,
 } from "@/app/animal-adoptions/[id]/page";
 import { AnimalDetail } from "@/components/animal-adoptions/animal-detail";
-import { getPublicAnimal } from "@/lib/animals";
+import { getPublicAnimal } from "@/lib/registry/public-animals";
 import type { Animal } from "@/lib/types";
 
 function animal(overrides: Partial<Animal>): Animal {

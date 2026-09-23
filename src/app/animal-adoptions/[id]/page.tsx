@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { AnimalDetail } from "@/components/animal-adoptions/animal-detail";
-import { getPublicAnimal } from "@/lib/animals";
+import { getPublicAnimal } from "@/lib/registry/public-animals";
 import { getSiteUrl } from "@/lib/seo";
 
 // Rendered per request rather than statically: an animal's lifecycle

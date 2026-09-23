@@ -1361,3 +1361,60 @@ Production `main` (snapshot `snap-morning-silence-aw9w4k2p`, verified
 pre-run): dry-run 7 docs / 0 exceptions → `--execute` → animals 3,
 admins 4 upserted → reconcile PASSED (7 docs, 0 diffs). Destination now
 holds a verified shadow copy; **Firestore remains authoritative.**
+
+## 21. Public animal read cutover (#182)
+
+The public animal read path has two sources behind
+`PUBLIC_ANIMALS_SOURCE` (server-side env, `src/lib/registry/public-animals.ts`):
+
+| Value | Behavior |
+|---|---|
+| unset | `postgres` on Vercel Preview, `firestore` everywhere else |
+| `firestore` | pre-#182 behavior; Firestore client SDK reads |
+| `postgres` | reads from Neon via `DATABASE_URL` (pooled) |
+
+**Authority after activation:** Postgres serves anonymous public animal
+reads (homepage preview, `/animal-adoptions`, `/animal-adoptions/[id]`
+incl. metadata). Everything else — admin reads, all writes,
+registrations, `admins/` authorization, CMS, Storage, Auth — is
+unchanged Firestore.
+
+### 21a. Activation (operator steps, in order)
+
+1. Confirm Firestore is still the write authority (no code change says
+   otherwise).
+2. Drift refresh (§20): dry-run → **fresh manual `main` snapshot →
+   verify it exists** → `--execute` with `MIGRATION_CONFIRM_PROJECT` →
+   reconcile → require 0 mismatches.
+3. Set `PUBLIC_ANIMALS_SOURCE=postgres` on the Vercel **Production**
+   environment and redeploy.
+4. Smoke: `/`, `/animal-adoptions`, one detail page via its legacy URL.
+   Expect the imported animals; check Vercel runtime logs for
+   `animals/fetch-registry*` errors.
+
+### 21b. Freshness during the transition
+
+Writes stay in Firestore and nothing syncs Postgres automatically. An
+admin animal mutation does NOT propagate to the public site until the
+§20 refresh is re-run (snapshot → execute → reconcile). The
+`onFirestoreChange` rebuild trigger still fires on animal writes and
+rebuilds the homepage — but it re-reads *Postgres*, so without a refresh
+the rebuilt page shows the last imported state. Operationally: run the
+refresh after each animal mutation, or keep the window to #183 short.
+If that is unacceptable, do not activate — leave the flag unset.
+
+### 21c. Rollback
+
+`PUBLIC_ANIMALS_SOURCE=firestore` (or delete the var) + redeploy.
+Firestore data was never modified — rollback restores exact prior
+behavior. A Neon-side bad state can additionally be restored to the
+pre-refresh snapshot.
+
+### 21d. #183 removes
+
+- the `PUBLIC_ANIMALS_SOURCE` flag and the Firestore branch of
+  `src/lib/registry/public-animals.ts` (seam becomes Postgres-only)
+- `src/lib/animals.ts` once admin/write paths move
+- the `animals` entry in the function's `REBUILD_COLLECTIONS` (writes
+  will no longer hit Firestore; rebuilds become Postgres-driven or the
+  pages become dynamic)

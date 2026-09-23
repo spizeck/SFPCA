@@ -7,7 +7,7 @@ import { HeroSection } from "@/components/homepage/hero-section";
 import { AboutSection } from "@/components/homepage/about-section";
 import { ServicesSection } from "@/components/homepage/services-section";
 import { AnimalsSection } from "@/components/homepage/animals-section";
-import { getAvailableAnimals } from "@/lib/animals";
+import { getAvailableAnimals } from "@/lib/registry/public-animals";
 import { DonationSection } from "@/components/homepage/donation-section";
 import { WhoWeAreSection } from "@/components/homepage/who-we-are-section";
 import { FaqSection } from "@/components/homepage/faq-section";

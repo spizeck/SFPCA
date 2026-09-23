@@ -184,7 +184,17 @@ describe("public animal boundary", () => {
     expect(max.photoUrls).toEqual(["https://img/1.jpg"]);
     // No owner/registration/payment fields exist on the DTO.
     expect(Object.keys(max).sort()).toEqual(
-      ["approxAge", "description", "id", "name", "photoUrls", "sex", "species"].sort(),
+      [
+        "approxAge",
+        "createdAt",
+        "description",
+        "id",
+        "name",
+        "photoUrls",
+        "sex",
+        "species",
+        "updatedAt",
+      ].sort(),
     );
   });
 
@@ -201,5 +211,36 @@ describe("public animal boundary", () => {
 
     expect(await getPublicAnimalById(db, "priv-1")).toBeNull();
     expect(await getPublicAnimalById(db, "does-not-exist")).toBeNull();
+    // A legacy id that happens to be uuid-shaped still resolves, and a
+    // uuid that matches no row fails closed rather than erroring.
+    expect(
+      await getPublicAnimalById(db, "00000000-0000-0000-0000-000000000000"),
+    ).toBeNull();
+  });
+
+  test("listing order is deterministic: created_at then id", async () => {
+    // The Firestore path had no defined order; the Postgres path orders
+    // by created_at with the uuid as a stable tiebreak.
+    await db.insert(schema.animals).values([
+      {
+        legacyId: "ord-new",
+        name: "Newer",
+        species: "cat",
+        sex: "female",
+        lifecycleStatus: "available",
+        createdAt: new Date("2025-06-02T00:00:00Z"),
+      },
+      {
+        legacyId: "ord-old",
+        name: "Older",
+        species: "cat",
+        sex: "male",
+        lifecycleStatus: "available",
+        createdAt: new Date("2025-06-01T00:00:00Z"),
+      },
+    ]);
+
+    const names = (await listPublicAnimals(db)).map((a) => a.name);
+    expect(names.indexOf("Older")).toBeLessThan(names.indexOf("Newer"));
   });
 });
