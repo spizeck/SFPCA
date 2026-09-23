@@ -366,9 +366,12 @@ export const microchipRecords = pgTable(
   ],
 );
 
-// Lightweight veterinary-event foundation — vaccinations, exams, notes.
+// Lightweight veterinary-event foundation — exams, notes, treatments.
 // Not a full EMR; details jsonb carries event-specific payload until the
-// dedicated issues (#173/#174) flesh out per-type shape.
+// dedicated issues (#174) flesh out per-type shape. Structured
+// vaccination records live in `vaccinations` (#173) — a 'vaccination'
+// vet_event remains legal only for unverifiable historical mentions
+// (e.g. "owner reports rabies ~2021") that lack structured fields.
 export const vetEvents = pgTable(
   "vet_events",
   {
@@ -389,6 +392,62 @@ export const vetEvents = pgTable(
     check(
       "vet_events_type_check",
       sql`${t.eventType} IN ('vaccination','exam','treatment','surgery','note','other')`,
+    ),
+  ],
+);
+
+// Structured vaccination history (#173) — the queryable record that
+// drives due/overdue derivation and the reminder foundation (#172).
+// Deliberately normalized: vaccine, dates, lot, and provider are queried
+// structurally, so they are columns rather than details jsonb.
+//
+// Date semantics are distinct and all dates are stored facts:
+// - administered_on — when THIS dose was given (historical fact)
+// - due_on — recommended next-dose/revaccination date (drives reminders)
+// - valid_until — legal/clinical expiry of this dose (e.g. rabies
+//   certificate expiry). May differ from due_on.
+// The effective "next relevant date" is derived as the earliest of
+// due_on/valid_until — never a stored status that could go stale.
+//
+// No vet_visits/encounters table yet: vaccinations legitimately have no
+// visit (historical backfill, external clinic records). #174 can add a
+// nullable visit_id without migrating data.
+export const vaccinations = pgTable(
+  "vaccinations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    animalId: uuid("animal_id")
+      .notNull()
+      .references(() => animals.id), // restrictive — medical history
+    vaccineName: text("vaccine_name").notNull(),
+    administeredOn: date("administered_on", { mode: "string" }).notNull(),
+    dueOn: date("due_on", { mode: "string" }),
+    validUntil: date("valid_until", { mode: "string" }),
+    productName: text("product_name"),
+    manufacturer: text("manufacturer"),
+    lotNumber: text("lot_number"),
+    // Free-text provider: visiting/rotating vets are not registry
+    // persons, and forcing a persons row per vet would be wrong.
+    administeredBy: text("administered_by"),
+    notes: text("notes"),
+    // Storage object path for a certificate/record (vet-docs/...) —
+    // a reference like payment_receipt_path, never the object itself.
+    // Upload UI is a later issue; the column exists so the model is
+    // complete without a rewrite.
+    documentPath: text("document_path"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("vaccinations_animal_idx").on(t.animalId),
+    index("vaccinations_due_idx").on(t.dueOn),
+    check(
+      "vaccinations_due_range_check",
+      sql`${t.dueOn} IS NULL OR ${t.dueOn} >= ${t.administeredOn}`,
+    ),
+    check(
+      "vaccinations_valid_range_check",
+      sql`${t.validUntil} IS NULL OR ${t.validUntil} >= ${t.administeredOn}`,
     ),
   ],
 );

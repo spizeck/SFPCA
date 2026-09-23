@@ -63,8 +63,8 @@ when the token is unset.
 - **Two authorities, by domain.** Firestore remains the CMS/content
   authority (page content, site settings, FAQs). Postgres (Neon, via
   Drizzle) is the foundation for the **registry domain** — animals,
-  people/households, ownership, registrations, payments, chips, vet
-  events, follow-ups, communications, audit. The boundary and migration
+  people/households, ownership, registrations, payments, chips,
+  vaccinations, vet events, follow-ups, communications, audit. The boundary and migration
   plan are in `ARCHITECTURE.md`. New registry-domain data goes to
   `src/lib/db`/`src/lib/registry` — **never into Firestore**. During the
   staged cutover (Phases C–G) Firestore `animals`/`animalRegistrations`/

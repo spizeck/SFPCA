@@ -104,6 +104,23 @@ export async function listAdminAnimals(
   return rows.map(toAdminDto);
 }
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Single-animal lookup for the admin detail/medical-record page (#173).
+// A malformed id is a not-found, never a driver error.
+export async function getAdminAnimal(
+  id: string,
+  db: RegistryDb = getRegistryDb(),
+): Promise<AdminAnimal | null> {
+  if (!UUID_RE.test(id)) return null;
+  const [row] = await db
+    .select(ADMIN_COLUMNS)
+    .from(animals)
+    .where(eq(animals.id, id));
+  return row ? toAdminDto(row) : null;
+}
+
 export type AnimalMutationResult =
   | { ok: true; animal: AdminAnimal }
   | { ok: false; reason: "not-found" | "conflict" | "invalid" };

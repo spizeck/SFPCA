@@ -50,6 +50,7 @@ describe("migration replay from empty database", () => {
       "persons",
       "registration_submissions",
       "registrations",
+      "vaccinations",
       "vet_events",
     ]) {
       expect(tables).toContain(expected);

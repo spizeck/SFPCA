@@ -17,6 +17,7 @@ export type LogSubsystem =
   | "receipt"
   | "admin"
   | "animals"
+  | "vaccinations"
   | "content"
   | "ui";
 

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useEffect } from "react";
 import {
   deleteAnimalAction,
@@ -25,7 +26,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@/hooks/use-mutation";
-import { Plus, Pencil, Trash } from "lucide-react";
+import { Plus, Pencil, Trash, Syringe } from "lucide-react";
 import { logError } from "@/lib/logger";
 import { ConfirmDialog } from "@/components/admin/confirm-dialog";
 import { LoadError } from "@/components/admin/load-error";
@@ -370,6 +371,14 @@ export default function AnimalsManager() {
                       <AnimalStatusBadge status={animal.status} />
                     </TableCell>
                     <TableCell className="text-right space-x-2">
+                      <Button variant="ghost" size="sm" asChild>
+                        <Link
+                          href={`/admin/animals/${animal.registryId}`}
+                          aria-label={`Medical records for ${animal.name}`}
+                        >
+                          <Syringe className="h-4 w-4" />
+                        </Link>
+                      </Button>
                       <Button
                         variant="ghost"
                         size="sm"
