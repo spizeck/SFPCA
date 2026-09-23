@@ -21,9 +21,8 @@ registry data in Firestore is now a mistake, not a shortcut.
      │   ┌────────────────────┐              ┌────────────────────────┐  │
      │   │ Firestore          │              │ Postgres (Neon)        │  │
      │   │ CMS content        │              │ registry domain        │  │
-     │   │ (unchanged)        │              │ (foundation this PR;   │  │
-     │   └────────────────────┘              │  cutover is Phases E-G)│  │
-     │                                     └────────────────────────┘  │
+     │   │ (retained)         │              │ (authoritative, #183)  │  │
+     │   └────────────────────┘              └────────────────────────┘  │
      │   ┌────────────────────┐              ┌────────────────────────┐  │
      │   │ Firebase Storage   │              │ Firebase Auth          │  │
      │   │ receipts/ team-…   │              │ authentication only    │  │
@@ -31,39 +30,50 @@ registry data in Firestore is now a mistake, not a shortcut.
      └──────────────────────────────────────────────────────────────────┘
 ```
 
-## 1. Current persistence inventory (audited)
+## 1. Current persistence inventory (post-#183)
 
-| Collection | Kind | Privacy | Readers | Writers | History? |
-|---|---|---|---|---|---|
-| `homepage/main` | CMS | public read | public pages (server) | admin client SDK + `admin/homepage/actions.ts` (Admin SDK) | overwritten |
-| `siteSettings/global` | CMS | public read | public pages, footer, contact | admin client SDK | overwritten |
-| `vetServices/main` | CMS | public read | `/vet-services` | admin client SDK | overwritten |
-| `animalAdoptions/main` | CMS | public read | `/animal-adoptions` | admin client SDK | overwritten |
-| `animalRegistration/main` | CMS | public read | `/animal-registration` copy | admin client SDK | overwritten |
-| `faq/*` | CMS | public read | `/faq`, homepage FAQ section | admin client SDK | overwritten |
-| `animals/*` | **operational** | public read iff `status=="available"`; fail-closed otherwise | `getAvailableAnimals`/`getPublicAnimal` (client SDK, server-rendered); admin list | admin client SDK | overwritten — **no history** |
-| `animalRegistrations/*` | **operational, PII** | admin-only read; anonymous shape-validated create (status forced `pending`) | admin registrations page | public form (client SDK); admin client SDK | overwritten — **no history** |
-| `admins/{email}` | **authz config** | admin-only | `isAdmin()` via Admin SDK; rules `isAdmin()` | Admin SDK (session route bootstrap) / console | overwritten |
+| Collection/table | Kind | Privacy | Readers | Writers |
+|---|---|---|---|---|
+| `homepage/main` | CMS (Firestore) | public read | public pages (server) | admin client SDK + `admin/homepage/actions.ts` (Admin SDK) |
+| `siteSettings/global` | CMS (Firestore) | public read | public pages, footer, contact | admin client SDK |
+| `vetServices/main` | CMS (Firestore) | public read | `/vet-services` | admin client SDK |
+| `animalAdoptions/main` | CMS (Firestore) | public read | `/animal-adoptions` | admin client SDK |
+| `animalRegistration/main` | CMS (Firestore) | public read | `/animal-registration` copy | admin client SDK |
+| `faq/*` | CMS (Firestore) | public read | `/faq`, homepage FAQ section | admin client SDK |
+| `animals` (Postgres) | **operational** | public iff `lifecycle_status='available'` | `src/lib/registry/public-animals.ts` (public DTO); `registry/animals.ts` (admin) | `admin/animals/actions.ts` server actions |
+| `registration_submissions` (Postgres) | **operational, PII** | admin-only; never public | `registry/registrations.ts` | `animal-registration/actions.ts` (public intake); `admin/registrations/actions.ts` (review) |
+| `admin_users` (Postgres) | **authz config** | server-only | `registry/admin-users.ts` → `isAdmin()` | `provisionAdminUser` (session route, insert-only) / SQL |
+| `audit_events` (Postgres) | **audit** | server-only | (append-only) | domain services, transactional with mutations |
+| Firestore `animals`/`animalRegistrations`/`admins` | **retired** | deny-all in rules for every principal | — none — | — none — |
 
-Storage prefixes: `receipts/<registrationDocId>` (private PII, anonymous
-create, admin read/delete, orphan-delete allowed), `team-photos/` (public
-read, admin image upload <5 MB). `images/` and `animals/` are deny-all.
+Storage prefixes: `receipts/<submission uuid>` (private PII — public
+constrained create only; no client read/update/delete for anyone; staff
+view via server-minted signed URLs; orphan cleanup via Admin SDK sweep),
+`team-photos/` (public read, admin-claim image upload <5 MB). `images/`
+and `animals/` are deny-all.
 
-Firebase Auth: email/password, session cookie (`/api/auth/session`),
-admin authorization = verified email in `admins/` + `ADMIN_EMAILS`
-bootstrap env var.
+Firebase Auth: email/password, session cookie (`/api/auth/session`).
+Authorization = Postgres `admin_users` lookup in `isAdmin()`; the session
+route sets a `admin` custom claim that Firestore/Storage rules consult
+for client-SDK writes (CMS saves, team-photo uploads). `ADMIN_EMAILS`
+remains a bootstrap/emergency allowlist only — it provisions the first
+`admin_users` row and never rewrites a staff-managed role.
 
-Functions: `onFirestoreChange` → Vercel rebuild for content collections;
-`triggerRebuild` (HTTP, bearer token); `sweepOrphanedReceipts` (scheduled
-Storage cleanup keyed on `animalRegistrations` doc existence).
+Functions: `onFirestoreChange` → Vercel rebuild for **CMS collections
+only** (`REBUILD_COLLECTIONS`); `triggerRebuild` (HTTP, bearer token).
+Registry writes invalidate via `revalidatePath` in the server actions —
+the public listing/detail pages are `force-dynamic`, the homepage
+preview revalidates on mutation; no rebuild hook is needed for Postgres
+writes. Orphan-receipt cleanup is `/api/cron/sweep-receipts` (Vercel
+cron) keyed on Postgres `registration_submissions` existence.
 
 ## 2. Persistence boundary
 
 | Data | Destination | Why |
 |---|---|---|
-| `animals/*` | **Postgres** | Permanent registry records; ownership/registration/chip/vet relations; currently loses history on every edit |
-| `animalRegistrations/*` | **Postgres** | Owner PII + payment-adjacent data; becomes `registration_submissions` + `persons` + `registrations` |
-| `admins/*` | **Postgres** | Staff authorization is registry domain (`admin_users`), linked to `auth_identities` |
+| `animals` | **Postgres** (done, #183) | Permanent registry records; ownership/registration/chip/vet relations; audit trail on every mutation |
+| `animalRegistrations` → `registration_submissions` | **Postgres** (done, #183) | Owner PII + payment-adjacent data; intake snapshot now, `persons`/`registrations` link-up is #178 |
+| `admins` → `admin_users` | **Postgres** (done, #183) | Staff authorization is registry domain |
 | `homepage`, `siteSettings`, `vetServices`, `animalAdoptions`, `animalRegistration` (page copy), `faq` | **Firestore (stays)** | Low-churn CMS content behind the rebuild-trigger pipeline; relational modeling buys nothing and would break `onFirestoreChange` → rebuild |
 | `receipts/`, `team-photos/` | **Firebase Storage (stays)** | Binary objects never live in Postgres; Postgres stores path references only |
 | Future: ownership, registrations, payments, chips, vet events, follow-ups, communications, audit | **Postgres** | Relational + historical by definition |
@@ -71,11 +81,13 @@ Storage cleanup keyed on `animalRegistrations` doc existence).
 Naming convention that makes authority obvious:
 
 - `src/lib/db/*` — Postgres schema/client/migrations (Drizzle)
-- `src/lib/registry/*` — Postgres-backed domain services (server-only)
-- `src/lib/firebase*.ts`, `src/lib/animals.ts`, page-content loaders —
-  Firestore/CMS side
-- `src/app/admin/**` may call either, but **registry writes never go to
-  Firestore** once a domain has cut over
+- `src/lib/registry/*` — Postgres-backed domain services (server-only);
+  the ONLY seam through which registry data is read or written
+- `src/lib/firebase*.ts`, page-content loaders — Firebase Auth,
+  Storage, and the Firestore/CMS side
+- `src/app/admin/**` registry surfaces call server actions that
+  self-authorize via `requireAdmin`; **registry writes never go to
+  Firestore** — the operational collections are deny-all
 
 ## 3. Auth boundary
 
@@ -97,10 +109,16 @@ Firebase Auth user ──uid──▶ auth_identities ──person_id──▶ p
                                  └── linked on first sign-in
 ```
 
-Current admin authorization is preserved during migration: `admin_users`
-mirrors the `admins/` collection's email-keyed allowlist semantics, and
-`ADMIN_EMAILS` remains the bootstrap path. Owner accounts (#166) become
-`auth_identities` + `persons` rows — no second auth authority.
+Post-#183 authorization: `admin_users` is the authoritative staff record
+(queried by `isAdmin()` on every admin surface); `ADMIN_EMAILS` remains
+the bootstrap/emergency path — an env-listed email can sign in and gets
+an `admin_users` row provisioned (insert-only, never rewrites a role).
+The session route also stamps a Firebase custom claim
+(`admin`, `adminRole`) so Firestore/Storage rules keep authorizing
+client-SDK writes (CMS edits, team-photo uploads) now that the
+`admins/` collection is retired; the claim is cleared on refused
+logins. Owner accounts (#166) become `auth_identities` + `persons` rows —
+no second auth authority.
 
 ## 4. Stack selection
 
@@ -165,9 +183,9 @@ UI validation — form shape only, never trusted.
 | B — migration tooling | `scripts/db-migrate.ts` (schema replay), `scripts/migrate-firestore.ts` (data import, dry-run default) | **this PR** |
 | C — import | Copy `animals`, `admins`, `animalRegistrations` → Postgres; idempotent, re-runnable | follow-up |
 | D — reconciliation | Compare source/destination counts and sampled content | follow-up |
-| E — read cutover | Public animal reads move to Postgres via `src/lib/registry/*`; Firestore keeps CMS | #182 (flag-gated, see §7a) |
-| F — write cutover | Registry writes move to Postgres domain services; single authoritative writer per domain | follow-up |
-| G — retire | Firestore operational collections removed after verification + rollback window | follow-up |
+| E — read cutover | Public animal reads move to Postgres via `src/lib/registry/*`; Firestore keeps CMS | **done, #182** |
+| F — write cutover | Registry writes move to Postgres domain services; single authoritative writer per domain | **done, #183** |
+| G — retire | Firestore operational collections deny-all; runtime usage removed | **done, #183** (documents not deleted — offline cleanup) |
 
 **Dual-write decision: avoided.** A bounded maintenance window (site
 already supports `SITE_MAINTENANCE_MODE`) plus idempotent import +
@@ -175,39 +193,38 @@ reconciliation is safer than a forever dual-write with authority/failure
 ambiguity. If a phase genuinely needs overlap, it must declare duration,
 authority, failure semantics, and exit criteria in its own issue.
 
-## 7a. Transitional authority during #182 (read cutover)
+## 7a. Final authority (post-#183)
 
-#182 moves **public animal reads only** behind a server-side switch.
-Authority while `PUBLIC_ANIMALS_SOURCE` is unset → `firestore` in
-production (unchanged behavior); once flipped to `postgres`:
+#183 completed Phases F+G. The transitional `PUBLIC_ANIMALS_SOURCE`
+switch and every Firestore operational path are **gone** — there is one
+authority per domain:
 
-| Operation | Authority after flip |
+| Operation | Authority |
 |---|---|
-| Public animal list/detail/homepage preview | **Postgres** (`src/lib/registry/public-animals.ts`) |
-| Admin animal reads + all writes | **Firestore** (unchanged) |
-| Registration submissions/reads | **Firestore** (unchanged) |
-| Admin authorization (`admins/`) | **Firestore** — the Postgres `admin_users` copy is migration evidence only |
-| CMS content, Storage, Firebase Auth | **Firestore / Storage / Auth** (unchanged) |
+| Public animal list/detail/homepage preview | **Postgres** (`registry/public-animals.ts`) |
+| Admin animal reads + all writes | **Postgres** (`registry/animals.ts` via `admin/animals/actions.ts`) |
+| Registration submissions | **Postgres** (`animal-registration/actions.ts` → `registry/registrations.ts`) |
+| Registration review | **Postgres** (`admin/registrations/actions.ts`) |
+| Admin authorization | **Postgres** `admin_users` via `isAdmin()`; Firebase `admin` claim projects it to rules |
+| CMS content | **Firestore** (retained) |
+| Authentication/session | **Firebase Auth** (retained) |
+| Receipts, team photos | **Firebase Storage** (retained); paths in Postgres |
+| Audit | **Postgres** `audit_events`, transactional with mutations |
 
 Deliberate properties:
 
-- **No dual-write, no sync.** Postgres freshness comes from re-running
-  the idempotent import (RUNBOOK §21). Between refreshes, public pages
-  reflect the last imported state — acceptable only inside a bounded
-  transition window; #183 follows promptly.
-- **No silent Firestore fallback.** A Postgres failure logs and fails
-  closed (empty list / 404) rather than masking a broken migration state.
+- **No dual-write, no sync, no flag.** Postgres is the only operational
+  authority; a Postgres failure fails closed (public: empty/404; admin:
+  error; authz: deny) — it never silently falls back to Firestore.
 - **Fail-closed visibility.** Only `lifecycle_status='available'` is
-  public — enforced in the query AND re-checked in the service, the same
-  double layer Firestore rules + `isPublicAnimalStatus` provide today.
-- **Rollback is the flag.** Set `PUBLIC_ANIMALS_SOURCE=firestore` (or
-  delete it) and redeploy — Firestore data is intact and authoritative.
-- The flag is **temporary**: #183 deletes the Firestore branch of the
-  seam and the variable. Do not build features on top of it.
-
-`PUBLIC_ANIMALS_SOURCE` defaults to `postgres` on Vercel Preview so every
-PR exercises the new path against its isolated Neon branch — preview
-branches are children of `main` and inherit the imported shadow data.
+  public — enforced in the query AND re-checked in the service.
+- **Retired collections are deny-all** in `firestore.rules` for every
+  principal including claimed admins — they can never serve as an
+  alternate write path. Pre-launch documents are inert; deletion is an
+  offline cleanup step, not part of the deploy.
+- **Admin mutations are audited** (`audit_events`, same transaction) and
+  optimistic-concurrency guarded (`updated_at` expected-value check
+  under `SELECT … FOR UPDATE`).
 
 ## 8. Production migration safety
 
@@ -221,16 +238,19 @@ branches are children of `main` and inherit the imported shadow data.
 - idempotent: upserts keyed on `legacy_id` / normalized email
 - **logs counts only — never owner PII or receipt contents**
 
-This PR changes **zero** production behavior: no app code path reads
-Postgres, no Firestore data is touched, no rules change.
+The import tooling stays useful post-cutover for rehearsal and for the
+launch-time data load, but nothing in the running app reads it.
 
 ## 9. Storage boundary
 
 Binary objects stay in Firebase Storage. Postgres stores only object
 *paths* (`payment_receipt_path`, `photo_urls`) — paths are references,
-not authorization: receipt access remains governed by Storage rules
-(private, admin-read) and the 56-day soft-delete posture is unchanged.
-Future vet documents follow the same pattern.
+not authorization. Post-#183 receipt access: the public form creates
+objects under `receipts/<submission uuid>` (constrained create only);
+no client-side read/update/delete exists for any principal — staff view
+via short-lived signed URLs from `getReceiptUrlAction` and orphan
+cleanup runs server-side in the cron sweeper. Future vet documents
+follow the same pattern.
 
 ## 10. Backup / recovery (Postgres side)
 
@@ -247,16 +267,14 @@ Verified Neon capabilities (2026-09):
 The actual provisioned project (`sfpca-db`, Vercel integration resource
 `store_Z35KM1ryj86s4YOG`) is on the **Free** plan — intentionally
 retained — with a 6-hour instant-restore window (1 GB cap), 1 manual
-snapshot, 10 branches. That is acceptable **only while** Postgres holds
-schema-only and Firestore remains authoritative; it does **not** meet
-the ≥7-day recovery target for authoritative Postgres use. Rules:
-
-- **#181:** a manual snapshot of `main` is a precondition before every
-  production `migrate:firestore --execute` run (RUNBOOK.md §19f).
-- **#183 hard gate:** Firestore must not be retired until Postgres
-  recovery is at least equivalent to Firestore's 7-day PITR posture —
-  via a Neon tier upgrade or another verified equivalent mechanism
-  (decision deferred; tracked on #180).
+snapshot, 10 branches. Postgres is now the authoritative registry
+store (#183), and the Free-plan window does **not** meet the ≥7-day
+recovery target for authoritative use. This is tracked on **#180** and
+is a **launch gate**: before the site goes live, Postgres recovery must
+reach the agreed posture via a Neon tier upgrade or another verified
+equivalent mechanism (decision deferred). A manual snapshot of `main`
+remains a precondition before any production `migrate:firestore
+--execute` run (RUNBOOK.md §19f).
 
 ## 11. Local dev & tests
 
@@ -271,8 +289,9 @@ the ≥7-day recovery target for authoritative Postgres use. Rules:
   via `DATABASE_URL_UNPOOLED` and fails the deployment on error.
   Production builds and local builds skip it — production schema changes
   are a deliberate operator step (RUNBOOK.md §19b).
-- Developers without a Neon branch need nothing: the registry is not on
-  any runtime path yet.
+- The dev server needs `DATABASE_URL` to exercise registry surfaces
+  locally (a Neon dev branch or a local Postgres/PGlite wire server —
+  E2E uses `tests/e2e/global-setup.ts`); unit tests need nothing.
 
 ## 12. CI
 
@@ -291,8 +310,10 @@ compatibility:
 
 | Var | Scope | Source |
 |---|---|---|
-| `DATABASE_URL` | server-only runtime queries (pooled Neon `-pooler` host) | Vercel–Neon integration |
+| `DATABASE_URL` | server-only runtime queries (pooled Neon `-pooler` host) — **required in every deployed env** | Vercel–Neon integration |
 | `DATABASE_URL_UNPOOLED` | schema/data migrations (unpooled direct host) | Vercel–Neon integration |
+| `CRON_SECRET` | bearer guard for `/api/cron/sweep-receipts` | operator-set (Production + Preview) |
+| `ADMIN_EMAILS` | bootstrap/emergency admin allowlist — not the authz authority | operator-set |
 | `MIGRATION_CONFIRM_PROJECT` | `migrate:firestore --execute` guard | operator-set |
 
 Integration-provided aliases (unused by app code): `POSTGRES_URL`,

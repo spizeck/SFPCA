@@ -84,7 +84,7 @@ jobs:
         run: npm test
 
       - name: Validate functions exports
-        run: node -e "const f = require('./index.js'); for (const name of ['onFirestoreChange', 'triggerRebuild', 'sweepOrphanedReceipts']) { if (!f[name]) { console.error('Missing required function export', name); process.exit(1); } }"
+        run: node -e "const f = require('./index.js'); for (const name of ['onFirestoreChange', 'triggerRebuild']) { if (!f[name]) { console.error('Missing required function export', name); process.exit(1); } }"
 
   # Security-rules tests are neither app nor Functions code and need the
   # Java-based emulator suite, so they get their own check. The required

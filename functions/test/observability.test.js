@@ -1,4 +1,6 @@
-// Unit tests for the injected-dependency rebuild + sweep modules.
+// Unit tests for the injected-dependency rebuild module.
+// The receipt sweeper moved to the app runtime (Vercel cron +
+// src/lib/registry/receipt-sweep.ts, #183) — its tests live there.
 // Run via `npm test` in functions/ (node:test, no emulator needed).
 const {test} = require("node:test");
 const assert = require("node:assert/strict");
@@ -7,7 +9,6 @@ const {
   missingRebuildEnv,
   describeRebuildFailure,
 } = require("../lib/rebuild");
-const {sweepOrphanedReceipts} = require("../lib/sweep");
 
 /**
  * Captures structured log calls so tests can assert on fields and,
@@ -113,97 +114,3 @@ test("rebuild: describeRebuildFailure keeps only safe fields", () => {
   assert.equal(fields.errorCode, "ENOTFOUND");
   assert.equal(fields.upstreamCode, undefined);
 });
-
-// ---------- sweepOrphanedReceipts ----------
-
-const HOUR = 60 * 60 * 1000;
-const NOW = Date.parse("2026-01-01T12:00:00Z");
-
-/**
- * Fake storage bucket returning the given file objects.
- * @param {object[]} files Fake file objects.
- * @return {object} Bucket stub.
- */
-function fakeBucket(files) {
-  return {getFiles: async () => [files]};
-}
-
-/**
- * Fake Firestore where doc existence is driven by an ID set.
- * @param {Set<string>} existingIds Document IDs that "exist".
- * @return {object} Firestore stub.
- */
-function fakeDb(existingIds) {
-  return {
-    collection: () => ({
-      doc: (id) => ({
-        get: async () => ({exists: existingIds.has(id)}),
-      }),
-    }),
-  };
-}
-
-/**
- * Fake storage file under receipts/.
- * @param {string} name Object name suffix (registration doc ID shape).
- * @param {number} ageMs Object age relative to NOW.
- * @param {boolean} failDelete Whether delete() should throw.
- * @return {object} File stub.
- */
-function fakeFile(name, ageMs = 2 * HOUR, failDelete = false) {
-  return {
-    name: `receipts/${name}`,
-    metadata: {timeCreated: new Date(NOW - ageMs).toISOString()},
-    deleted: false,
-    delete: async function() {
-      if (failDelete) throw Object.assign(new Error("io"), {code: "500"});
-      this.deleted = true;
-    },
-  };
-}
-
-test("sweep: deletes orphans, keeps referenced and recent objects",
-    async () => {
-      const log = fakeLog();
-      const orphan = fakeFile("orphan-id");
-      const referenced = fakeFile("known-id");
-      const recent = fakeFile("inflight-id", 5 * 60 * 1000);
-      const nested = {name: "receipts/nested/path"};
-      const counts = await sweepOrphanedReceipts({
-        bucket: fakeBucket([orphan, referenced, recent, nested]),
-        db: fakeDb(new Set(["known-id"])),
-        nowMs: NOW,
-        log,
-        runId: "run-1",
-      });
-      assert.equal(orphan.deleted, true);
-      assert.equal(referenced.deleted, false);
-      assert.equal(recent.deleted, false);
-      assert.deepEqual(counts, {
-        scanned: 3, deleted: 1, skippedRecent: 1,
-        skippedMalformed: 1, failed: 0,
-      });
-      assert.equal(log.calls.info[0].outcome, "ok");
-      // Registration IDs / receipt paths must never appear in logs.
-      for (const name of ["orphan-id", "known-id", "inflight-id"]) {
-        assert.ok(!log.all().includes(name), `log leaked ${name}`);
-      }
-    });
-
-test("sweep: per-object failure counted, run continues, error logged",
-    async () => {
-      const log = fakeLog();
-      const bad = fakeFile("bad-id", 2 * HOUR, true);
-      const good = fakeFile("good-id");
-      const counts = await sweepOrphanedReceipts({
-        bucket: fakeBucket([bad, good]),
-        db: fakeDb(new Set()),
-        nowMs: NOW,
-        log,
-      });
-      assert.equal(counts.deleted, 1);
-      assert.equal(counts.failed, 1);
-      assert.equal(good.deleted, true, "later objects still processed");
-      assert.equal(log.calls.error[0].outcome, "partial-failure");
-      assert.ok(!log.all().includes("bad-id"));
-    });

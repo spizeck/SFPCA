@@ -3,6 +3,9 @@ import { getFirestore } from "firebase-admin/firestore";
 import * as fs from "fs";
 import * as path from "path";
 import { config } from "dotenv";
+import postgres from "postgres";
+import { drizzle } from "drizzle-orm/postgres-js";
+import { sql as dsql } from "drizzle-orm";
 
 // Load environment variables from .env.local
 config({ path: ".env.local" });
@@ -19,11 +22,21 @@ if (!serviceAccount.projectId || !serviceAccount.clientEmail || !serviceAccount.
   process.exit(1);
 }
 
+// Operational registry data (animals, admin users) is Postgres-only
+// after #183 — the seed needs a database connection for those sections.
+const dbUrl = process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL;
+if (!dbUrl) {
+  console.error("Please set DATABASE_URL (or DATABASE_URL_UNPOOLED) — animals and admin users seed into Postgres");
+  process.exit(1);
+}
+
 const app = initializeApp({
   credential: cert(serviceAccount),
 });
 
 const db = getFirestore(app);
+const pg = postgres(dbUrl, { max: 1, prepare: false });
+const pgdb = drizzle(pg);
 
 async function seed() {
   try {
@@ -42,22 +55,25 @@ async function seed() {
     console.log("Seeding site settings...");
     await db.collection("siteSettings").doc("global").set(seedData.siteSettings);
 
-    console.log("Seeding animals...");
+    console.log("Seeding animals (Postgres)...");
     for (const animal of seedData.animals) {
-      await db.collection("animals").add({
-        ...animal,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
+      const { id, status, photos, ...rest } = animal;
+      await pgdb.execute(dsql`
+        INSERT INTO animals (legacy_id, name, species, sex, approx_age,
+          description, lifecycle_status, photo_urls)
+        VALUES (${id ?? null}, ${rest.name}, ${rest.species}, ${rest.sex},
+          ${rest.approxAge ?? null}, ${rest.description ?? null},
+          ${status}, ${JSON.stringify(photos ?? [])}::jsonb)
+      `);
     }
 
-    console.log("Seeding admin users...");
-    for (const [email, data] of Object.entries(seedData.admins)) {
-      await db.collection("admins").doc(email).set({
-        email: data.email,
-        role: data.role,
-        createdAt: new Date(data.createdAt),
-      });
+    console.log("Seeding admin users (Postgres)...");
+    for (const [, data] of Object.entries(seedData.admins)) {
+      await pgdb.execute(dsql`
+        INSERT INTO admin_users (email, role)
+        VALUES (${data.email.toLowerCase()}, ${data.role})
+        ON CONFLICT DO NOTHING
+      `);
     }
 
     console.log("✅ Seed data successfully loaded!");

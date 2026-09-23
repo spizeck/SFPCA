@@ -1,9 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
-import { Animal } from "@/lib/types";
+import {
+  deleteAnimalAction,
+  listAnimalsAction,
+  saveAnimalAction,
+  type AdminAnimalRow,
+} from "./actions";
 import {
   ANIMAL_STATUSES,
   ANIMAL_STATUS_LABELS,
@@ -40,12 +43,12 @@ const EMPTY_FORM = {
 };
 
 export default function AnimalsManager() {
-  const [animals, setAnimals] = useState<Animal[]>([]);
+  const [animals, setAnimals] = useState<AdminAnimalRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingAnimal, setEditingAnimal] = useState<Animal | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<Animal | null>(null);
+  const [editingAnimal, setEditingAnimal] = useState<AdminAnimalRow | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AdminAnimalRow | null>(null);
   const [statusError, setStatusError] = useState("");
   const [initialFormJson, setInitialFormJson] = useState(() =>
     JSON.stringify(EMPTY_FORM),
@@ -63,17 +66,7 @@ export default function AnimalsManager() {
     setLoading(true);
     setLoadError(false);
     try {
-      const querySnapshot = await getDocs(collection(db, "animals"));
-      const animalsData = querySnapshot.docs.map((doc) => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data,
-          createdAt: data.createdAt?.toDate().toISOString(),
-          updatedAt: data.updatedAt?.toDate().toISOString(),
-        } as Animal;
-      });
-      setAnimals(animalsData);
+      setAnimals(await listAnimalsAction());
     } catch (error) {
       logError("animals", "admin-load", error);
       setLoadError(true);
@@ -92,21 +85,36 @@ export default function AnimalsManager() {
 
     mutation.run(async () => {
       try {
-        if (editingAnimal) {
-          const docRef = doc(db, "animals", editingAnimal.id);
-          await updateDoc(docRef, {
-            ...formData,
-            updatedAt: new Date(),
+        const result = await saveAnimalAction(
+          {
+            name: formData.name,
+            species: formData.species,
+            sex: formData.sex,
+            approxAge: formData.approxAge,
+            description: formData.description,
+            lifecycleStatus: formData.status,
+            photoUrls: formData.photos,
+          },
+          editingAnimal?.registryId ?? null,
+          editingAnimal?.updatedAt,
+        );
+        if (!result.ok) {
+          toast({
+            title: "Error",
+            description:
+              result.reason === "conflict"
+                ? "This animal was changed by someone else. Reopen it to see the latest version."
+                : "Failed to save animal. Your entries are kept — try again.",
+            variant: "destructive",
           });
-          toast({ title: "Success", description: "Animal updated successfully" });
-        } else {
-          await addDoc(collection(db, "animals"), {
-            ...formData,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          });
-          toast({ title: "Success", description: "Animal added successfully" });
+          return;
         }
+        toast({
+          title: "Success",
+          description: editingAnimal
+            ? "Animal updated successfully"
+            : "Animal added successfully",
+        });
 
         setDialogOpen(false);
         resetForm();
@@ -123,7 +131,7 @@ export default function AnimalsManager() {
     });
   };
 
-  const handleEdit = (animal: Animal) => {
+  const handleEdit = (animal: AdminAnimalRow) => {
     setEditingAnimal(animal);
     const editForm = {
       name: animal.name,
@@ -145,7 +153,15 @@ export default function AnimalsManager() {
     if (!target) return;
     mutation.run(async () => {
       try {
-        await deleteDoc(doc(db, "animals", target.id));
+        const result = await deleteAnimalAction(target.registryId);
+        if (!result.ok) {
+          toast({
+            title: "Error",
+            description: "Failed to delete animal. Try again.",
+            variant: "destructive",
+          });
+          return;
+        }
         setDeleteTarget(null);
         toast({ title: "Success", description: "Animal deleted successfully" });
         loadAnimals();

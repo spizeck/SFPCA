@@ -232,6 +232,9 @@ export function transformRegistration(
       ownerAddress: str(owner.address) ?? null,
       ownerPhone: str(owner.phone) ?? null,
       ownerEmail: str(owner.email) ?? null,
+      // Intake snapshot of the submitted animal list — carried verbatim
+      // into the JSONB column; shape was enforced at intake time.
+      animals: Array.isArray(d.animals) ? d.animals : null,
       paymentReceiptPath: str(d.paymentReceipt) ?? null,
       totalFeeCents,
       currency: "USD",
@@ -285,6 +288,7 @@ export function submissionProjection(
     ownerAddress: canon(r.ownerAddress),
     ownerPhone: canon(r.ownerPhone),
     ownerEmail: canon(r.ownerEmail),
+    animals: canon(r.animals),
     paymentReceiptPath: canon(r.paymentReceiptPath),
     totalFeeCents: r.totalFeeCents,
     currency: r.currency,

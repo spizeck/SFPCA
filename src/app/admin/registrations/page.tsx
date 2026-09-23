@@ -16,12 +16,13 @@ import { useMutation } from "@/hooks/use-mutation";
 import { LoadError } from "@/components/admin/load-error";
 import { AnimalRegistration } from "@/lib/types";
 import { Eye, CircleCheckBig, Download, CircleX, RotateCcw } from "lucide-react";
-import { collection, getDocs, doc, updateDoc, serverTimestamp } from "firebase/firestore";
-import { ref, getDownloadURL } from "firebase/storage";
-import { db, storage } from "@/lib/firebase";
+import {
+  getReceiptUrlAction,
+  listRegistrationsAction,
+  setRegistrationStatusAction,
+} from "./actions";
 import {
   formatRegistrationTimestamp,
-  registrationTimestampMillis,
   RegistrationStatus,
 } from "@/lib/animal-registration";
 import { RegistrationStatusBadge } from "@/components/admin/registration-status-badge";
@@ -45,24 +46,9 @@ export default function RegistrationsPage() {
     setLoading(true);
     setLoadError(false);
     try {
-      // No server-side orderBy: a query ordered on createdAt silently
-      // drops documents that lack the field, which would hide malformed
-      // records from staff. Sort client-side instead so everything
-      // surfaces, newest first, undated records last.
-      const querySnapshot = await getDocs(collection(db, "animalRegistrations"));
-      const registrationsData: AnimalRegistration[] = [];
-
-      querySnapshot.forEach((doc) => {
-        registrationsData.push({ id: doc.id, ...doc.data() } as AnimalRegistration);
-      });
-
-      registrationsData.sort(
-        (a, b) =>
-          registrationTimestampMillis(b.createdAt) -
-          registrationTimestampMillis(a.createdAt),
-      );
-
-      setRegistrations(registrationsData);
+      // Postgres returns submissions newest-first (submitted_at DESC);
+      // every stored row has a timestamp, so nothing is silently hidden.
+      setRegistrations(await listRegistrationsAction());
     } catch (error) {
       logError("admin", "registrations-load", error);
       setLoadError(true);
@@ -74,11 +60,15 @@ export default function RegistrationsPage() {
   const setStatus = (id: string, status: RegistrationStatus) => {
     mutation.run(async () => {
       try {
-        const registrationRef = doc(db, "animalRegistrations", id);
-        await updateDoc(registrationRef, {
-          status,
-          updatedAt: serverTimestamp(),
-        });
+        const result = await setRegistrationStatusAction(id, status);
+        if (!result.ok) {
+          toast({
+            title: "Error",
+            description: "Failed to update registration status. Try again.",
+            variant: "destructive",
+          });
+          return;
+        }
 
         setRegistrations((prev) =>
           prev.map((reg) => (reg.id === id ? { ...reg, status } : reg)),
@@ -112,12 +102,14 @@ export default function RegistrationsPage() {
 
     mutation.run(async () => {
       try {
-        // New submissions store a storage path ("receipts/<id>"); older
-        // documents may hold a full download URL.
-        const url = receipt.startsWith("http")
-          ? receipt
-          : await getDownloadURL(ref(storage, receipt));
-        window.open(url, "_blank");
+        // Postgres stores the object path ("receipts/<submissionId>");
+        // the server action mints a short-lived signed URL so the
+        // object itself stays private.
+        const result = receipt.startsWith("http")
+          ? { ok: true, url: receipt }
+          : await getReceiptUrlAction(receipt);
+        if (!result.ok || !result.url) throw new Error("no signed url");
+        window.open(result.url, "_blank");
       } catch (error) {
         logError("admin", "receipt-view", error);
         toast({

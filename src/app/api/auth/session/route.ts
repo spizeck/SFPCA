@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminAuth, adminDb } from "@/lib/firebase-admin";
+import { adminAuth } from "@/lib/firebase-admin";
 import { isAdmin, isExpectedAuthError } from "@/lib/auth";
+import { provisionAdminUser } from "@/lib/registry/admin-users";
 import { logError, logWarn } from "@/lib/logger";
 import { cookies } from "next/headers";
 
@@ -53,17 +54,29 @@ export async function POST(request: NextRequest) {
     const { isAdmin: userIsAdmin, role } = await isAdmin(email);
 
     if (!userIsAdmin) {
+      // Clear any stale admin claim so a removed admin's rules-side
+      // access ends on the next token refresh instead of lingering.
+      await adminAuth().setCustomUserClaims(decodedToken.uid, {
+        admin: false,
+      });
       return NextResponse.json({ authorized: false }, { status: 403 });
     }
 
-    // Admins authorized via the ADMIN_EMAILS env allowlist are not visible
-    // to the security rules, which check the admins collection. Bootstrap a
-    // document so server-side and rules-side authorization agree.
-    const adminRef = adminDb().collection("admins").doc(email);
-    const adminSnap = await adminRef.get();
-    if (!adminSnap.exists) {
-      await adminRef.set({ email, role: "admin", createdAt: new Date() });
-    }
+    // Provision the Postgres admin_users row (insert-only; never
+    // rewrites a staff-managed role). Covers ADMIN_EMAILS bootstrap on
+    // first login and self-heals a missing row for Postgres-listed
+    // admins.
+    await provisionAdminUser(email);
+
+    // The Firestore admins/ collection is retired: rules-side
+    // authorization for client-SDK writes (CMS saves, team photos,
+    // receipt uploads) rides on this custom claim instead. The client
+    // must force-refresh its ID token after a successful session POST
+    // for the claim to reach rules-evaluated requests.
+    await adminAuth().setCustomUserClaims(decodedToken.uid, {
+      admin: true,
+      adminRole: role ?? "admin",
+    });
 
     const expiresIn = 60 * 60 * 24 * 5 * 1000;
     const sessionCookie = await adminAuth().createSessionCookie(idToken, { expiresIn });

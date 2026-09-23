@@ -3,7 +3,6 @@ const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
 const crypto = require("crypto");
 const {triggerVercelRebuild} = require("./lib/rebuild");
-const {sweepOrphanedReceipts} = require("./lib/sweep");
 
 admin.initializeApp();
 
@@ -14,13 +13,14 @@ const {
 
 // Firestore collections whose writes can change statically generated
 // public pages — the only writes that should trigger a Vercel rebuild.
-// Notably absent: animalRegistrations and admins. A public
-// registration submission must not burn a deploy, and filtering here
-// also keeps private document paths out of the trigger logs entirely.
+// This list is CMS-only: operational registry collections (animals,
+// animalRegistrations, admins) are retired and live in Postgres — their
+// writes can never reach this trigger anyway. Animal visibility changes
+// revalidate via the Postgres mutation path (revalidatePath in the
+// server actions), not a rebuild.
 const REBUILD_COLLECTIONS = new Set([
   "homepage",
   "siteSettings",
-  "animals",
   "faq",
   "vetServices",
   "animalAdoptions",
@@ -140,32 +140,3 @@ exports.triggerRebuild = functions.https.onRequest(async (req, res) => {
     });
   }
 });
-
-/**
- * Deletes payment receipts whose registration write never landed.
- * The public form uploads a receipt to receipts/<registrationId>
- * before creating the Firestore document; a failed write leaves an
- * orphan. Clients delete their own orphan immediately (storage rules
- * permit delete only while the document does not exist), but that
- * cleanup call can itself fail. This sweeper is the fail-safe: any
- * receipts/<id> object without a matching animalRegistrations/<id>
- * document is unreferenced private data and is removed. Logs counts
- * only — never object names or contents.
- */
-exports.sweepOrphanedReceipts =
-    functions.scheduler.onSchedule("every 24 hours", async () => {
-      const result = await sweepOrphanedReceipts({
-        bucket: admin.storage().bucket(),
-        db: admin.firestore(),
-        log: logger,
-        runId: crypto.randomUUID(),
-      });
-      if (result.failed > 0) {
-        // Mark the execution failed so error-rate alerting fires; the
-        // sweep is idempotent and the next run retries the remainder.
-        throw new Error(
-            "sweepOrphanedReceipts: " + result.failed +
-            " receipt object(s) failed during sweep",
-        );
-      }
-    });

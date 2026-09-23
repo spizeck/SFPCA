@@ -9,11 +9,13 @@ service firebase.storage {
           && request.auth.token.email_verified == true;
     }
 
-    // Canonical staff identity: a verified user whose email has a document
-    // in the Firestore admins collection.
+    // Canonical staff identity: a verified user carrying the admin
+    // custom claim set by the session route (Postgres admin_users is the
+    // authority). No Firestore lookup — the admins/ collection is
+    // retired and must never be an authorization input again.
     function isAdmin() {
       return isVerifiedUser()
-          && firestore.exists(/databases/(default)/documents/admins/$(request.auth.token.email));
+          && request.auth.token.admin == true;
     }
 
     // Uploads are image assets only (site/team photos), max 5 MB.
@@ -43,7 +45,7 @@ service firebase.storage {
     // A future media feature must introduce explicit authorization
     // for its own prefix rather than reviving a generic catch-all.
 
-    // Animal photos are plain URLs stored on the Firestore document —
+    // Animal photos are plain URLs stored on the registry row —
     // nothing uploads to an animals/ Storage prefix, so there is
     // deliberately no animals/ rule: it falls through to default-deny.
     // A future upload feature must add lifecycle-aware authorization
@@ -56,28 +58,26 @@ service firebase.storage {
       allow write: if canWrite();
     }
 
-    // Payment receipts attached to animal registrations - private data.
-    // Receipts are stored at receipts/<registration document ID> — the
-    // bound path is what makes orphaned uploads self-identifying and
-    // lets cleanup be evaluated authoritatively in rules.
+    // Payment receipts attached to registration submissions - private
+    // data stored at receipts/<submission uuid>. The submission id is
+    // generated client-side before upload so the object path is bound
+    // to the Postgres registration_submissions row.
     //
     // The public form uploads unauthenticated, so create is open but
-    // constrained to small image/PDF files; only admins can read or
-    // replace receipts. The resource == null check keeps an anonymous
-    // uploader from overwriting an existing object even where a PUT to
-    // an occupied path is classified as a create.
+    // constrained to small image/PDF files; the resource == null check
+    // keeps an anonymous uploader from overwriting an existing object
+    // even where a PUT to an occupied path is classified as a create.
     //
-    // Delete: admins always; anonymous/non-admin only when the matching
-    // registration document does NOT exist — i.e. the object is an
-    // orphan whose submission write failed. The check runs at delete
-    // time, so a receipt whose registration actually landed (response
-    // lost in transit) can never be removed through this path.
+    // There is no client-side read/update/delete at all — not even for
+    // admins. Staff view receipts through short-lived signed URLs minted
+    // by a server action, and orphan cleanup runs through the Admin SDK
+    // in the scheduled sweep — both bypass rules entirely. A receipt
+    // object is therefore unreachable via the client SDK for every
+    // principal, and retired Firestore collections are never consulted
+    // for authorization.
     match /receipts/{receiptId} {
       allow create: if resource == null && isReceiptUpload();
-      allow read, update: if isAdmin();
-      allow delete: if isAdmin()
-          || !firestore.exists(
-              /databases/(default)/documents/animalRegistrations/$(receiptId));
+      allow read, update, delete: if false;
     }
 
     // Default deny

@@ -229,6 +229,12 @@ export const registrationSubmissions = pgTable(
     ownerAddress: text("owner_address"),
     ownerPhone: text("owner_phone"),
     ownerEmail: text("owner_email"),
+    // Intake snapshot of the animals submitted with the registration.
+    // JSONB copy of the validated intake payload rather than a
+    // normalized relation: these are the applicant's claims at
+    // submission time, not registry animals — identity/animal linking
+    // belongs to the later review workflow (#178).
+    animals: jsonb("animals"),
     personId: uuid("person_id").references(() => persons.id, {
       onDelete: "set null",
     }),

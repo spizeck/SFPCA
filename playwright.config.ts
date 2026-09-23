@@ -42,6 +42,15 @@ export default defineConfig({
       NEXT_PUBLIC_GTM_ID: "GTM-E2ETEST",
       // E2E must exercise the full site, never the maintenance gate.
       SITE_MAINTENANCE_MODE: "false",
+      // The registry datastore: a PGlite Postgres engine served over the
+      // wire protocol by tests/e2e/global-setup.ts — the dev server uses
+      // the same postgres.js client it would for Neon, against an
+      // isolated throwaway database.
+      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5544/postgres",
+      // One connection: pglite-socket queues protocol messages
+      // per-message, so multiple pooled connections can interleave
+      // extended-protocol sequences. See src/lib/db/client.ts.
+      DATABASE_POOL_MAX: "1",
     },
   },
 });

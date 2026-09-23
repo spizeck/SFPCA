@@ -1,4 +1,5 @@
-import { adminAuth, adminDb } from "./firebase-admin";
+import { adminAuth } from "./firebase-admin";
+import { findAdminUser } from "./registry/admin-users";
 import { logError } from "./logger";
 import { cookies } from "next/headers";
 
@@ -51,11 +52,11 @@ export async function isAdmin(email: string): Promise<{ isAdmin: boolean; role?:
     return { isAdmin: false };
   }
 
-  // The env allowlist is a bootstrap mechanism only (see the session route,
-  // which reconciles listed users into admins/ docs). Match it
+  // The env allowlist is a bootstrap/emergency mechanism only — the
+  // authoritative record is Postgres admin_users (the session route
+  // provisions a row for env-listed users on first login). Match it
   // case-insensitively so mis-cased configuration can't lock out a real
-  // admin; the Firestore doc lookup below stays exact-match because the
-  // security rules key on the exact token email.
+  // admin.
   const normalizedEmail = email.trim().toLowerCase();
   const envAdmins = (process.env.ADMIN_EMAILS || "")
     .split(",")
@@ -67,13 +68,12 @@ export async function isAdmin(email: string): Promise<{ isAdmin: boolean; role?:
   }
 
   try {
-    const adminDoc = await adminDb().collection("admins").doc(email).get();
-    if (adminDoc.exists) {
-      const data = adminDoc.data();
-      return { isAdmin: true, role: data?.role || "editor" };
+    const adminUser = await findAdminUser(email);
+    if (adminUser) {
+      return { isAdmin: true, role: adminUser.role };
     }
   } catch (error) {
-    // Fail closed to non-admin, but a Firestore outage here silently
+    // Fail closed to non-admin, but a Postgres outage here silently
     // locks out every admin — that must be diagnosable.
     logError("auth", "admin-lookup", error);
   }

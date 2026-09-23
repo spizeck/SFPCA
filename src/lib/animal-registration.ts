@@ -1,9 +1,10 @@
 // Canonical definition of the animal-registration submission lifecycle
 // and its field constraints. This module is the single authoritative
-// source for registration status semantics, the field limits that the
-// public form and the Firestore rules both enforce, the fee schedule
-// the form advertises, and receipt-file constraints that mirror
-// storage.rules. Keep the two rule files and this module in agreement.
+// source for registration status semantics, the field limits the public
+// form and the server-side submission action both enforce, the fee
+// schedule the form advertises, and receipt-file constraints that
+// mirror storage.rules. Keep the rule file and this module in
+// agreement.
 //
 // Submission lifecycle contract:
 //
@@ -16,14 +17,14 @@
 // |          | (surfaced as needing attention)            |            |
 //
 // No registration data is ever publicly readable. Public clients may
-// only CREATE submissions, and only with status "pending" — the rules
-// layer rejects any other initial status. Admin status changes may move
-// between any supported statuses so staff can correct mistakes; no
-// state is terminal.
+// only CREATE submissions, and only with status "pending" — the
+// submission server action forces the initial status and re-validates
+// the payload server-side before writing to Postgres. Admin status
+// changes may move between any supported statuses so staff can correct
+// mistakes; no state is terminal.
 //
 // Retention: the repository defines no automatic retention period.
-// Registrations persist indefinitely unless an admin deletes a document
-// through a privileged path; there is no UI delete today.
+// Registrations persist indefinitely; there is no UI delete today.
 
 export const REGISTRATION_STATUSES = [
   "pending",
@@ -39,7 +40,8 @@ export const REGISTRATION_STATUS_LABELS: Record<RegistrationStatus, string> = {
   rejected: "Rejected",
 };
 
-// The only status a public submission may carry. Rules enforce this.
+// The only status a public submission may carry — the submission
+// server action sets it unconditionally.
 export const REGISTRATION_INITIAL_STATUS: RegistrationStatus = "pending";
 
 export function isRegistrationStatus(
@@ -67,10 +69,11 @@ export function canTransitionRegistrationStatus(
   return isRegistrationStatus(from) && isRegistrationStatus(to);
 }
 
-// --- Field constraints (mirrored in firestore.rules) ------------------
+// --- Field constraints -----------------------------------------------
 // These bound what a public submission may carry. The public form sets
 // matching maxLength attributes so browser validation agrees with the
-// trusted boundary.
+// trusted boundary, and the submission action re-checks them
+// server-side via validateRegistration.
 
 export const REGISTRATION_FIELD_LIMITS = {
   ownerName: 120,
@@ -128,9 +131,10 @@ export function isReceiptFile(file: { type: string; size: number }): boolean {
 }
 
 // --- Submission shape validation ----------------------------------------
-// Client-side validation for the public form. Firestore rules repeat the
-// security-relevant checks; this exists to give users immediate,
-// field-level feedback rather than a round-trip failure.
+// Shared validation for the public form and the server-side submission
+// action: the form uses it for immediate field-level feedback, the
+// action repeats it as the trusted boundary so a crafted request can
+// never write an out-of-shape submission.
 
 export interface RegistrationFormInput {
   ownerName: string;
@@ -145,10 +149,9 @@ export type RegistrationFieldErrors = Partial<
 >;
 
 // --- Timestamp handling --------------------------------------------------
-// Submissions store Firestore server timestamps; some historical code
-// paths wrote ISO strings. These helpers normalize both shapes so the
-// admin view can display and sort defensively instead of crashing on a
-// Timestamp object or dropping records that lack the field entirely.
+// Registration DTOs carry ISO strings; these helpers normalize
+// defensively so the admin view can display and sort without crashing
+// on an unexpected shape or dropping records that lack the field.
 
 interface TimestampLike {
   toDate: () => Date;
