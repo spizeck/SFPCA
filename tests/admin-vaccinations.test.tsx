@@ -50,6 +50,7 @@ function vaxRow(data: Record<string, unknown>) {
     id: "vax-1",
     animalId: "animal-uuid-1",
     vaccineName: "Rabies",
+    seriesKey: "rabies",
     administeredOn: "2025-10-01",
     dueOn: "2026-10-01",
     validUntil: null,

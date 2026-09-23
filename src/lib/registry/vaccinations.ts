@@ -9,17 +9,19 @@
 // animal with vaccination history fail loudly (restrictive FK) rather
 // than erasing medical history.
 //
-// Reminder integration: this module does NOT send anything. It exposes
-// the due/overdue query (#172 evaluates it on a schedule) and
-// recordVaccinationReminder(), which writes a communications row whose
-// unique idempotency key makes a retry incapable of double-sending.
+// Reminder integration: this module does NOT send anything and cannot
+// claim that it did. It exposes the due/overdue query (#172 evaluates
+// it on a schedule), a deterministic idempotency-key helper, and
+// queueVaccinationReminder(), which registers a reminder as queued or
+// skipped — never sent. Only #172's delivery path may transition a
+// queued row to sent/failed and stamp sent_at.
 // follow_ups is deliberately NOT materialized from vaccination dates —
 // due state is derived, so there is no second copy to go stale. Manual
 // rechecks from encounters stay on follow_ups (#175).
 
 import "server-only";
 
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, lte, or, sql } from "drizzle-orm";
 import {
   animals,
   auditEvents,
@@ -50,6 +52,10 @@ export interface AdminVaccination {
   id: string;
   animalId: string;
   vaccineName: string;
+  // DB-generated series identity (normalized vaccine_name). Doses
+  // sharing an (animalId, seriesKey) are one vaccine series — the
+  // latest dose alone drives due/reminder state.
+  seriesKey: string;
   administeredOn: string;
   dueOn: string | null;
   validUntil: string | null;
@@ -67,6 +73,7 @@ const VACCINATION_COLUMNS = {
   id: vaccinations.id,
   animalId: vaccinations.animalId,
   vaccineName: vaccinations.vaccineName,
+  seriesKey: vaccinations.seriesKey,
   administeredOn: vaccinations.administeredOn,
   dueOn: vaccinations.dueOn,
   validUntil: vaccinations.validUntil,
@@ -124,6 +131,9 @@ export function validateVaccinationInput(
   ) {
     return "vaccineName";
   }
+  // The generated series_key strips non-alphanumerics — a name with
+  // none would collapse every such row into one empty-key series.
+  if (!/[a-z0-9]/i.test(input.vaccineName)) return "vaccineName";
   if (!isIsoDateString(input.administeredOn)) return "administeredOn";
   // A dose dated in the future is almost certainly a typo (wrong year);
   // vaccinations record what WAS administered, not schedules.
@@ -286,6 +296,9 @@ export async function updateVaccination(
 // --- Due/overdue query + reminder foundation (#172 consumes these) ----------
 
 export interface DueVaccinationRow {
+  // The CURRENT dose of a vaccine series — the latest administered_on
+  // per (animal, series_key). Superseded historical doses never appear
+  // here; they remain in listVaccinationsForAnimal() history.
   vaccination: AdminVaccination;
   // Earliest of due_on/valid_until — the date that needs attention.
   effectiveDate: string;
@@ -296,24 +309,35 @@ export interface DueVaccinationRow {
     species: string;
     lifecycleStatus: string;
   };
-  // Current owner/contact resolved through registry ownerships — null
-  // when the animal has no open ownership row. A person carries contact
-  // details; a household contributes its name only.
-  owner: {
+  // The ownership valid at `asOf` — context for whoever consumes the
+  // queue, NOT a chosen reminder recipient. A person row carries the
+  // contact details a sender would need; a household row carries only
+  // its name (no rule defines a household contact). Recipient
+  // selection, opt-outs, and channel choice are #172's job.
+  currentOwner: {
     id: string;
     kind: "person" | "household";
     name: string;
     email: string | null;
     phone: string | null;
   } | null;
-  // How many 'vaccination-reminder' communications are already logged
-  // as sent for this vaccination — the "already reminded?" check.
+  // How many 'vaccination-reminder' communications reached status
+  // 'sent' for this vaccination — i.e. the count of GENUINE deliveries
+  // recorded by #172's send path, not queued rows. This module never
+  // produces a 'sent' row itself.
   remindersSent: number;
 }
 
 // "Which animals have vaccinations due soon or overdue?" — the query
-// #172's scheduler and #175's work queue build on. Rows with no
-// due/expiry date can never be due and are excluded.
+// #172's scheduler and #175's work queue build on. Two projections
+// keep it honest:
+//  - latest dose per (animal, series): historical doses are superseded
+//    for reminder purposes but stay in the medical record;
+//  - one owner per animal at asOf: inconsistent data with multiple
+//    simultaneously-valid ownerships yields ONE deterministic pick
+//    (person over household, then earliest valid_from), never a
+//    duplicate queue row. True multi-owner semantics are #178.
+// Rows with no due/expiry date can never be due and are excluded.
 export async function listDueVaccinations(
   {
     asOf = todayIsoDate(),
@@ -330,9 +354,50 @@ export async function listDueVaccinations(
   horizon.setUTCDate(horizon.getUTCDate() + withinDays);
   const horizonIso = horizon.toISOString().slice(0, 10);
 
-  // Postgres LEAST ignores NULL arguments — this is the earliest
-  // non-null of the two dates, NULL only when both are unset.
-  const effective = sql<string>`LEAST(${vaccinations.dueOn}, ${vaccinations.validUntil})`;
+  // Latest dose per vaccine series: DISTINCT ON picks the first row of
+  // each (animal_id, series_key) group under this ordering — the most
+  // recently administered dose wins.
+  const latestDoses = db
+    .selectDistinctOn(
+      [vaccinations.animalId, vaccinations.seriesKey],
+      { ...VACCINATION_COLUMNS },
+    )
+    .from(vaccinations)
+    .orderBy(
+      vaccinations.animalId,
+      vaccinations.seriesKey,
+      desc(vaccinations.administeredOn),
+      desc(vaccinations.createdAt),
+      desc(vaccinations.id),
+    )
+    .as("latest_doses");
+
+  // Ownership valid at asOf: [valid_from, valid_to) — an open-ended
+  // valid_to is "still current". DISTINCT ON guarantees at most one
+  // owner per animal even if bad data leaves two rows valid at once.
+  const currentOwnership = db
+    .selectDistinctOn([ownerships.animalId], {
+      animalId: ownerships.animalId,
+      personId: ownerships.personId,
+      householdId: ownerships.householdId,
+    })
+    .from(ownerships)
+    .where(
+      and(
+        lte(ownerships.validFrom, asOf),
+        or(isNull(ownerships.validTo), gt(ownerships.validTo, asOf)),
+      ),
+    )
+    .orderBy(
+      ownerships.animalId,
+      // Deterministic pick under inconsistent data: a person beats a
+      // household (person rows carry contact details), then earliest
+      // valid_from, then id as a stable tiebreak.
+      asc(sql`(${ownerships.personId} IS NULL)`),
+      asc(ownerships.validFrom),
+      asc(ownerships.id),
+    )
+    .as("current_ownership");
 
   const sent = db
     .select({
@@ -350,9 +415,27 @@ export async function listDueVaccinations(
     .groupBy(communications.relatedId)
     .as("vax_reminders_sent");
 
+  // Postgres LEAST ignores NULL arguments — the earliest non-null of
+  // the two dates, NULL only when both are unset.
+  const effective = sql<string>`LEAST(${latestDoses.dueOn}, ${latestDoses.validUntil})`;
+
   const rows = await db
     .select({
-      ...VACCINATION_COLUMNS,
+      id: latestDoses.id,
+      animalId: latestDoses.animalId,
+      vaccineName: latestDoses.vaccineName,
+      seriesKey: latestDoses.seriesKey,
+      administeredOn: latestDoses.administeredOn,
+      dueOn: latestDoses.dueOn,
+      validUntil: latestDoses.validUntil,
+      productName: latestDoses.productName,
+      manufacturer: latestDoses.manufacturer,
+      lotNumber: latestDoses.lotNumber,
+      administeredBy: latestDoses.administeredBy,
+      notes: latestDoses.notes,
+      documentPath: latestDoses.documentPath,
+      createdAt: latestDoses.createdAt,
+      updatedAt: latestDoses.updatedAt,
       animalName: animals.name,
       animalSpecies: animals.species,
       animalLifecycleStatus: animals.lifecycleStatus,
@@ -365,24 +448,19 @@ export async function listDueVaccinations(
       remindersSent: sent.count,
       effectiveDate: effective,
     })
-    .from(vaccinations)
-    .innerJoin(animals, eq(vaccinations.animalId, animals.id))
-    // Current owner only: an ownership closed by valid_to is history,
-    // and changing owners must never rewrite medical records.
+    .from(latestDoses)
+    .innerJoin(animals, eq(latestDoses.animalId, animals.id))
     .leftJoin(
-      ownerships,
-      and(
-        eq(ownerships.animalId, vaccinations.animalId),
-        isNull(ownerships.validTo),
-      ),
+      currentOwnership,
+      eq(currentOwnership.animalId, latestDoses.animalId),
     )
-    .leftJoin(persons, eq(ownerships.personId, persons.id))
-    .leftJoin(households, eq(ownerships.householdId, households.id))
+    .leftJoin(persons, eq(currentOwnership.personId, persons.id))
+    .leftJoin(households, eq(currentOwnership.householdId, households.id))
     // communications.related_id is text (a loose cross-entity ref) —
     // cast the uuid for the comparison.
-    .leftJoin(sent, sql`${sent.relatedId} = ${vaccinations.id}::text`)
+    .leftJoin(sent, sql`${sent.relatedId} = ${latestDoses.id}::text`)
     .where(sql`${effective} <= ${horizonIso}`)
-    .orderBy(effective, vaccinations.id);
+    .orderBy(effective, latestDoses.id);
 
   return rows.map((row) => {
     const {
@@ -409,7 +487,7 @@ export async function listDueVaccinations(
         species: animalSpecies,
         lifecycleStatus: animalLifecycleStatus,
       },
-      owner: ownerPersonId
+      currentOwner: ownerPersonId
         ? {
             id: ownerPersonId,
             kind: "person" as const,
@@ -436,7 +514,7 @@ export const VACCINATION_REMINDER_KIND = "vaccination-reminder";
 // Deterministic idempotency key: one reminder per (vaccination,
 // effective due date, touch). #172 chooses the touch vocabulary
 // ("due-30d", "due-7d", "overdue", ...) — this foundation only needs
-// uniqueness to be deterministic so a retried send can never duplicate.
+// uniqueness to be deterministic so a retry can never write two rows.
 export function vaccinationReminderKey(
   vaccinationId: string,
   effectiveDate: string,
@@ -445,24 +523,32 @@ export function vaccinationReminderKey(
   return `vax-reminder:${vaccinationId}:${effectiveDate}:${touch}`;
 }
 
-export type RecordReminderResult =
+export type QueueReminderResult =
   | { ok: true; duplicate: boolean }
   | { ok: false; reason: "invalid" | "not-found" };
 
-// Records a vaccination reminder in the communications send log.
-// Delivery itself belongs to #172 — this is the idempotent ledger it
-// writes through. A repeat call for the same (vaccination, due date,
-// touch) is a no-op returning duplicate:true, never a second row.
-export async function recordVaccinationReminder(
+// Registers a vaccination reminder in the communications ledger as
+// 'queued' (awaiting #172's delivery) or 'skipped' (decided not to
+// send — opt-out, suppressed, etc.). It CANNOT write 'sent'/'failed'
+// or stamp sent_at: nothing in #173 delivers mail, so a row that
+// claimed delivery would make communication history — and the
+// idempotency state it feeds — lie. #172's delivery path owns the
+// queued → sent/failed transition and sent_at.
+//
+// Idempotent by construction: the deterministic key means a repeat
+// call for the same (vaccination, due date, touch) is a no-op
+// returning duplicate:true, never a second row — so #172's scheduler
+// can re-evaluate the due query freely without leaking duplicates.
+export async function queueVaccinationReminder(
   input: {
     vaccinationId: string;
     personId: string;
     channel: "email" | "sms" | "whatsapp" | "phone";
     touch: string;
-    status?: "queued" | "sent" | "failed" | "skipped";
+    status?: "queued" | "skipped";
   },
   db: RegistryDb = getRegistryDb(),
-): Promise<RecordReminderResult> {
+): Promise<QueueReminderResult> {
   if (!UUID_RE.test(input.vaccinationId) || !UUID_RE.test(input.personId)) {
     return { ok: false, reason: "invalid" };
   }
@@ -471,7 +557,7 @@ export async function recordVaccinationReminder(
   if (
     !["email", "sms", "whatsapp", "phone"].includes(input.channel) ||
     (input.status !== undefined &&
-      !["queued", "sent", "failed", "skipped"].includes(input.status))
+      !["queued", "skipped"].includes(input.status))
   ) {
     return { ok: false, reason: "invalid" };
   }
@@ -485,7 +571,6 @@ export async function recordVaccinationReminder(
   const effective = effectiveVaccinationDate(vax.dueOn, vax.validUntil);
   if (!effective) return { ok: false, reason: "invalid" };
 
-  const status = input.status ?? "sent";
   try {
     const inserted = await db
       .insert(communications)
@@ -493,7 +578,7 @@ export async function recordVaccinationReminder(
         personId: input.personId,
         channel: input.channel,
         kind: VACCINATION_REMINDER_KIND,
-        status,
+        status: input.status ?? "queued",
         idempotencyKey: vaccinationReminderKey(
           input.vaccinationId,
           effective,
@@ -501,7 +586,9 @@ export async function recordVaccinationReminder(
         ),
         relatedType: "vaccination",
         relatedId: input.vaccinationId,
-        sentAt: status === "sent" ? new Date() : null,
+        // No sent_at: registration is not delivery. #172 stamps it
+        // when a provider confirms the message actually went out.
+        sentAt: null,
       })
       .onConflictDoNothing({ target: communications.idempotencyKey })
       .returning();

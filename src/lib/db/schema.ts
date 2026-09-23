@@ -409,6 +409,15 @@ export const vetEvents = pgTable(
 // The effective "next relevant date" is derived as the earliest of
 // due_on/valid_until — never a stored status that could go stale.
 //
+// series_key is the stable identity of a vaccine SERIES: a normalized
+// form of vaccine_name (lowercase, non-alphanumerics stripped) computed
+// by Postgres itself so every writer — the service, a backfill script,
+// raw SQL — derives the same key. It exists so the due/reminder query
+// can evaluate only the latest dose per (animal, series): a newer
+// booster supersedes an older dose without deleting history. It is NOT
+// a clinical vaccine ontology — a misspelled name forms its own series
+// until the name is corrected, which re-derives the key automatically.
+//
 // No vet_visits/encounters table yet: vaccinations legitimately have no
 // visit (historical backfill, external clinic records). #174 can add a
 // nullable visit_id without migrating data.
@@ -420,6 +429,11 @@ export const vaccinations = pgTable(
       .notNull()
       .references(() => animals.id), // restrictive — medical history
     vaccineName: text("vaccine_name").notNull(),
+    seriesKey: text("series_key")
+      .notNull()
+      .generatedAlwaysAs(
+        sql`lower(regexp_replace("vaccine_name", '[^a-zA-Z0-9]+', '', 'g'))`,
+      ),
     administeredOn: date("administered_on", { mode: "string" }).notNull(),
     dueOn: date("due_on", { mode: "string" }),
     validUntil: date("valid_until", { mode: "string" }),
@@ -441,6 +455,8 @@ export const vaccinations = pgTable(
   (t) => [
     index("vaccinations_animal_idx").on(t.animalId),
     index("vaccinations_due_idx").on(t.dueOn),
+    // Latest-dose-per-series reads: DISTINCT ON (animal_id, series_key).
+    index("vaccinations_series_idx").on(t.animalId, t.seriesKey),
     check(
       "vaccinations_due_range_check",
       sql`${t.dueOn} IS NULL OR ${t.dueOn} >= ${t.administeredOn}`,

@@ -155,9 +155,9 @@ plain SQL.
 | `payments` | Provider-neutral ledger | integer cents + currency; kind/status CHECKs; no cascade deletes |
 | `microchip_records` | Chip assignments w/ history | partial `unique(chip_number) WHERE assigned_to IS NULL` — one active assignment |
 | `vet_events` | General/unstructured vet history (exam, treatment, surgery, note) | event-type CHECK; structured vaccinations live in `vaccinations` |
-| `vaccinations` | Structured vaccination history (#173) | restrictive FK to `animals`; `due_on`/`valid_until` ≥ `administered_on`; due-state derived, never stored |
+| `vaccinations` | Structured vaccination history (#173) | restrictive FK to `animals`; `due_on`/`valid_until` ≥ `administered_on`; `series_key` generated from `vaccine_name` — only the latest dose per (animal, series) drives the due/reminder projection; due-state derived, never stored |
 | `follow_ups` | Manual recheck queue (#175) | status CHECK; vaccination due-ness is derived — not materialized here |
-| `communications` | Reminder send log | `unique(idempotency_key)` — safe retries; `vax-reminder:<vax>:<date>:<touch>` keys (#173) |
+| `communications` | Reminder ledger + send log | `unique(idempotency_key)` — safe retries; `vax-reminder:<vax>:<date>:<touch>` keys (#173 writes only `queued`/`skipped`; #172 owns the `sent`/`failed` delivery transition + `sent_at`) |
 | `audit_events` | Append-only mutation history | entity type/id + before/after jsonb |
 
 **Where invariants live:** DB constraints — identity uniqueness, FK

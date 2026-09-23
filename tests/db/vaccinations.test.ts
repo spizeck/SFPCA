@@ -14,7 +14,7 @@ import {
   createVaccination,
   listDueVaccinations,
   listVaccinationsForAnimal,
-  recordVaccinationReminder,
+  queueVaccinationReminder,
   updateVaccination,
 } from "@/lib/registry/vaccinations";
 
@@ -339,8 +339,8 @@ describe("due/overdue query and reminder foundation", () => {
     expect(mine[1].vaccination.vaccineName).toBe("Rabies");
     expect(mine[1].state).toBe("due-soon");
 
-    // The current owner resolves with contact details for #172.
-    expect(mine[0].owner).toMatchObject({
+    // The owner valid at asOf resolves with contact details for #172.
+    expect(mine[0].currentOwner).toMatchObject({
       kind: "person",
       name: "Jane Owner",
       email: "jane@example.com",
@@ -378,10 +378,133 @@ describe("due/overdue query and reminder foundation", () => {
     const mine = due.filter((r) => r.animal.id === animal.id);
     expect(mine).toHaveLength(1);
     // History is intact; there is simply no current owner to notify.
-    expect(mine[0].owner).toBeNull();
+    expect(mine[0].currentOwner).toBeNull();
   });
 
-  test("recordVaccinationReminder is idempotent and logged in communications", async () => {
+  test("a newer booster supersedes the old dose in the due projection", async () => {
+    const asOf = "2026-09-23";
+    const animal = await seedAnimal("Booster");
+
+    // Dose A: administered 2025, was due 2026-06 — overdue at asOf.
+    const oldDose = await createVaccination(
+      {
+        animalId: animal.id,
+        vaccineName: "Rabies",
+        administeredOn: "2025-06-01",
+        dueOn: "2026-06-01",
+      },
+      "vet@test.dev",
+      db,
+    );
+    // Dose B: the booster that superseded it — due 2026-10-10.
+    const booster = await createVaccination(
+      {
+        animalId: animal.id,
+        vaccineName: "Rabies",
+        administeredOn: "2026-06-15",
+        dueOn: "2026-10-10",
+      },
+      "vet@test.dev",
+      db,
+    );
+    // An unrelated vaccine keeps its own independent due state.
+    const dhpp = await createVaccination(
+      {
+        animalId: animal.id,
+        vaccineName: "DHPP",
+        administeredOn: "2025-09-01",
+        dueOn: "2026-09-30",
+      },
+      "vet@test.dev",
+      db,
+    );
+    if (!oldDose.ok || !booster.ok || !dhpp.ok) {
+      throw new Error("setup failed");
+    }
+
+    // Medical history is untouched — all three doses remain visible,
+    // ordered by administeredOn (booster 2026-06, DHPP 2025-09, the
+    // old rabies dose 2025-06).
+    const history = await listVaccinationsForAnimal(animal.id, db);
+    expect(history.map((v) => v.id)).toEqual([
+      booster.vaccination.id,
+      dhpp.vaccination.id,
+      oldDose.vaccination.id,
+    ]);
+
+    const due = await listDueVaccinations({ asOf, withinDays: 30 }, db);
+    const mine = due.filter((r) => r.animal.id === animal.id);
+    // Two rows — one per series — never three doses.
+    expect(mine).toHaveLength(2);
+
+    // The expired dose A is gone from the projection; the booster
+    // controls the rabies series' next due date.
+    const rabies = mine.find(
+      (r) => r.vaccination.seriesKey === "rabies",
+    );
+    expect(rabies?.vaccination.id).toBe(booster.vaccination.id);
+    expect(rabies?.effectiveDate).toBe("2026-10-10");
+    expect(rabies?.state).toBe("due-soon");
+    expect(
+      mine.some((r) => r.vaccination.id === oldDose.vaccination.id),
+    ).toBe(false);
+
+    // DHPP is evaluated independently and is due-soon too.
+    const dhppRow = mine.find((r) => r.vaccination.seriesKey === "dhpp");
+    expect(dhppRow?.vaccination.id).toBe(dhpp.vaccination.id);
+    expect(dhppRow?.state).toBe("due-soon");
+  });
+
+  test("casing/punctuation variants of a name share one series", async () => {
+    const animal = await seedAnimal("SameSeries");
+    // "Rabies" then "RABIES " — same series_key, so the newer row is
+    // the series' current dose.
+    const first = await createVaccination(
+      {
+        animalId: animal.id,
+        vaccineName: "Rabies",
+        administeredOn: "2025-06-01",
+        dueOn: "2026-06-01",
+      },
+      "vet@test.dev",
+      db,
+    );
+    const second = await createVaccination(
+      {
+        animalId: animal.id,
+        vaccineName: "RABIES ",
+        administeredOn: "2026-06-10",
+        dueOn: "2027-06-10",
+      },
+      "vet@test.dev",
+      db,
+    );
+    if (!first.ok || !second.ok) throw new Error("setup failed");
+    expect(first.vaccination.seriesKey).toBe("rabies");
+    expect(second.vaccination.seriesKey).toBe("rabies");
+
+    const due = await listDueVaccinations(
+      { asOf: "2026-09-23", withinDays: 365 },
+      db,
+    );
+    const mine = due.filter((r) => r.animal.id === animal.id);
+    expect(mine).toHaveLength(1);
+    expect(mine[0].vaccination.id).toBe(second.vaccination.id);
+
+    // Normalization strips punctuation/spacing too: "Rabies 1-Year"
+    // and "rabies1year" are the same series.
+    const [row] = await db
+      .insert(schema.vaccinations)
+      .values({
+        animalId: animal.id,
+        vaccineName: "Rabies 1-Year",
+        administeredOn: "2026-07-01",
+      })
+      .returning();
+    expect(row.seriesKey).toBe("rabies1year");
+  });
+
+  test("queueVaccinationReminder registers a queued row, idempotently", async () => {
     const owner = (
       await db
         .insert(schema.persons)
@@ -408,10 +531,10 @@ describe("due/overdue query and reminder foundation", () => {
       channel: "email" as const,
       touch: "due-30d",
     };
-    const first = await recordVaccinationReminder(input, db);
+    const first = await queueVaccinationReminder(input, db);
     expect(first).toEqual({ ok: true, duplicate: false });
-    // A retry for the same due date + touch can never double-send.
-    const retry = await recordVaccinationReminder(input, db);
+    // A retry for the same due date + touch writes no second row.
+    const retry = await queueVaccinationReminder(input, db);
     expect(retry).toEqual({ ok: true, duplicate: true });
 
     const rows = await db
@@ -419,34 +542,55 @@ describe("due/overdue query and reminder foundation", () => {
       .from(schema.communications)
       .where(eq(schema.communications.relatedId, vaxId));
     expect(rows).toHaveLength(1);
+    // Registration is NOT delivery — nothing here may claim a send.
     expect(rows[0]).toMatchObject({
       personId: owner.id,
       channel: "email",
       kind: "vaccination-reminder",
-      status: "sent",
+      status: "queued",
       relatedType: "vaccination",
+      sentAt: null,
     });
     expect(rows[0].idempotencyKey).toContain(vaxId);
-    expect(rows[0].sentAt).not.toBeNull();
+
+    // A queued row does not count as reminded — only #172's delivery
+    // path can turn it 'sent'. Simulate that transition directly.
+    expect(
+      (
+        await listDueVaccinations(
+          { asOf: "2026-09-23", withinDays: 30 },
+          db,
+        )
+      ).find((r) => r.vaccination.id === vaxId)?.remindersSent,
+    ).toBe(0);
+    await db
+      .update(schema.communications)
+      .set({ status: "sent", sentAt: new Date() })
+      .where(eq(schema.communications.idempotencyKey, rows[0].idempotencyKey!));
 
     // A different touch (the 7-day notice) is a distinct reminder.
-    const secondTouch = await recordVaccinationReminder(
+    const secondTouch = await queueVaccinationReminder(
       { ...input, touch: "due-7d" },
       db,
     );
     expect(secondTouch).toEqual({ ok: true, duplicate: false });
+    const all = await db
+      .select()
+      .from(schema.communications)
+      .where(eq(schema.communications.relatedId, vaxId));
+    await db
+      .update(schema.communications)
+      .set({ status: "sent", sentAt: new Date() })
+      .where(eq(schema.communications.id, all[1].id));
 
-    // The sent log shows up in the due query so staff can see reminders
-    // already went out — both touches count.
-    const due = await listDueVaccinations(
-      { asOf: "2026-09-23", withinDays: 30 },
-      db,
-    );
-    const row = due.find((r) => r.vaccination.id === vaxId);
+    // The due query's sent count reflects genuine deliveries only.
+    const row = (
+      await listDueVaccinations({ asOf: "2026-09-23", withinDays: 30 }, db)
+    ).find((r) => r.vaccination.id === vaxId);
     expect(row?.remindersSent).toBe(2);
   });
 
-  test("reminder recording validates its inputs", async () => {
+  test("reminder queueing validates its inputs", async () => {
     const owner = (
       await db
         .insert(schema.persons)
@@ -467,7 +611,7 @@ describe("due/overdue query and reminder foundation", () => {
 
     // No due/expiry date → nothing to remind about.
     expect(
-      await recordVaccinationReminder(
+      await queueVaccinationReminder(
         {
           vaccinationId: created.vaccination.id,
           personId: owner.id,
@@ -480,7 +624,7 @@ describe("due/overdue query and reminder foundation", () => {
 
     // Unknown vaccination / unknown person / bad ids.
     expect(
-      await recordVaccinationReminder(
+      await queueVaccinationReminder(
         {
           vaccinationId: "00000000-0000-4000-8000-000000000000",
           personId: owner.id,
@@ -491,7 +635,7 @@ describe("due/overdue query and reminder foundation", () => {
       ),
     ).toEqual({ ok: false, reason: "not-found" });
     expect(
-      await recordVaccinationReminder(
+      await queueVaccinationReminder(
         {
           vaccinationId: created.vaccination.id,
           personId: "not-a-uuid",
@@ -501,5 +645,140 @@ describe("due/overdue query and reminder foundation", () => {
         db,
       ),
     ).toEqual({ ok: false, reason: "invalid" });
+    // A 'sent'/'failed' status is not accepted here — delivery state
+    // belongs to #172's send path.
+    expect(
+      await queueVaccinationReminder(
+        {
+          vaccinationId: created.vaccination.id,
+          personId: owner.id,
+          channel: "email",
+          touch: "due-30d",
+          status: "sent" as never,
+        },
+        db,
+      ),
+    ).toEqual({ ok: false, reason: "invalid" });
+  });
+});
+
+describe("ownership as-of resolution", () => {
+  async function seedDueVaccination() {
+    const animal = await seedAnimal("AsOfDog");
+    const created = await createVaccination(
+      {
+        animalId: animal.id,
+        vaccineName: "Rabies",
+        administeredOn: "2025-10-01",
+        dueOn: "2026-10-10",
+      },
+      "vet@test.dev",
+      db,
+    );
+    if (!created.ok) throw new Error("setup failed");
+    return animal;
+  }
+
+  async function seedPerson(name: string) {
+    const [person] = await db
+      .insert(schema.persons)
+      .values({ fullName: name, email: `${name}@example.com` })
+      .returning();
+    return person;
+  }
+
+  test("a future ownership is not yet current", async () => {
+    const animal = await seedDueVaccination();
+    const person = await seedPerson("future-owner");
+    await db.insert(schema.ownerships).values({
+      animalId: animal.id,
+      personId: person.id,
+      validFrom: "2027-01-01",
+    });
+
+    const due = await listDueVaccinations(
+      { asOf: "2026-09-23", withinDays: 30 },
+      db,
+    );
+    const mine = due.find((r) => r.animal.id === animal.id);
+    expect(mine?.currentOwner).toBeNull();
+    // But once the ownership begins, it is the owner.
+    const future = await listDueVaccinations(
+      { asOf: "2027-01-15", withinDays: 400 },
+      db,
+    );
+    const later = future.find((r) => r.animal.id === animal.id);
+    expect(later?.currentOwner).toMatchObject({
+      kind: "person",
+      name: "future-owner",
+    });
+  });
+
+  test("a historical asOf inside a now-closed ownership resolves that owner", async () => {
+    const animal = await seedDueVaccination();
+    const person = await seedPerson("past-owner");
+    await db.insert(schema.ownerships).values({
+      animalId: animal.id,
+      personId: person.id,
+      validFrom: "2024-01-01",
+      validTo: "2026-01-01",
+    });
+
+    // Evaluated while the ownership was open → owner resolves.
+    const then = await listDueVaccinations(
+      { asOf: "2025-06-01", withinDays: 600 },
+      db,
+    );
+    const row = then.find((r) => r.animal.id === animal.id);
+    expect(row?.currentOwner).toMatchObject({
+      kind: "person",
+      name: "past-owner",
+    });
+
+    // Evaluated after it closed → no owner (also covered above).
+    const now = await listDueVaccinations(
+      { asOf: "2026-09-23", withinDays: 30 },
+      db,
+    );
+    expect(
+      now.find((r) => r.animal.id === animal.id)?.currentOwner,
+    ).toBeNull();
+  });
+
+  test("overlapping valid ownerships yield one deterministic owner row", async () => {
+    const animal = await seedDueVaccination();
+    const person = await seedPerson("preferred-owner");
+    const [household] = await db
+      .insert(schema.households)
+      .values({ name: "Shared Household" })
+      .returning();
+    // Inconsistent data: two rows simultaneously valid at asOf.
+    await db.insert(schema.ownerships).values([
+      {
+        animalId: animal.id,
+        householdId: household.id,
+        validFrom: "2025-06-01",
+      },
+      {
+        animalId: animal.id,
+        personId: person.id,
+        validFrom: "2025-01-01",
+      },
+    ]);
+
+    const due = await listDueVaccinations(
+      { asOf: "2026-09-23", withinDays: 30 },
+      db,
+    );
+    // The vaccination appears exactly once — never duplicated per
+    // ownership row.
+    const mine = due.filter((r) => r.animal.id === animal.id);
+    expect(mine).toHaveLength(1);
+    // The deterministic pick prefers the person row (it carries the
+    // contact details a sender needs).
+    expect(mine[0].currentOwner).toMatchObject({
+      kind: "person",
+      name: "preferred-owner",
+    });
   });
 });
