@@ -1263,3 +1263,101 @@ delete protection). Acceptable resolutions include a Neon tier with
 better recoverability — the exact mechanism is deliberately not
 decided here. No independent backup system is built now; the
 re-evaluation trigger is the #183 cutover checklist.
+
+## 20. Firestore → Postgres import (#181)
+
+One-time operational import of the registry collections. Postgres is a
+verified shadow copy afterward — **Firestore remains authoritative**;
+no runtime path changes.
+
+### 20a. Scope
+
+| Source (Firestore) | Destination (Postgres) | Key |
+|---|---|---|
+| `animals` | `animals` | `legacy_id` = doc id |
+| `admins` | `admin_users` | `lower(email)` = doc id |
+| `animalRegistrations` | `registration_submissions` | `legacy_id` = doc id |
+
+CMS collections and Storage objects are never migrated. Owner contact
+data is preserved as a snapshot on the submission row — Person/household
+linkage is deliberately deferred to #178.
+
+Transform rules live in `scripts/lib/migrate-transform.ts`; every
+normalization produces a classified exception (kind/field/shape only —
+never values). Unrecognized lifecycle statuses import as private
+`pending` (fail-closed) and are always flagged.
+
+### 20b. Tooling
+
+- `npx tsx scripts/audit-firestore.ts --project=saba-sfpca` — read-only
+  structural inventory (counts, field names/types, enum distributions;
+  never field values).
+- `npx tsx scripts/migrate-firestore.ts --project=saba-sfpca` — dry run:
+  source counts + exceptions + destination connectivity check.
+- `npx tsx scripts/migrate-firestore.ts --project=saba-sfpca --execute` —
+  writes; additionally requires `MIGRATION_CONFIRM_PROJECT=saba-sfpca`.
+- `npx tsx scripts/reconcile-migration.ts --project=saba-sfpca` —
+  read-only source↔destination comparison; exit 1 on any mismatch.
+- `npx tsx scripts/neon-ops.ts …` — branch/snapshot/connection-string
+  management via NEON_API_KEY (project-scoped key in `.env.local`;
+  revoke when the migration program completes).
+
+### 20c. Rehearsal procedure (required before production)
+
+1. `neon-ops create-branch migrate-rehearsal-181` (off `main`).
+2. `neon-ops conn migrate-rehearsal-181` → writes
+   `DATABASE_URL_UNPOOLED` into `.env.local`.
+3. `npm run db:migrate` → schema onto the rehearsal branch.
+4. `migrate-firestore --project=saba-sfpca --execute` +
+   `MIGRATION_CONFIRM_PROJECT=saba-sfpca`.
+5. `reconcile-migration --project=saba-sfpca` → must pass.
+6. Re-run `--execute` → `reconcile` again → proves idempotency.
+7. `neon-ops delete-branch migrate-rehearsal-181` when done
+   (Free plan: 10-branch cap).
+
+### 20d. Production execution procedure
+
+1. Confirm Firestore is still authoritative (no code change claims
+   otherwise) and source project is `saba-sfpca`.
+2. `neon-ops snapshot` on `main`; `neon-ops snapshots` → verify it
+   exists and predates the run. **Required before EVERY `--execute`.**
+   Free allows 1 manual snapshot — delete the prior disposable one
+   before a later run.
+3. `neon-ops conn main --production` → verify the written host is the
+   `main` endpoint (`ep-soft-wind-awarztez…`).
+4. Dry-run → review counts/exceptions → `--execute` → reconcile.
+5. Reconcile must pass; if it fails materially: fix-forward importer
+   (fresh snapshot before re-run) or restore `main` to the snapshot —
+   Firestore is untouched either way.
+6. Remove `DATABASE_URL_UNPOOLED`/`MIGRATION_CONFIRM_PROJECT` from
+   `.env.local` when finished.
+
+### 20e. Drift
+
+Postgres becomes stale the moment production Firestore changes after
+the import. There is no sync system by design. **Before #182 cutover:
+re-run dry-run → fresh snapshot → `--execute` → reconcile.** The
+idempotent upsert makes the refresh a diff-apply, not a re-import.
+
+### 20f. PII discipline
+
+Tooling prints counts, doc ids, exception kinds/fields — never owner
+names, emails, phones, addresses, or receipt contents. No production
+exports are committed; fixtures in tests are synthetic only.
+
+### 20g. Execution record (2026-09-23)
+
+Rehearsal on isolated branch `migrate-rehearsal-181` (endpoint
+`ep-old-queen-aw7t0dqc`, distinct from production `ep-soft-wind-awarztez`):
+
+- `db:migrate` → schema applied (branch cloned `main`'s schema; replay no-op)
+- `--execute` → animals 3, admins 4 upserted; reconcile PASSED (7 docs, 0 diffs)
+- **Second `--execute` exposed an idempotency defect:** the upsert set
+  `updated_at = now()` on conflict, diverging from the source `updatedAt`.
+  Fixed to `excluded.updated_at` (copy source value); re-run then
+  reconciled to 0 mismatches. Branch deleted after rehearsal.
+
+Production `main` (snapshot `snap-morning-silence-aw9w4k2p`, verified
+pre-run): dry-run 7 docs / 0 exceptions → `--execute` → animals 3,
+admins 4 upserted → reconcile PASSED (7 docs, 0 diffs). Destination now
+holds a verified shadow copy; **Firestore remains authoritative.**
