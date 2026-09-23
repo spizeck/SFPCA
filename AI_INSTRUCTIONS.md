@@ -300,7 +300,7 @@ is for erroneous/spam records only.
 - `npm run test:db` — Postgres registry schema/migration tests via
   PGlite (in-process real Postgres; no Docker or credentials needed)
 - `npm run db:generate` / `npm run db:migrate` — drizzle schema → SQL /
-  apply to `DIRECT_DATABASE_URL`
+  apply to `DATABASE_URL_UNPOOLED`
   (`tests/*.test.mjs`, needs Java)
 - `npm run test:e2e` — Playwright Chromium smoke suite (`tests/e2e/`),
   orchestrates emulators + dev server + fixtures itself (needs Java)
