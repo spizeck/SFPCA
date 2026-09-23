@@ -10,7 +10,7 @@ const { mockGetAvailableAnimals } = vi.hoisted(() => ({
   mockGetAvailableAnimals: vi.fn(),
 }));
 
-vi.mock("@/lib/animals", () => ({
+vi.mock("@/lib/registry/public-animals", () => ({
   getAvailableAnimals: mockGetAvailableAnimals,
 }));
 

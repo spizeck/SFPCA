@@ -1,10 +1,11 @@
-// Registry data-access seam for public animal reads (#165 Phase E / #182).
+// Registry data-access seam for public animal reads (#165 Phase E / #182,
+// made Postgres-only in #183).
 //
-// Postgres-side counterpart to src/lib/animals.ts (Firestore). During the
-// #182 transitional phase this module owns the source switch: pages import
-// getAvailableAnimals/getPublicAnimal from HERE, and the seam serves them
-// from Postgres or Firestore according to PUBLIC_ANIMALS_SOURCE. In #183
-// the Firestore branch is removed and this becomes Postgres-only.
+// Postgres is the single read authority for public animal pages — the
+// transitional PUBLIC_ANIMALS_SOURCE switch and its Firestore branch were
+// removed once admin writes moved to Postgres (#183). There is no
+// alternate read source and no fallback: a Postgres failure fails closed
+// to empty/not-found and is logged as an incident.
 //
 // Boundary rules for anything added under src/lib/registry/:
 // - server-side only (src/lib/db/client.ts imports "server-only")
@@ -141,39 +142,13 @@ export function toAnimal(dto: PublicRegistryAnimal): Animal {
   };
 }
 
-// --- #182 cutover switch ---------------------------------------------------
+// --- App-facing read surface ----------------------------------------------
 //
-// PUBLIC_ANIMALS_SOURCE selects the read authority for public animal pages:
-//   "postgres"  — reads serve from the Postgres shadow registry
-//   "firestore" — reads serve from Firestore (pre-#182 behavior)
-// Unset defaults to "postgres" on Vercel Preview deployments (each preview
-// gets its own Neon branch, so exercising the new path there is isolated)
-// and "firestore" everywhere else, including production until the operator
-// flips the variable. This flag is temporary — #183 removes the Firestore
-// branch once Postgres becomes the write authority too.
-export type PublicAnimalsSource = "firestore" | "postgres";
-
-export function publicAnimalsSource(
-  env: Record<string, string | undefined> = process.env,
-): PublicAnimalsSource {
-  const flag = env.PUBLIC_ANIMALS_SOURCE;
-  if (flag === "postgres" || flag === "firestore") return flag;
-  return env.VERCEL_ENV === "preview" ? "postgres" : "firestore";
-}
-
-// Failure contract for the Postgres path: log the failure (counts/surface
-// only — no PII, no credentials) and fail closed to empty/not-found, the
-// same degradation the Firestore path already uses. Deliberately NO silent
-// fallback to Firestore: a broken Postgres path during cutover must be
-// visible as an incident, not masked by a second authority.
-// The Firestore implementation is loaded lazily: importing ../animals
-// eagerly initializes the Firebase client SDK (getAuth throws without
-// Firebase env), which would make the Postgres-only path — and DB-only
-// tests — depend on Firebase configuration they never use.
+// Failure contract: log the failure (counts/surface only — no PII, no
+// credentials) and fail closed to empty/not-found. There is no alternate
+// read source: a broken Postgres path must be visible as an incident, not
+// masked by a second authority.
 export async function getAvailableAnimals(): Promise<Animal[]> {
-  if (publicAnimalsSource() === "firestore") {
-    return (await import("../animals")).getAvailableAnimals();
-  }
   try {
     const rows = await listPublicAnimals(getRegistryDb());
     return rows.map(toAnimal);
@@ -184,9 +159,6 @@ export async function getAvailableAnimals(): Promise<Animal[]> {
 }
 
 export async function getPublicAnimal(id: string): Promise<Animal | null> {
-  if (publicAnimalsSource() === "firestore") {
-    return (await import("../animals")).getPublicAnimal(id);
-  }
   try {
     const dto = await getPublicAnimalById(getRegistryDb(), id);
     return dto ? toAnimal(dto) : null;

@@ -1,35 +1,27 @@
-// Component tests for /admin/registrations (#91): per-row pending
-// guards on status changes and receipt lookups, a retryable load-error
-// state, and feedback that never includes private owner data.
+// Component tests for /admin/registrations (#91, Postgres cutover in
+// #183): per-row pending guards on status changes and receipt lookups,
+// a retryable load-error state, and feedback that never includes
+// private owner data. Server actions are mocked at the module boundary.
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const {
-  mockGetDocs,
-  mockUpdateDoc,
-  mockGetDownloadURL,
+  mockListRegistrations,
+  mockSetStatus,
+  mockGetReceiptUrl,
   mockToast,
 } = vi.hoisted(() => ({
-  mockGetDocs: vi.fn(),
-  mockUpdateDoc: vi.fn(),
-  mockGetDownloadURL: vi.fn(),
+  mockListRegistrations: vi.fn(),
+  mockSetStatus: vi.fn(),
+  mockGetReceiptUrl: vi.fn(),
   mockToast: vi.fn(),
 }));
 
-vi.mock("firebase/firestore", () => ({
-  collection: vi.fn((_db: unknown, name: string) => ({ name })),
-  getDocs: mockGetDocs,
-  doc: vi.fn((_db: unknown, _col: string, id: string) => ({ id })),
-  updateDoc: mockUpdateDoc,
-  serverTimestamp: () => "SERVER_TS",
+vi.mock("@/app/admin/registrations/actions", () => ({
+  listRegistrationsAction: mockListRegistrations,
+  setRegistrationStatusAction: mockSetStatus,
+  getReceiptUrlAction: mockGetReceiptUrl,
 }));
-
-vi.mock("firebase/storage", () => ({
-  ref: vi.fn((_storage: unknown, path: string) => ({ path })),
-  getDownloadURL: mockGetDownloadURL,
-}));
-
-vi.mock("@/lib/firebase", () => ({ db: {}, storage: {} }));
 
 vi.mock("@/hooks/use-toast", () => ({
   useToast: () => ({ toast: mockToast }),
@@ -38,40 +30,36 @@ vi.mock("@/hooks/use-toast", () => ({
 import RegistrationsPage from "@/app/admin/registrations/page";
 
 const REG_PENDING = {
-  id: "r1",
-  data: () => ({
-    ownerInfo: {
-      name: "Jane Doe",
-      address: "Windwardside",
-      phone: "+599 416 0000",
-      email: "jane@example.com",
-    },
-    animals: [
-      { name: "Rex", type: "Dog", sex: "Male", isFixed: "yes" },
-    ],
-    totalFee: 10,
-    status: "pending",
-    paymentReceipt: "receipts/r1",
-    createdAt: "2025-01-01T00:00:00.000Z",
-    updatedAt: "2025-01-01T00:00:00.000Z",
-  }),
+  id: "11111111-1111-4111-8111-111111111111",
+  ownerInfo: {
+    name: "Jane Doe",
+    address: "Windwardside",
+    phone: "+599 416 0000",
+    email: "jane@example.com",
+  },
+  animals: [{ name: "Rex", type: "Dog", sex: "male", isFixed: "yes" }],
+  totalFee: 10,
+  status: "pending",
+  paymentReceipt: "receipts/11111111-1111-4111-8111-111111111111",
+  createdAt: "2025-01-01T00:00:00.000Z",
+  updatedAt: "2025-01-01T00:00:00.000Z",
 };
-
-// The page iterates the snapshot with forEach — mirror that shape.
-function snapshot(docs: { id: string; data: () => Record<string, unknown> }[]) {
-  return { docs, forEach: (cb: (d: (typeof docs)[number]) => void) => docs.forEach(cb) };
-}
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockGetDocs.mockResolvedValue(snapshot([]));
+  mockListRegistrations.mockResolvedValue([]);
+  mockSetStatus.mockResolvedValue({ ok: true });
+  mockGetReceiptUrl.mockResolvedValue({
+    ok: true,
+    url: "https://example.com/signed",
+  });
 });
 
 describe("admin registrations", () => {
   test("load failure shows a retryable error, not an empty list", async () => {
-    mockGetDocs
+    mockListRegistrations
       .mockRejectedValueOnce(new Error("deadline-exceeded"))
-      .mockResolvedValueOnce(snapshot([REG_PENDING]));
+      .mockResolvedValueOnce([REG_PENDING]);
 
     render(<RegistrationsPage />);
 
@@ -92,10 +80,10 @@ describe("admin registrations", () => {
 
   test("double-clicking approve fires a single status write", async () => {
     let resolveUpdate: () => void = () => {};
-    mockUpdateDoc.mockImplementation(
-      () => new Promise((r) => { resolveUpdate = () => r(undefined); }),
+    mockSetStatus.mockImplementation(
+      () => new Promise((r) => { resolveUpdate = () => r({ ok: true }); }),
     );
-    mockGetDocs.mockResolvedValue(snapshot([REG_PENDING]));
+    mockListRegistrations.mockResolvedValue([REG_PENDING]);
     render(<RegistrationsPage />);
     await waitFor(() => screen.getByText("Jane Doe"));
 
@@ -105,7 +93,8 @@ describe("admin registrations", () => {
     fireEvent.click(approve);
     fireEvent.click(approve);
     fireEvent.click(approve);
-    expect(mockUpdateDoc).toHaveBeenCalledTimes(1);
+    expect(mockSetStatus).toHaveBeenCalledTimes(1);
+    expect(mockSetStatus).toHaveBeenCalledWith(REG_PENDING.id, "approved");
 
     // While the write is in flight the other row actions are disabled.
     await waitFor(() =>
@@ -129,8 +118,8 @@ describe("admin registrations", () => {
   });
 
   test("failed status change reports a retryable error toast", async () => {
-    mockUpdateDoc.mockRejectedValue(new Error("unavailable"));
-    mockGetDocs.mockResolvedValue(snapshot([REG_PENDING]));
+    mockSetStatus.mockResolvedValue({ ok: false });
+    mockListRegistrations.mockResolvedValue([REG_PENDING]);
     render(<RegistrationsPage />);
     await waitFor(() => screen.getByText("Jane Doe"));
 
@@ -152,11 +141,10 @@ describe("admin registrations", () => {
   });
 
   test("receipt lookup is guarded against double clicks", async () => {
-    mockGetDownloadURL.mockResolvedValue("https://example.com/receipt.png");
     const openSpy = vi
       .spyOn(window, "open")
       .mockImplementation(() => null);
-    mockGetDocs.mockResolvedValue(snapshot([REG_PENDING]));
+    mockListRegistrations.mockResolvedValue([REG_PENDING]);
     render(<RegistrationsPage />);
     await waitFor(() => screen.getByText("Jane Doe"));
 
@@ -166,7 +154,10 @@ describe("admin registrations", () => {
     fireEvent.click(receiptButton);
     fireEvent.click(receiptButton);
     await waitFor(() =>
-      expect(mockGetDownloadURL).toHaveBeenCalledTimes(1),
+      expect(mockGetReceiptUrl).toHaveBeenCalledTimes(1),
+    );
+    expect(mockGetReceiptUrl).toHaveBeenCalledWith(
+      REG_PENDING.paymentReceipt,
     );
     openSpy.mockRestore();
   });

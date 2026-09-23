@@ -21,12 +21,12 @@ Vercel Git integration ──► Next.js build ──► production deployment
   ▲                                            (saba-sfpca domain)
   │ deploy hook (VERCEL_TOKEN / VERCEL_PROJECT_ID)
   │
-Firestore content write ──► onFirestoreChange ──► deploy hook POST
-(scheduled every 24 h)  ──► sweepOrphanedReceipts ──► Storage cleanup
+Firestore CMS write ──► onFirestoreChange ──► deploy hook POST
 (authenticated HTTPS)   ──► triggerRebuild ──► same deploy hook
+Vercel cron (daily)     ──► /api/cron/sweep-receipts ──► Storage cleanup
 
 Firebase deploy (manual, CLI):
-  functions/  ──► Cloud Functions (+ Cloud Scheduler for the sweep)
+  functions/  ──► Cloud Functions (rebuild triggers only)
   firestore.rules / firestore.indexes.json ──► Firestore
   storage.rules ──► Cloud Storage
 ```
@@ -45,7 +45,7 @@ everything.
 | Next.js app | repo root (`src/`) | Vercel | automatic on merge to `main` [console: confirm production branch] | Vercel → Deployments | Vercel → Logs (Runtime) |
 | `onFirestoreChange` | `functions/index.js` | Cloud Functions v2 | manual `firebase deploy` | `firebase deploy` output / Firebase console → Functions | Cloud Logging, `subsystem:"rebuild"` |
 | `triggerRebuild` | `functions/index.js` | Cloud Functions v2 | manual `firebase deploy` | same | Cloud Logging |
-| `sweepOrphanedReceipts` | `functions/index.js`, `functions/lib/sweep.js` | Cloud Functions + Cloud Scheduler | manual `firebase deploy` (schedule is part of the function definition) | Firebase console → Functions / Cloud Scheduler | Cloud Logging, `subsystem:"receipt-cleanup"` |
+| Receipt sweep | `src/app/api/cron/sweep-receipts/route.ts`, `src/lib/registry/receipt-sweep.ts` | Vercel cron (`vercel.json`, daily 06:00 UTC) | automatic with Vercel deploy | Vercel → Deployments → Cron / Functions logs | Vercel → Logs, `subsystem:"receipt-cleanup"`; partial failures return 500 |
 | Firestore rules | `firestore.rules` | Firestore | manual `firebase deploy --only firestore:rules` | Firebase console → Firestore → Rules | denied requests surface as `permission-denied` in app logs |
 | Storage rules | `storage.rules` | Cloud Storage | manual `firebase deploy --only storage` | Firebase console → Storage → Rules | `storage/unauthorized` in app logs |
 | Firestore indexes | `firestore.indexes.json` | Firestore | manual (currently none — see §7) | Firebase console → Firestore → Indexes | query failures in app logs |
@@ -79,7 +79,10 @@ files is not used by production code.
 | `FIREBASE_ADMIN_PROJECT_ID` | Admin SDK (session route, admin auth) | **yes** |
 | `FIREBASE_ADMIN_CLIENT_EMAIL` | Admin SDK service account | **yes** |
 | `FIREBASE_ADMIN_PRIVATE_KEY` | Admin SDK service account | **yes** |
-| `ADMIN_EMAILS` | Bootstrap admin allowlist (comma-separated) | yes-ish — emails are personal data |
+| `ADMIN_EMAILS` | Bootstrap/emergency admin allowlist — NOT the authorization authority (Postgres `admin_users` is; see §21) | yes-ish — emails are personal data |
+| `DATABASE_URL` | Neon Postgres pooled endpoint — **required**: registry reads/writes + admin authz | **yes** (Vercel–Neon integration) |
+| `DATABASE_URL_UNPOOLED` | Neon unpooled endpoint for migrations/preview self-migrate | **yes** (Vercel–Neon integration) |
+| `CRON_SECRET` | Bearer guard for `/api/cron/sweep-receipts` | **yes** — random string, set in Production AND Preview |
 | `NEXT_PUBLIC_GTM_ID` | Google Tag Manager container; injected only after analytics consent (§16); absent ⇒ no Google traffic | no |
 | `NEXT_PUBLIC_SITE_URL` | Canonical origin for sitemap/OG/canonical | no |
 | `SITE_MAINTENANCE_MODE` | `"true"` gates all public routes (§9) | no, but server-only — never `NEXT_PUBLIC_*` |
@@ -194,7 +197,7 @@ npm test                        # functions unit tests
 cd ..
 ```
 
-**Deploy everything (all three functions + the sweep schedule):**
+**Deploy everything (both functions):**
 
 ```bash
 firebase deploy --only functions
@@ -209,7 +212,6 @@ hotfix that touches a single function):
 ```bash
 firebase deploy --only functions:triggerRebuild
 firebase deploy --only functions:onFirestoreChange
-firebase deploy --only functions:sweepOrphanedReceipts
 ```
 
 **Verify:**
@@ -220,9 +222,10 @@ firebase functions:log --only onFirestoreChange # one function
 ```
 
 Firebase console → Functions shows deployed revisions, trigger type,
-and error rate. For `sweepOrphanedReceipts`, also confirm the job exists
-in Google Cloud console → Cloud Scheduler **[console]** (created by the
-deploy; `every 24 hours`).
+and error rate. The old `sweepOrphanedReceipts` Cloud Function/Scheduler
+job was removed in #183 — if a stale deployment still exists in the
+console, delete the function and its Cloud Scheduler job **[console]**;
+the replacement is the Vercel cron route (§2).
 
 `functions/.env` is uploaded as the functions' environment during
 deploy. If you deploy a function that needs `VERCEL_TOKEN`,
@@ -283,9 +286,9 @@ while it is `"true"`. Verified behavior (`src/lib/maintenance.ts`,
 - **SEO while gated:** `robots.txt` disallows everything and the sitemap
   is empty; both revert automatically when the flag lifts.
 - **Scope:** this gates HTTP requests to the Next.js app only. It does
-  **not** change Firestore/Storage rules — public form creates in
-  `animalRegistrations` are still accepted by the rules layer, and
-  Firebase Functions keep running normally.
+  **not** change Firestore/Storage rules — public receipt uploads to
+  `receipts/` are still accepted by the rules layer, and Firebase
+  Functions keep running normally.
 
 **Enable before risky work:**
 
@@ -312,7 +315,8 @@ data in production.
 4. Maintenance mode is in its intended state (§9).
 5. Vercel → Logs (Runtime): no error burst since the deploy.
 6. Firebase console → Functions / Cloud Logging: no unexpected failures
-   on `onFirestoreChange` / `sweepOrphanedReceipts` since the deploy.
+   on `onFirestoreChange` since the deploy; Vercel → Logs: no
+   `receipt-cleanup` errors on the cron route.
 6a. Once Sentry is configured (§15): Sentry → Issues filtered to the new
    release — no new unhandled exceptions attributable to the deploy.
 7. If the release changed content plumbing: make one real admin content
@@ -434,7 +438,7 @@ Admin can't load
 
 Function broken / not running
   → Cloud Logging (filter resource.type="cloud_function")
-  → which function? onFirestoreChange | triggerRebuild | sweepOrphanedReceipts
+  → which function? onFirestoreChange | triggerRebuild
   → fix or revert functions/ → firebase deploy --only functions[:name]
 
 Authorization regression (rules)
@@ -458,23 +462,27 @@ Manual rebuild
     500 = upstream failure, see vercel-hook error log
 
 Orphan-receipt sweep failing
-  → Cloud Logging subsystem:"receipt-cleanup": a failed execution or
+  → Vercel → Logs, subsystem:"receipt-cleanup": a 500 execution or
     outcome:"partial-failure" summary means orphans remain; the next
     daily run retries them (idempotent). Investigate the errorCode on
     per-object warn entries. Registration IDs/receipt names are
     deliberately never logged — inspect Storage directly if needed.
+  → 401s mean CRON_SECRET is unset or mismatched — the route fails
+    closed; check the Vercel env var for that environment.
 ```
 
 ## 14. Automatic content rebuilds (post-#94)
 
-A write to a **content collection** — `homepage`, `siteSettings`,
-`animals`, `faq`, `vetServices`, `animalAdoptions`, `animalRegistration`
+A write to a **CMS collection** — `homepage`, `siteSettings`, `faq`,
+`vetServices`, `animalAdoptions`, `animalRegistration`
 (`REBUILD_COLLECTIONS` in `functions/index.js`) — triggers
 `onFirestoreChange`, which POSTs the configured Vercel deploy hook, and
 Vercel starts a new deployment. Writes with no actual data change are
-skipped. Writes to `animalRegistrations` (private submissions) and
-`admins` trigger **nothing** — by design, and so their document paths
-never enter the logs.
+skipped. Registry writes go to Postgres, not Firestore — animal
+mutations revalidate the homepage via `revalidatePath` in the server
+actions instead (the listing/detail pages are `force-dynamic`), and
+every other Firestore write triggers **nothing** — by design, and so
+non-CMS document paths never enter the logs.
 
 A successful Firestore write does **not** imply a successful rebuild —
 the write commits before the hook runs. If the hook fails
@@ -886,16 +894,14 @@ PITR and backups protect **Firestore documents only**:
 | Data | Covered by PITR/backups |
 |---|---|
 | `homepage/main`, `siteSettings/global`, `animalAdoptions/main`, `animalRegistration/main`, `vetServices/main`, `faq/*` — site content | yes |
-| `animals/*` — animal records | yes |
-| `animalRegistrations/*` — owner PII + receipt references | yes |
-| `admins/*` — admin allowlist | yes |
+| `animals`, `animalRegistrations`, `admins` — **retired** pre-launch leftovers (authoritative data is Postgres — §19) | yes (inert) |
 | `receipts/*` in Storage — payment receipt images/PDFs | **no** |
 | `team-photos/*` in Storage — public images | **no** |
 
-A restored `animalRegistrations` document may reference a `receipts/`
-object that no longer exists (and vice versa — `sweepOrphanedReceipts`
-deletes Storage objects whose registration document is gone, so an old
-backup's registrations can point at swept receipts). Storage recovery
+A restored `registration_submissions` row may reference a `receipts/`
+object that no longer exists (and vice versa — the cron sweeper deletes
+Storage objects whose submission row is gone, so an old Postgres
+snapshot's submissions can point at swept receipts). Storage recovery
 is covered by the bucket's native soft-delete — see §18 (audited state,
 window, restore procedure, and the sweeper ordering warning).
 
@@ -1011,13 +1017,13 @@ covering a scenario soft delete misses at this scale.
 
 ### 18d. Restore procedure
 
-> Receipt object names are registration document IDs — treat them as
+> Receipt object names are registration submission IDs — treat them as
 > sensitive. Query a specific object path; do **not** dump whole-prefix
 > listings into terminals, tickets, or logs. Never download a receipt
 > just to check it exists — validate via metadata.
 
-1. **Identify the object.** From the `animalRegistrations` document,
-   the `paymentReceipt` field holds the path `receipts/<doc id>`.
+1. **Identify the object.** From the Postgres `registration_submissions`
+   row, `payment_receipt_path` holds `receipts/<submission uuid>`.
    For team photos, the member record stores the `team-photos/...`
    URL.
 2. **Confirm it is soft-deleted** (metadata only):
@@ -1051,35 +1057,33 @@ covering a scenario soft delete misses at this scale.
    Operationally, re-collect the receipt from the registrant; there is
    no deeper copy to reach for.
 
-### 18e. Orphan-sweeper interaction (`sweepOrphanedReceipts`)
+### 18e. Orphan-sweeper interaction (`/api/cron/sweep-receipts`)
 
-The sweeper (functions, every 24 h) deletes `receipts/<id>` objects
-whose `animalRegistrations/<id>` document does not exist and which are
+The sweeper (Vercel cron, daily) deletes `receipts/<uuid>` objects whose
+Postgres `registration_submissions` row does not exist and which are
 older than one hour. Two properties matter for recovery:
 
 - **Soft-deleted receipts are invisible to the sweeper** — its listing
   sees live objects only. A swept receipt stays recoverable for the
   whole soft-delete window.
-- **Firestore restore ordering hazard:** while a Firestore restore is
-  in progress, a receipt can look orphaned if its registration document
-  is absent from `(default)`. With delete protection now on,
-  `(default)` cannot be removed — restores create *new* databases — so
-  `(default)` stays populated. Still, as cheap insurance during any
-  §17d restore that leaves registrations temporarily missing: **pause
-  the sweeper's Cloud Scheduler job first** (Google Cloud console →
-  Cloud Scheduler → `firebase-schedule-sweepOrphanedReceipts-*` →
-  Pause), and resume it after recovery completes.
+- **Postgres restore ordering hazard:** while a Neon branch restore or
+  migration replay is in progress, a receipt can look orphaned if its
+  submission row is temporarily missing. As cheap insurance during any
+  §19/§20 restore or re-import that leaves submissions temporarily
+  absent: **pause the cron first** (Vercel → Settings → Cron Jobs →
+  disable, or temporarily remove the `vercel.json` entry and redeploy),
+  and resume it after the data is verified complete.
 
-**Combined incident ordering** (registration doc + receipt both gone):
+**Combined incident ordering** (submission row + receipt both gone):
 
-1. Pause the sweeper job (above).
-2. Recover the Firestore document first per §17d — the document's
-   `paymentReceipt` field tells you the exact object name.
+1. Pause the sweeper cron (above).
+2. Recover the Postgres row first (§19/§20 — Neon instant restore or
+   snapshot) — `payment_receipt_path` tells you the exact object name.
 3. Restore the Storage object per §18d, then resume the sweeper.
 4. Validate the pair in the admin UI before reopening the site.
 
-If the document is restored but its receipt is beyond the soft-delete
-window, the registration record remains valid — only the attachment is
+If the row is restored but its receipt is beyond the soft-delete
+window, the submission remains valid — only the attachment is
 unrecoverable (re-collect from the registrant).
 
 ### 18f. Privacy & retention boundary
@@ -1362,59 +1366,36 @@ pre-run): dry-run 7 docs / 0 exceptions → `--execute` → animals 3,
 admins 4 upserted → reconcile PASSED (7 docs, 0 diffs). Destination now
 holds a verified shadow copy; **Firestore remains authoritative.**
 
-## 21. Public animal read cutover (#182)
+## 21. Registry cutover complete (#183)
 
-The public animal read path has two sources behind
-`PUBLIC_ANIMALS_SOURCE` (server-side env, `src/lib/registry/public-animals.ts`):
+Postgres is the single operational authority for animals,
+`registration_submissions`, and `admin_users`. The `PUBLIC_ANIMALS_SOURCE`
+flag and all Firestore operational paths were removed — there is no
+runtime switch and no Firestore fallback.
 
-| Value | Behavior |
-|---|---|
-| unset | `postgres` on Vercel Preview, `firestore` everywhere else |
-| `firestore` | pre-#182 behavior; Firestore client SDK reads |
-| `postgres` | reads from Neon via `DATABASE_URL` (pooled) |
+**Final authority:** public + admin animal reads/writes, registration
+intake/review, and admin authorization → Postgres (`src/lib/registry/*`
+via server actions). CMS → Firestore. Sessions → Firebase Auth (with an
+`admin` custom claim stamped by the session route so rules keep
+authorizing client-SDK CMS/Storage writes). Receipts/photos → Firebase
+Storage (paths in Postgres). Firestore `animals`, `animalRegistrations`,
+`admins` are deny-all for every principal — retired, not deleted.
 
-**Authority after activation:** Postgres serves anonymous public animal
-reads (homepage preview, `/animal-adoptions`, `/animal-adoptions/[id]`
-incl. metadata). Everything else — admin reads, all writes,
-registrations, `admins/` authorization, CMS, Storage, Auth — is
-unchanged Firestore.
+**Schema rollout:** production `main` needs
+`drizzle/0001_outgoing_lady_mastermind.sql` (`registration_submissions.
+animals jsonb`) before the cutover deploy serves traffic — apply via
+`npm run db:migrate` with `DATABASE_URL_UNPOOLED` (§19b). Preview
+branches self-migrate during build.
 
-### 21a. Activation (operator steps, in order)
+**Admin provisioning:** the first post-cutover admin signs in with an
+`ADMIN_EMAILS`-listed verified account; the session route provisions
+their `admin_users` row automatically. Thereafter `admin_users` is the
+authority — add/remove staff with SQL (`INSERT INTO admin_users (email,
+role) VALUES (...)` / `DELETE`), not env changes. Removing a row takes
+effect at the next session verification; their Firebase custom claim is
+cleared on their next session POST.
 
-1. Confirm Firestore is still the write authority (no code change says
-   otherwise).
-2. Drift refresh (§20): dry-run → **fresh manual `main` snapshot →
-   verify it exists** → `--execute` with `MIGRATION_CONFIRM_PROJECT` →
-   reconcile → require 0 mismatches.
-3. Set `PUBLIC_ANIMALS_SOURCE=postgres` on the Vercel **Production**
-   environment and redeploy.
-4. Smoke: `/`, `/animal-adoptions`, one detail page via its legacy URL.
-   Expect the imported animals; check Vercel runtime logs for
-   `animals/fetch-registry*` errors.
-
-### 21b. Freshness during the transition
-
-Writes stay in Firestore and nothing syncs Postgres automatically. An
-admin animal mutation does NOT propagate to the public site until the
-§20 refresh is re-run (snapshot → execute → reconcile). The
-`onFirestoreChange` rebuild trigger still fires on animal writes and
-rebuilds the homepage — but it re-reads *Postgres*, so without a refresh
-the rebuilt page shows the last imported state. Operationally: run the
-refresh after each animal mutation, or keep the window to #183 short.
-If that is unacceptable, do not activate — leave the flag unset.
-
-### 21c. Rollback
-
-`PUBLIC_ANIMALS_SOURCE=firestore` (or delete the var) + redeploy.
-Firestore data was never modified — rollback restores exact prior
-behavior. A Neon-side bad state can additionally be restored to the
-pre-refresh snapshot.
-
-### 21d. #183 removes
-
-- the `PUBLIC_ANIMALS_SOURCE` flag and the Firestore branch of
-  `src/lib/registry/public-animals.ts` (seam becomes Postgres-only)
-- `src/lib/animals.ts` once admin/write paths move
-- the `animals` entry in the function's `REBUILD_COLLECTIONS` (writes
-  will no longer hit Firestore; rebuilds become Postgres-driven or the
-  pages become dynamic)
+**Operational rollback:** code rollback restores the Firestore rules +
+client paths, but post-cutover writes only exist in Postgres — a
+rollback needs the data direction decided explicitly (§11). The right
+response to a Postgres incident is fixing Postgres, not flipping back.

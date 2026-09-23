@@ -10,64 +10,15 @@ service cloud.firestore {
           && request.auth.token.email_verified == true;
     }
 
-    // Canonical staff identity: a verified user whose email has a document
-    // in the admins collection (managed via console/Admin SDK only).
+    // Canonical staff identity for rules-evaluated client writes: a
+    // verified user carrying the admin custom claim. The claim is set by
+    // the session route (/api/auth/session) after Postgres admin_users
+    // authorizes the login — Postgres is the authority, the claim is its
+    // rules-visible projection. The retired admins/ collection is never
+    // consulted here.
     function isAdmin() {
       return isVerifiedUser()
-          && exists(/databases/$(database)/documents/admins/$(request.auth.token.email));
-    }
-
-    // Shape check for public animal-registration submissions. Mirrors the
-    // constraints in src/lib/animal-registration.ts — keep the two in
-    // agreement. The allowlisted schema stops anonymous submitters from
-    // injecting privileged or unexpected fields; string caps bound stored
-    // data size; the initial status is forced to "pending" so a submitter
-    // can never self-approve. Individual entries inside the animals list
-    // cannot be iterated in rules — the client constrains them (required
-    // inputs, enum radios, maxLength) and staff verify them on review.
-    //
-    // paymentReceipt must name the storage object bound to THIS document
-    // ("receipts/<doc id>"): a submission can never point at an existing
-    // receipt belonging to a different registration.
-    function isValidRegistration(registrationId) {
-      return request.resource.data.keys().hasOnly(
-              ["ownerInfo", "animals", "paymentReceipt", "totalFee",
-               "status", "createdAt", "updatedAt"])
-          && request.resource.data.status == "pending"
-          && request.resource.data.ownerInfo is map
-          && request.resource.data.ownerInfo.keys().hasOnly(
-              ["name", "address", "phone", "email"])
-          && request.resource.data.ownerInfo.name is string
-          && request.resource.data.ownerInfo.name.size() > 0
-          && request.resource.data.ownerInfo.name.size() <= 120
-          && request.resource.data.ownerInfo.address is string
-          && request.resource.data.ownerInfo.address.size() > 0
-          && request.resource.data.ownerInfo.address.size() <= 500
-          && request.resource.data.ownerInfo.phone is string
-          && request.resource.data.ownerInfo.phone.size() > 0
-          && request.resource.data.ownerInfo.phone.size() <= 40
-          && request.resource.data.ownerInfo.email is string
-          && request.resource.data.ownerInfo.email.size() > 0
-          && request.resource.data.ownerInfo.email.size() <= 320
-          && request.resource.data.animals is list
-          && request.resource.data.animals.size() > 0
-          && request.resource.data.animals.size() <= 25
-          && request.resource.data.totalFee is number
-          && request.resource.data.totalFee >= 0
-          && request.resource.data.totalFee <= 25000
-          && (request.resource.data.paymentReceipt == null
-              || request.resource.data.paymentReceipt
-                  == "receipts/" + registrationId)
-          && request.resource.data.createdAt == request.time
-          && request.resource.data.updatedAt == request.time;
-    }
-
-    // Registration lifecycle (mirrors src/lib/animal-registration.ts):
-    // pending -> approved | rejected, with admin corrections allowed
-    // between any supported states. Unknown values are never writable.
-    function isSupportedRegistrationStatus() {
-      return request.resource.data.status
-          in ["pending", "approved", "rejected"];
+          && request.auth.token.admin == true;
     }
 
     // Homepage content - public read, admin write
@@ -80,25 +31,6 @@ service cloud.firestore {
     match /siteSettings/{document=**} {
       allow read: if true;
       allow write: if isAdmin();
-    }
-
-    // Canonical animal lifecycle (mirrors src/lib/animal-lifecycle.ts):
-    // "available" is the only publicly visible status; "pending" and
-    // "adopted" are retained but admin-only. The read check fails closed —
-    // a missing or unrecognized status is never publicly readable.
-    function isSupportedAnimalStatus() {
-      return request.resource.data.status
-          in ["available", "pending", "adopted"];
-    }
-
-    // Animals - public can read only animals listed as available;
-    // pending/adopted animals and all writes are admin-only. Writes must
-    // carry a supported status so a typo can never create an
-    // unclassifiable record.
-    match /animals/{animalId} {
-      allow get, list: if resource.data.status == "available" || isAdmin();
-      allow create, update: if isAdmin() && isSupportedAnimalStatus();
-      allow delete: if isAdmin();
     }
 
     // FAQ - public read, admin write
@@ -127,20 +59,25 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // Animal Registrations - private owner data. The public form submits
-    // unauthenticated, so create is open but shape-validated and forced to
-    // "pending"; only admins can read or mutate submissions. Admin updates
-    // must keep a supported lifecycle status so a typo can never create
-    // an unclassifiable record.
-    match /animalRegistrations/{registrationId} {
-      allow create: if isValidRegistration(registrationId);
-      allow read, delete: if isAdmin();
-      allow update: if isAdmin() && isSupportedRegistrationStatus();
+    // --- Retired operational collections (#183) -------------------------
+    // Postgres is the sole authority for animals, registration
+    // submissions, and admin-user records. These collections no longer
+    // participate in normal application behavior and fail closed for
+    // every principal — including admins — so they can never serve as
+    // an alternate write path or a stale read source. Pre-launch
+    // documents left in place are inert and unreadable through the
+    // client SDK; cleanup is an offline operation.
+
+    match /animals/{animalId} {
+      allow read, write: if false;
     }
 
-    // Admins collection - only admins can read/write
+    match /animalRegistrations/{registrationId} {
+      allow read, write: if false;
+    }
+
     match /admins/{email} {
-      allow read, write: if isAdmin();
+      allow read, write: if false;
     }
 
     // Default deny all other access

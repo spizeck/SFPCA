@@ -35,11 +35,25 @@ export function getRegistryDb(): RegistryDb {
         `Postgres registry is not configured: missing env var(s) ${missing.join(", ")}`,
       );
     }
+    // Pool size is an env knob because the E2E harness (and any dev
+    // setup pointed at a PGlite socket server) must serialize all
+    // queries onto ONE connection: pglite-socket forwards protocol
+    // messages per-message, so concurrent connections can interleave
+    // extended-protocol sequences and corrupt unnamed statements.
+    // Production leaves it unset → 3.
+    const configuredMax = Number.parseInt(
+      process.env.DATABASE_POOL_MAX ?? "",
+      10,
+    );
+    const max =
+      Number.isInteger(configuredMax) && configuredMax >= 1
+        ? Math.min(configuredMax, 10)
+        : 3;
     client = postgres(process.env.DATABASE_URL!, {
       // Serverless: many short-lived function instances share the Neon
       // pooler — keep per-instance pools tiny and avoid holding idle
       // connections open.
-      max: 3,
+      max,
       prepare: false, // required through PgBouncer transaction pooling
     });
     db = drizzle(client, { schema });

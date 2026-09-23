@@ -1,40 +1,28 @@
-// Component tests for the public animal-registration form. Firebase is
-// mocked at the module boundary — these tests pin down the submitted
-// payload shape, the re-entrancy guard (double-submit protection),
-// receipt upload/orphan-cleanup behavior, and that entered data
-// survives a failed write. Rules-level enforcement is covered by
-// security-rules.test.mjs.
+// Component tests for the public animal-registration form. The server
+// action and Storage are mocked at the module boundary — these tests pin
+// down the submitted payload shape, the re-entrancy guard (double-submit
+// protection), receipt upload binding, and that entered data survives a
+// failed write. Server-side validation and idempotency are covered by
+// tests/db (PGlite) and the domain service.
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const {
-  mockDoc,
-  mockSetDoc,
-  mockUploadBytes,
-  mockDeleteObject,
-  mockToast,
-} = vi.hoisted(() => ({
-  mockDoc: vi.fn(),
-  mockSetDoc: vi.fn(),
+const { mockSubmitAction, mockUploadBytes, mockToast } = vi.hoisted(() => ({
+  mockSubmitAction: vi.fn(),
   mockUploadBytes: vi.fn(),
-  mockDeleteObject: vi.fn(),
   mockToast: vi.fn(),
 }));
 
-vi.mock("firebase/firestore", () => ({
-  collection: vi.fn((_db: unknown, name: string) => ({ name })),
-  doc: mockDoc,
-  setDoc: mockSetDoc,
-  serverTimestamp: () => "SERVER_TS",
+vi.mock("@/app/animal-registration/actions", () => ({
+  submitRegistrationAction: mockSubmitAction,
 }));
 
 vi.mock("firebase/storage", () => ({
   ref: vi.fn((_storage: unknown, path: string) => ({ path })),
   uploadBytes: mockUploadBytes,
-  deleteObject: mockDeleteObject,
 }));
 
-vi.mock("@/lib/firebase", () => ({ db: {}, storage: {} }));
+vi.mock("@/lib/firebase", () => ({ storage: {} }));
 
 vi.mock("@/hooks/use-toast", () => ({
   useToast: () => ({ toast: mockToast }),
@@ -42,7 +30,7 @@ vi.mock("@/hooks/use-toast", () => ({
 
 import { AnimalRegistration } from "@/components/animal-registration/animal-registration-page";
 
-let nextDocId = 0;
+const UUID_PATH = /^receipts\/[0-9a-f-]{36}$/i;
 
 async function fillValidForm() {
   fireEvent.change(screen.getByLabelText(/^Full Name/), {
@@ -82,37 +70,28 @@ function submit() {
 }
 
 beforeEach(() => {
-  nextDocId = 0;
-  // doc() allocates a fresh registration ID per submission — the bound
-  // receipts/<id> path differs on every attempt, which the retry test
-  // relies on.
-  mockDoc.mockReset().mockImplementation(() => ({
-    id: `reg-${++nextDocId}`,
-  }));
-  mockSetDoc.mockReset().mockResolvedValue(undefined);
+  mockSubmitAction.mockReset().mockResolvedValue({ ok: true });
   mockUploadBytes.mockReset().mockResolvedValue({});
-  mockDeleteObject.mockReset().mockResolvedValue(undefined);
   mockToast.mockReset();
 });
 
 describe("AnimalRegistration form", () => {
-  test("submits a pending registration with trimmed owner data", async () => {
+  test("submits a registration with trimmed owner data", async () => {
     render(<AnimalRegistration />);
     await fillValidForm();
     submit();
 
-    await waitFor(() => expect(mockSetDoc).toHaveBeenCalledTimes(1));
-    const [, payload] = mockSetDoc.mock.calls[0];
-    expect(payload.status).toBe("pending");
-    expect(payload.paymentReceipt).toBeNull();
-    expect(payload.totalFee).toBe(10);
-    expect(payload.ownerInfo).toEqual({
-      name: "Jane Doe",
-      address: "Windwardside, Saba",
-      phone: "+599 416 0000",
-      email: "jane@example.com",
+    await waitFor(() => expect(mockSubmitAction).toHaveBeenCalledTimes(1));
+    const [input] = mockSubmitAction.mock.calls[0];
+    expect(input.receiptPath).toBeNull();
+    expect(input.submissionId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(input).toMatchObject({
+      ownerName: "Jane Doe",
+      ownerAddress: "Windwardside, Saba",
+      ownerPhone: "+599 416 0000",
+      ownerEmail: "jane@example.com",
     });
-    expect(payload.animals).toEqual([
+    expect(input.animals).toEqual([
       { name: "Rex", type: "Dog", sex: "male", isFixed: "yes" },
     ]);
 
@@ -123,9 +102,9 @@ describe("AnimalRegistration form", () => {
 
   test("a second submit during the write cannot create a duplicate", async () => {
     let resolveWrite!: () => void;
-    mockSetDoc.mockReturnValue(
-      new Promise<void>((resolve) => {
-        resolveWrite = resolve;
+    mockSubmitAction.mockReturnValue(
+      new Promise<{ ok: true }>((resolve) => {
+        resolveWrite = () => resolve({ ok: true });
       }),
     );
     render(<AnimalRegistration />);
@@ -147,11 +126,11 @@ describe("AnimalRegistration form", () => {
         expect.objectContaining({ title: "Registration Submitted" }),
       ),
     );
-    expect(mockSetDoc).toHaveBeenCalledTimes(1);
+    expect(mockSubmitAction).toHaveBeenCalledTimes(1);
   });
 
-  test("failed writes show an error and preserve entered data", async () => {
-    mockSetDoc.mockRejectedValue(new Error("permission-denied"));
+  test("a failed submission shows an error and preserves entered data", async () => {
+    mockSubmitAction.mockResolvedValue({ ok: false, reason: "error" });
     render(<AnimalRegistration />);
     await fillValidForm();
     submit();
@@ -167,28 +146,24 @@ describe("AnimalRegistration form", () => {
     // Entered data is preserved for retry — no false success, no reset.
     expect(screen.getByLabelText(/^Full Name/)).toHaveValue("  Jane Doe  ");
     expect(screen.getByLabelText(/Animal's Name/)).toHaveValue("Rex");
-    // No receipt was attached, so no cleanup is attempted.
-    expect(mockDeleteObject).not.toHaveBeenCalled();
   });
 
-  test("an attached receipt uploads to the path bound to the doc id", async () => {
+  test("an attached receipt uploads to the path bound to the submission id", async () => {
     render(<AnimalRegistration />);
     await fillValidForm();
     attachReceipt();
     submit();
 
-    await waitFor(() => expect(mockSetDoc).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockSubmitAction).toHaveBeenCalledTimes(1));
     expect(mockUploadBytes).toHaveBeenCalledTimes(1);
     // The upload target and the stored reference must both be
-    // receipts/<registration doc id> — the binding that authorizes
-    // orphan cleanup and blocks arbitrary receipt references.
-    expect(mockUploadBytes.mock.calls[0][0]).toEqual({
-      path: "receipts/reg-1",
-    });
-    const [docRef, payload] = mockSetDoc.mock.calls[0];
-    expect(docRef).toEqual({ id: "reg-1" });
-    expect(payload.paymentReceipt).toBe("receipts/reg-1");
-    expect(mockDeleteObject).not.toHaveBeenCalled();
+    // receipts/<submissionId> — the binding the sweep uses to classify
+    // orphans.
+    const uploadRef = mockUploadBytes.mock.calls[0][0] as { path: string };
+    const [input] = mockSubmitAction.mock.calls[0];
+    expect(uploadRef.path).toBe(`receipts/${input.submissionId}`);
+    expect(input.receiptPath).toBe(`receipts/${input.submissionId}`);
+    expect(uploadRef.path).toMatch(UUID_PATH);
   });
 
   test("a failed receipt upload still submits the registration", async () => {
@@ -198,9 +173,9 @@ describe("AnimalRegistration form", () => {
     attachReceipt();
     submit();
 
-    await waitFor(() => expect(mockSetDoc).toHaveBeenCalledTimes(1));
-    const [, payload] = mockSetDoc.mock.calls[0];
-    expect(payload.paymentReceipt).toBeNull();
+    await waitFor(() => expect(mockSubmitAction).toHaveBeenCalledTimes(1));
+    const [input] = mockSubmitAction.mock.calls[0];
+    expect(input.receiptPath).toBeNull();
     expect(mockToast).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "Registration Submitted",
@@ -209,54 +184,10 @@ describe("AnimalRegistration form", () => {
     );
   });
 
-  test("a failed write after a successful upload removes the orphan receipt", async () => {
-    mockSetDoc.mockRejectedValue(new Error("permission-denied"));
-    render(<AnimalRegistration />);
-    await fillValidForm();
-    attachReceipt();
-    submit();
-
-    await waitFor(() => expect(mockDeleteObject).toHaveBeenCalledTimes(1));
-    // Cleanup targets exactly the just-uploaded object.
-    expect(mockDeleteObject.mock.calls[0][0]).toEqual({
-      path: "receipts/reg-1",
-    });
-    // The failure is still reported honestly and data is preserved.
-    await waitFor(() =>
-      expect(mockToast).toHaveBeenCalledWith(
-        expect.objectContaining({ title: "Error", variant: "destructive" }),
-      ),
-    );
-    expect(screen.getByLabelText(/^Full Name/)).toHaveValue("  Jane Doe  ");
-  });
-
-  test("a denied cleanup means the write landed — report success, keep the receipt", async () => {
-    // Simulates a lost setDoc response: the document exists, so the
-    // rules deny anonymous deletion of its now-referenced receipt.
-    mockSetDoc.mockRejectedValue(new Error("network-request-failed"));
-    mockDeleteObject.mockRejectedValue(
-      Object.assign(new Error("denied"), { code: "storage/unauthorized" }),
-    );
-    render(<AnimalRegistration />);
-    await fillValidForm();
-    attachReceipt();
-    submit();
-
-    await waitFor(() =>
-      expect(mockToast).toHaveBeenCalledWith(
-        expect.objectContaining({ title: "Registration Submitted" }),
-      ),
-    );
-  });
-
-  test("a failed cleanup still reports the write failure honestly", async () => {
-    // Cleanup fails for a non-authorization reason (e.g. offline). The
-    // orphan is left for the scheduled sweeper — the user must NOT see
-    // a false success.
-    mockSetDoc.mockRejectedValue(new Error("permission-denied"));
-    mockDeleteObject.mockRejectedValue(
-      Object.assign(new Error("gone"), { code: "storage/retry-limit-exceeded" }),
-    );
+  test("a failed submission after a successful upload reports the error honestly", async () => {
+    // The orphan receipt is left for the scheduled sweep — the form must
+    // NOT report a false success.
+    mockSubmitAction.mockResolvedValue({ ok: false, reason: "error" });
     render(<AnimalRegistration />);
     await fillValidForm();
     attachReceipt();
@@ -273,9 +204,8 @@ describe("AnimalRegistration form", () => {
     expect(screen.getByLabelText(/^Full Name/)).toHaveValue("  Jane Doe  ");
   });
 
-  test("a retry after failure uses a fresh doc id and receipt path", async () => {
-    // First attempt: upload succeeds, write fails, cleanup succeeds.
-    mockSetDoc.mockRejectedValueOnce(new Error("permission-denied"));
+  test("a retry after failure uses a fresh submission id and receipt path", async () => {
+    mockSubmitAction.mockResolvedValueOnce({ ok: false, reason: "error" });
     render(<AnimalRegistration />);
     await fillValidForm();
     attachReceipt();
@@ -296,15 +226,11 @@ describe("AnimalRegistration form", () => {
       ),
     );
 
-    expect(mockSetDoc).toHaveBeenCalledTimes(2);
+    expect(mockSubmitAction).toHaveBeenCalledTimes(2);
     expect(mockUploadBytes).toHaveBeenCalledTimes(2);
-    // The retry uploaded to a new bound path — no stale reference reuse,
-    // and the cleaned-up first upload is never pointed at again.
-    expect(mockUploadBytes.mock.calls[1][0]).toEqual({
-      path: "receipts/reg-2",
-    });
-    const [, retryPayload] = mockSetDoc.mock.calls[1];
-    expect(retryPayload.paymentReceipt).toBe("receipts/reg-2");
+    const [first, second] = mockSubmitAction.mock.calls.map((c) => c[0]);
+    expect(second.submissionId).not.toBe(first.submissionId);
+    expect(second.receiptPath).toBe(`receipts/${second.submissionId}`);
   });
 
   test("a disallowed receipt file is rejected before upload", async () => {
@@ -319,7 +245,7 @@ describe("AnimalRegistration form", () => {
 
     await fillValidForm();
     submit();
-    await waitFor(() => expect(mockSetDoc).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockSubmitAction).toHaveBeenCalledTimes(1));
     expect(mockUploadBytes).not.toHaveBeenCalled();
   });
 });

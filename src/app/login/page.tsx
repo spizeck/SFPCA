@@ -71,6 +71,10 @@ export default function LoginPage() {
       const data = await response.json().catch(() => null);
 
       if (response.ok && data?.authorized) {
+        // The session route set the admin custom claim; refresh the ID
+        // token so rules-evaluated client writes (CMS, team photos)
+        // carry it immediately.
+        await result.user.getIdToken(true);
         router.push("/admin");
       } else if (response.status === 403) {
         // The server refused to issue a session (non-admin or unverified
@@ -116,6 +120,9 @@ export default function LoginPage() {
       const data = await response.json().catch(() => null);
 
       if (response.ok && data?.authorized) {
+        // See handleGoogleSignIn: pick up the admin custom claim set by
+        // the session route before rules-evaluated client writes run.
+        await result.user.getIdToken(true);
         router.push("/admin");
       } else if (response.status === 403) {
         // The server refused to issue a session (non-admin or unverified

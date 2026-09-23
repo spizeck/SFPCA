@@ -9,15 +9,15 @@ import { NextRequest } from "next/server";
 const {
   mockVerifyIdToken,
   mockCreateSessionCookie,
-  mockAdminGet,
-  mockAdminSet,
+  mockSetCustomUserClaims,
+  mockProvisionAdminUser,
   mockCookieSet,
   mockIsAdmin,
 } = vi.hoisted(() => ({
   mockVerifyIdToken: vi.fn(),
   mockCreateSessionCookie: vi.fn(),
-  mockAdminGet: vi.fn(),
-  mockAdminSet: vi.fn(),
+  mockSetCustomUserClaims: vi.fn(),
+  mockProvisionAdminUser: vi.fn(),
   mockCookieSet: vi.fn(),
   mockIsAdmin: vi.fn(),
 }));
@@ -26,12 +26,14 @@ vi.mock("@/lib/firebase-admin", () => ({
   adminAuth: () => ({
     verifyIdToken: mockVerifyIdToken,
     createSessionCookie: mockCreateSessionCookie,
+    setCustomUserClaims: mockSetCustomUserClaims,
   }),
-  adminDb: () => ({
-    collection: () => ({
-      doc: () => ({ get: mockAdminGet, set: mockAdminSet }),
-    }),
-  }),
+}));
+
+// Postgres admin_users provisioning — the seam is mocked here; the
+// insert semantics are exercised for real in tests/db.
+vi.mock("@/lib/registry/admin-users", () => ({
+  provisionAdminUser: mockProvisionAdminUser,
 }));
 
 // Partial mock: isAdmin is stubbed, but isExpectedAuthError stays real —
@@ -71,10 +73,11 @@ beforeEach(() => {
   vi.unstubAllEnvs();
   mockVerifyIdToken.mockReset();
   mockCreateSessionCookie.mockReset();
-  mockAdminGet.mockReset();
-  mockAdminSet.mockReset();
+  mockSetCustomUserClaims.mockReset();
+  mockProvisionAdminUser.mockReset();
   mockCookieSet.mockReset();
   mockIsAdmin.mockReset();
+  mockProvisionAdminUser.mockResolvedValue(null);
 });
 
 describe("POST /api/auth/session", () => {
@@ -84,7 +87,6 @@ describe("POST /api/auth/session", () => {
       email_verified: true,
     });
     mockIsAdmin.mockResolvedValue({ isAdmin: true, role: "admin" });
-    mockAdminGet.mockResolvedValue({ exists: true });
     mockCreateSessionCookie.mockResolvedValue("signed-session-cookie");
 
     const response = await POST(postRequest({ idToken: "valid-token" }));
@@ -116,7 +118,6 @@ describe("POST /api/auth/session", () => {
       email_verified: true,
     });
     mockIsAdmin.mockResolvedValue({ isAdmin: true, role: "admin" });
-    mockAdminGet.mockResolvedValue({ exists: true });
     mockCreateSessionCookie.mockResolvedValue("cookie");
 
     await POST(postRequest({ idToken: "valid-token" }));
@@ -140,10 +141,11 @@ describe("POST /api/auth/session", () => {
     expect(mockCreateSessionCookie).not.toHaveBeenCalled();
   });
 
-  test("rejects a verified user who is not an admin", async () => {
+  test("rejects a verified user who is not an admin and clears their claim", async () => {
     mockVerifyIdToken.mockResolvedValue({
       email: "user@example.com",
       email_verified: true,
+      uid: "uid-1",
     });
     mockIsAdmin.mockResolvedValue({ isAdmin: false });
 
@@ -151,6 +153,12 @@ describe("POST /api/auth/session", () => {
     expect(response.status).toBe(403);
     expect((await response.json()).authorized).toBe(false);
     expect(mockCreateSessionCookie).not.toHaveBeenCalled();
+    // A removed admin's rules-side access must not linger in a stale
+    // token — the claim is cleared on the rejected login.
+    expect(mockSetCustomUserClaims).toHaveBeenCalledWith("uid-1", {
+      admin: false,
+    });
+    expect(mockProvisionAdminUser).not.toHaveBeenCalled();
   });
 
   test("rejects an invalid or malformed token with 401", async () => {
@@ -166,35 +174,21 @@ describe("POST /api/auth/session", () => {
     expect(mockVerifyIdToken).not.toHaveBeenCalled();
   });
 
-  test("bootstraps an admins/ doc for an env-allowlisted admin", async () => {
+  test("provisions the admin_users row and sets the admin claim on login", async () => {
     mockVerifyIdToken.mockResolvedValue({
       email: "staff@example.com",
       email_verified: true,
+      uid: "uid-admin",
     });
     mockIsAdmin.mockResolvedValue({ isAdmin: true, role: "admin" });
-    mockAdminGet.mockResolvedValue({ exists: false });
     mockCreateSessionCookie.mockResolvedValue("cookie");
 
     await POST(postRequest({ idToken: "token" }));
-    expect(mockAdminSet).toHaveBeenCalledWith(
-      expect.objectContaining({
-        email: "staff@example.com",
-        role: "admin",
-      }),
-    );
-  });
-
-  test("does not rewrite an existing admins/ doc", async () => {
-    mockVerifyIdToken.mockResolvedValue({
-      email: "staff@example.com",
-      email_verified: true,
+    expect(mockProvisionAdminUser).toHaveBeenCalledWith("staff@example.com");
+    expect(mockSetCustomUserClaims).toHaveBeenCalledWith("uid-admin", {
+      admin: true,
+      adminRole: "admin",
     });
-    mockIsAdmin.mockResolvedValue({ isAdmin: true, role: "admin" });
-    mockAdminGet.mockResolvedValue({ exists: true });
-    mockCreateSessionCookie.mockResolvedValue("cookie");
-
-    await POST(postRequest({ idToken: "token" }));
-    expect(mockAdminSet).not.toHaveBeenCalled();
   });
 
   test("accepts a same-origin request", async () => {
@@ -203,7 +197,6 @@ describe("POST /api/auth/session", () => {
       email_verified: true,
     });
     mockIsAdmin.mockResolvedValue({ isAdmin: true, role: "admin" });
-    mockAdminGet.mockResolvedValue({ exists: true });
     mockCreateSessionCookie.mockResolvedValue("cookie");
 
     const response = await POST(

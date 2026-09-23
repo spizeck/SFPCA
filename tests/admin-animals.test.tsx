@@ -1,35 +1,29 @@
-// Component tests for /admin/animals (#91). Firebase is mocked at the
-// module boundary; these tests pin down mutation hardening: pending
-// guards, double-click prevention, field-level validation preserving
-// data, named destructive confirmation, and a retryable load-error
-// state distinct from "no records".
+// Component tests for /admin/animals (#91, Postgres cutover in #183).
+// The server actions are mocked at the module boundary; these tests pin
+// down mutation hardening: pending guards, double-click prevention,
+// field-level validation preserving data, named destructive
+// confirmation, and a retryable load-error state distinct from "no
+// records". Postgres behavior itself is covered by tests/db.
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const {
-  mockGetDocs,
-  mockAddDoc,
-  mockUpdateDoc,
-  mockDeleteDoc,
+  mockListAnimals,
+  mockSaveAnimal,
+  mockDeleteAnimal,
   mockToast,
 } = vi.hoisted(() => ({
-  mockGetDocs: vi.fn(),
-  mockAddDoc: vi.fn(),
-  mockUpdateDoc: vi.fn(),
-  mockDeleteDoc: vi.fn(),
+  mockListAnimals: vi.fn(),
+  mockSaveAnimal: vi.fn(),
+  mockDeleteAnimal: vi.fn(),
   mockToast: vi.fn(),
 }));
 
-vi.mock("firebase/firestore", () => ({
-  collection: vi.fn((_db: unknown, name: string) => ({ name })),
-  getDocs: mockGetDocs,
-  addDoc: mockAddDoc,
-  updateDoc: mockUpdateDoc,
-  deleteDoc: mockDeleteDoc,
-  doc: vi.fn((_db: unknown, _col: string, id: string) => ({ id })),
+vi.mock("@/app/admin/animals/actions", () => ({
+  listAnimalsAction: mockListAnimals,
+  saveAnimalAction: mockSaveAnimal,
+  deleteAnimalAction: mockDeleteAnimal,
 }));
-
-vi.mock("@/lib/firebase", () => ({ db: {} }));
 
 vi.mock("@/hooks/use-toast", () => ({
   useToast: () => ({ toast: mockToast }),
@@ -37,22 +31,40 @@ vi.mock("@/hooks/use-toast", () => ({
 
 import AnimalsManager from "@/app/admin/animals/page";
 
-function animalDoc(id: string, data: Record<string, unknown>) {
-  return { id, data: () => data };
+function animalRow(
+  registryId: string,
+  data: Record<string, unknown>,
+) {
+  return {
+    id: registryId,
+    registryId,
+    name: "",
+    species: "dog",
+    sex: "unknown",
+    approxAge: "",
+    description: "",
+    status: "available",
+    photos: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    ...data,
+  };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockGetDocs.mockResolvedValue({ docs: [] });
+  mockListAnimals.mockResolvedValue([]);
+  mockSaveAnimal.mockResolvedValue({ ok: true });
+  mockDeleteAnimal.mockResolvedValue({ ok: true });
 });
 
 describe("admin animals", () => {
   test("shows a retryable error state when the list fails to load", async () => {
-    mockGetDocs
+    mockListAnimals
       .mockRejectedValueOnce(new Error("permission-denied"))
-      .mockResolvedValueOnce({
-        docs: [animalDoc("a1", { name: "Buddy", species: "dog", sex: "male", approxAge: "2y", description: "", status: "available" })],
-      });
+      .mockResolvedValueOnce([
+        animalRow("a1", { name: "Buddy", species: "dog", sex: "male", approxAge: "2y" }),
+      ]);
 
     render(<AnimalsManager />);
 
@@ -80,9 +92,9 @@ describe("admin animals", () => {
   });
 
   test("double-clicking Add Animal submits only once", async () => {
-    let resolveAdd: () => void = () => {};
-    mockAddDoc.mockImplementation(
-      () => new Promise((r) => { resolveAdd = () => r(undefined); }),
+    let resolveSave: () => void = () => {};
+    mockSaveAnimal.mockImplementation(
+      () => new Promise((r) => { resolveSave = () => r({ ok: true }); }),
     );
     render(<AnimalsManager />);
     await waitFor(() => screen.getByText(/No animals found/));
@@ -97,14 +109,14 @@ describe("admin animals", () => {
     fireEvent.click(submit);
     fireEvent.click(submit);
     fireEvent.click(submit);
-    expect(mockAddDoc).toHaveBeenCalledTimes(1);
+    expect(mockSaveAnimal).toHaveBeenCalledTimes(1);
 
-    resolveAdd();
-    await waitFor(() => expect(mockGetDocs).toHaveBeenCalledTimes(2));
+    resolveSave();
+    await waitFor(() => expect(mockListAnimals).toHaveBeenCalledTimes(2));
   }, 15000);
 
   test("keeps dialog data and shows a safe error when save fails", async () => {
-    mockAddDoc.mockRejectedValue(new Error("unavailable"));
+    mockSaveAnimal.mockResolvedValue({ ok: false });
     render(<AnimalsManager />);
     await waitFor(() => screen.getByText(/No animals found/));
 
@@ -124,26 +136,46 @@ describe("admin animals", () => {
     );
     // Dialog stays open with the entered data intact.
     expect(screen.getByLabelText("Name")).toHaveValue("Rex");
-    // Raw Firebase error text is never shown to staff.
+    // Raw server error text is never shown to staff.
     const descriptions = mockToast.mock.calls.map(
       (c) => c[0].description as string,
     );
     expect(descriptions.join(" ")).not.toContain("unavailable");
   });
 
-  test("shows a field-level error instead of writing an invalid status", async () => {
-    mockGetDocs.mockResolvedValue({
-      docs: [
-        animalDoc("a1", {
-          name: "Buddy",
-          species: "dog",
-          sex: "male",
-          approxAge: "2y",
-          description: "",
-          status: "bogus-legacy",
+  test("a concurrency conflict tells staff to reopen the record", async () => {
+    mockListAnimals.mockResolvedValue([
+      animalRow("a1", { name: "Buddy", species: "dog", sex: "male" }),
+    ]);
+    mockSaveAnimal.mockResolvedValue({ ok: false, reason: "conflict" });
+    render(<AnimalsManager />);
+    await waitFor(() => screen.getByText("Buddy"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Buddy" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Update Animal" }),
+    );
+
+    await waitFor(() =>
+      expect(mockToast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          variant: "destructive",
+          description: expect.stringContaining("changed by someone else"),
         }),
-      ],
-    });
+      ),
+    );
+  });
+
+  test("shows a field-level error instead of writing an invalid status", async () => {
+    mockListAnimals.mockResolvedValue([
+      animalRow("a1", {
+        name: "Buddy",
+        species: "dog",
+        sex: "male",
+        approxAge: "2y",
+        status: "bogus-legacy",
+      }),
+    ]);
     render(<AnimalsManager />);
     await waitFor(() => screen.getByText("Buddy"));
 
@@ -157,24 +189,20 @@ describe("admin animals", () => {
         /Select a valid animal status/,
       ),
     );
-    expect(mockUpdateDoc).not.toHaveBeenCalled();
+    expect(mockSaveAnimal).not.toHaveBeenCalled();
     // Entered data is preserved.
     expect(screen.getByLabelText("Name")).toHaveValue("Buddy");
   });
 
   test("delete requires confirmation naming the animal; cancel keeps it", async () => {
-    mockGetDocs.mockResolvedValue({
-      docs: [
-        animalDoc("a1", {
-          name: "Buddy",
-          species: "dog",
-          sex: "male",
-          approxAge: "2y",
-          description: "",
-          status: "available",
-        }),
-      ],
-    });
+    mockListAnimals.mockResolvedValue([
+      animalRow("a1", {
+        name: "Buddy",
+        species: "dog",
+        sex: "male",
+        approxAge: "2y",
+      }),
+    ]);
     render(<AnimalsManager />);
     await waitFor(() => screen.getByText("Buddy"));
 
@@ -184,33 +212,29 @@ describe("admin animals", () => {
     expect(dialog).toHaveTextContent(/cannot be undone/i);
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(mockDeleteDoc).not.toHaveBeenCalled();
+    expect(mockDeleteAnimal).not.toHaveBeenCalled();
     await waitFor(() =>
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
   });
 
   test("confirming delete removes the animal", async () => {
-    mockDeleteDoc.mockResolvedValue(undefined);
-    mockGetDocs.mockResolvedValue({
-      docs: [
-        animalDoc("a1", {
-          name: "Buddy",
-          species: "dog",
-          sex: "male",
-          approxAge: "2y",
-          description: "",
-          status: "available",
-        }),
-      ],
-    });
+    mockListAnimals.mockResolvedValue([
+      animalRow("a1", {
+        name: "Buddy",
+        species: "dog",
+        sex: "male",
+        approxAge: "2y",
+      }),
+    ]);
     render(<AnimalsManager />);
     await waitFor(() => screen.getByText("Buddy"));
 
     fireEvent.click(screen.getByRole("button", { name: "Delete Buddy" }));
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
 
-    await waitFor(() => expect(mockDeleteDoc).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockDeleteAnimal).toHaveBeenCalledTimes(1));
+    expect(mockDeleteAnimal).toHaveBeenCalledWith("a1");
     expect(mockToast).toHaveBeenCalledWith(
       expect.objectContaining({ title: "Success" }),
     );
