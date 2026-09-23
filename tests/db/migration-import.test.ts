@@ -196,6 +196,8 @@ describe("import upserts (PGlite)", () => {
   });
 
   async function upsertAnimal(row: ReturnType<typeof transformAnimal>["row"]) {
+    // Mirrors scripts/migrate-firestore.ts — updated_at copies the
+    // source value so re-runs converge to the same semantic state.
     await db
       .insert(animals)
       .values(row)
@@ -204,7 +206,7 @@ describe("import upserts (PGlite)", () => {
         set: {
           name: sql`excluded.name`,
           lifecycleStatus: sql`excluded.lifecycle_status`,
-          updatedAt: sql`now()`,
+          updatedAt: sql`excluded.updated_at`,
         },
       });
   }

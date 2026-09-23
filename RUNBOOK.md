@@ -1344,3 +1344,20 @@ idempotent upsert makes the refresh a diff-apply, not a re-import.
 Tooling prints counts, doc ids, exception kinds/fields — never owner
 names, emails, phones, addresses, or receipt contents. No production
 exports are committed; fixtures in tests are synthetic only.
+
+### 20g. Execution record (2026-09-23)
+
+Rehearsal on isolated branch `migrate-rehearsal-181` (endpoint
+`ep-old-queen-aw7t0dqc`, distinct from production `ep-soft-wind-awarztez`):
+
+- `db:migrate` → schema applied (branch cloned `main`'s schema; replay no-op)
+- `--execute` → animals 3, admins 4 upserted; reconcile PASSED (7 docs, 0 diffs)
+- **Second `--execute` exposed an idempotency defect:** the upsert set
+  `updated_at = now()` on conflict, diverging from the source `updatedAt`.
+  Fixed to `excluded.updated_at` (copy source value); re-run then
+  reconciled to 0 mismatches. Branch deleted after rehearsal.
+
+Production `main` (snapshot `snap-morning-silence-aw9w4k2p`, verified
+pre-run): dry-run 7 docs / 0 exceptions → `--execute` → animals 3,
+admins 4 upserted → reconcile PASSED (7 docs, 0 diffs). Destination now
+holds a verified shadow copy; **Firestore remains authoritative.**

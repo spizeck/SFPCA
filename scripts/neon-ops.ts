@@ -122,8 +122,7 @@ async function cmdSnapshot() {
 }
 
 async function cmdSnapshots() {
-  const main = await mainBranch();
-  const j = await api(`/branches/${main.id}/snapshots`);
+  const j = await api(`/snapshots`);
   for (const s of j.snapshots ?? []) {
     console.log(`${s.id}  name=${s.name}  created=${s.created_at}  lsn=${s.lsn ?? "-"}`);
   }
@@ -153,7 +152,8 @@ async function cmdConn(nameOrId: string, production: boolean) {
 }
 
 const [cmd, ...rest] = process.argv.slice(2);
-try {
+
+async function main() {
   switch (cmd) {
     case "list":
       await cmdList();
@@ -177,7 +177,9 @@ try {
       console.error("commands: list | create-branch <name> [--parent <b>] | delete-branch <b> | snapshot | snapshots | conn <branch> [--production]");
       process.exit(1);
   }
-} catch (e) {
+}
+
+main().catch((e) => {
   console.error("neon-ops failed:", e instanceof Error ? e.message : e);
   process.exit(1);
-}
+});

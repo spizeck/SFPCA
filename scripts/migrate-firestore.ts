@@ -211,7 +211,10 @@ async function main() {
             photoUrls: dsql`excluded.photo_urls`,
             // created_at intentionally absent from the update set — the
             // original import timestamp is the record's provenance.
-            updatedAt: dsql`now()`,
+            // updated_at mirrors the SOURCE value (not now()) so re-runs
+            // converge to the same semantic state — reconciliation
+            // compares it against the Firestore doc.
+            updatedAt: dsql`excluded.updated_at`,
           },
         });
       console.log(`animals: upserted ${animalRows.length}`);
@@ -243,7 +246,7 @@ async function main() {
             status: dsql`excluded.status`,
             submittedAt: dsql`excluded.submitted_at`,
             decidedAt: dsql`excluded.decided_at`,
-            updatedAt: dsql`now()`,
+            updatedAt: dsql`excluded.updated_at`,
           },
         });
       console.log(`animalRegistrations: upserted ${regRows.length}`);
