@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { instantTransition } from "@/lib/animations";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,37 +9,23 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import { Animal } from "@/lib/types";
-import { getAvailableAnimals } from "@/lib/animals";
 import {
   AnimalAdoptionsContent,
   DEFAULT_ADOPTIONS_CONTENT,
 } from "@/lib/page-content";
-import { logError } from "@/lib/logger";
 
+// Animals arrive server-fetched via the registry read seam (#182): the
+// Postgres source can only be queried on the server, and server-rendering
+// the list also means the grid is indexable rather than client-only.
 export function AnimalAdoptions({
   content = DEFAULT_ADOPTIONS_CONTENT,
+  animals = [],
 }: {
   content?: AnimalAdoptionsContent;
+  animals?: Animal[];
 }) {
-  const [animals, setAnimals] = useState<Animal[]>([]);
-  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("all");
   const reduceMotion = useReducedMotion();
-
-  useEffect(() => {
-    loadAnimals();
-  }, []);
-
-  const loadAnimals = async () => {
-    try {
-      const animalList = await getAvailableAnimals();
-      setAnimals(animalList);
-    } catch (error) {
-      logError("animals", "list", error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const filteredAnimals = filter === "all" 
     ? animals 
@@ -154,9 +140,7 @@ export function AnimalAdoptions({
           </div>
 
           {/* Animals Grid */}
-          {loading ? (
-            <div className="text-center">Loading...</div>
-          ) : filteredAnimals.length === 0 ? (
+          {filteredAnimals.length === 0 ? (
             <p className="text-center text-muted-foreground">
               No animals are currently listed for adoption. Please check back
               soon or contact us to learn about upcoming adoptions.

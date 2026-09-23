@@ -165,7 +165,7 @@ UI validation — form shape only, never trusted.
 | B — migration tooling | `scripts/db-migrate.ts` (schema replay), `scripts/migrate-firestore.ts` (data import, dry-run default) | **this PR** |
 | C — import | Copy `animals`, `admins`, `animalRegistrations` → Postgres; idempotent, re-runnable | follow-up |
 | D — reconciliation | Compare source/destination counts and sampled content | follow-up |
-| E — read cutover | Public animal reads move to Postgres via `src/lib/registry/*`; Firestore keeps CMS | follow-up |
+| E — read cutover | Public animal reads move to Postgres via `src/lib/registry/*`; Firestore keeps CMS | #182 (flag-gated, see §7a) |
 | F — write cutover | Registry writes move to Postgres domain services; single authoritative writer per domain | follow-up |
 | G — retire | Firestore operational collections removed after verification + rollback window | follow-up |
 
@@ -174,6 +174,40 @@ already supports `SITE_MAINTENANCE_MODE`) plus idempotent import +
 reconciliation is safer than a forever dual-write with authority/failure
 ambiguity. If a phase genuinely needs overlap, it must declare duration,
 authority, failure semantics, and exit criteria in its own issue.
+
+## 7a. Transitional authority during #182 (read cutover)
+
+#182 moves **public animal reads only** behind a server-side switch.
+Authority while `PUBLIC_ANIMALS_SOURCE` is unset → `firestore` in
+production (unchanged behavior); once flipped to `postgres`:
+
+| Operation | Authority after flip |
+|---|---|
+| Public animal list/detail/homepage preview | **Postgres** (`src/lib/registry/public-animals.ts`) |
+| Admin animal reads + all writes | **Firestore** (unchanged) |
+| Registration submissions/reads | **Firestore** (unchanged) |
+| Admin authorization (`admins/`) | **Firestore** — the Postgres `admin_users` copy is migration evidence only |
+| CMS content, Storage, Firebase Auth | **Firestore / Storage / Auth** (unchanged) |
+
+Deliberate properties:
+
+- **No dual-write, no sync.** Postgres freshness comes from re-running
+  the idempotent import (RUNBOOK §21). Between refreshes, public pages
+  reflect the last imported state — acceptable only inside a bounded
+  transition window; #183 follows promptly.
+- **No silent Firestore fallback.** A Postgres failure logs and fails
+  closed (empty list / 404) rather than masking a broken migration state.
+- **Fail-closed visibility.** Only `lifecycle_status='available'` is
+  public — enforced in the query AND re-checked in the service, the same
+  double layer Firestore rules + `isPublicAnimalStatus` provide today.
+- **Rollback is the flag.** Set `PUBLIC_ANIMALS_SOURCE=firestore` (or
+  delete it) and redeploy — Firestore data is intact and authoritative.
+- The flag is **temporary**: #183 deletes the Firestore branch of the
+  seam and the variable. Do not build features on top of it.
+
+`PUBLIC_ANIMALS_SOURCE` defaults to `postgres` on Vercel Preview so every
+PR exercises the new path against its isolated Neon branch — preview
+branches are children of `main` and inherit the imported shadow data.
 
 ## 8. Production migration safety
 

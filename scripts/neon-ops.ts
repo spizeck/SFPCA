@@ -9,6 +9,8 @@
 //   npx tsx scripts/neon-ops.ts delete-branch <name|id>
 //   npx tsx scripts/neon-ops.ts snapshot                 # manual snapshot of main
 //   npx tsx scripts/neon-ops.ts snapshots                # list snapshots on main
+//   npx tsx scripts/neon-ops.ts delete-snapshot <id>     # free the single
+//                                                        # Free-plan slot
 //   npx tsx scripts/neon-ops.ts conn <name|id>           # write DATABASE_URL_UNPOOLED into .env.local
 //   npx tsx scripts/neon-ops.ts conn main --production   # same, for the prod branch
 //
@@ -129,6 +131,14 @@ async function cmdSnapshots() {
   if (!(j.snapshots ?? []).length) console.log("(no snapshots)");
 }
 
+// Free plan allows ONE manual snapshot — the runbook's refresh-before-
+// execute flow replaces the prior disposable snapshot each run.
+async function cmdDeleteSnapshot(id: string) {
+  if (!id) throw new Error("usage: delete-snapshot <snapshot-id>");
+  await api(`/snapshots/${id}`, { method: "DELETE" });
+  console.log(`deleted snapshot ${id}`);
+}
+
 async function cmdConn(nameOrId: string, production: boolean) {
   const b = await findBranch(nameOrId);
   if (b.primary && !production) {
@@ -170,11 +180,14 @@ async function main() {
     case "snapshots":
       await cmdSnapshots();
       break;
+    case "delete-snapshot":
+      await cmdDeleteSnapshot(rest[0]);
+      break;
     case "conn":
       await cmdConn(rest[0], rest.includes("--production"));
       break;
     default:
-      console.error("commands: list | create-branch <name> [--parent <b>] | delete-branch <b> | snapshot | snapshots | conn <branch> [--production]");
+      console.error("commands: list | create-branch <name> [--parent <b>] | delete-branch <b> | snapshot | snapshots | delete-snapshot <id> | conn <branch> [--production]");
       process.exit(1);
   }
 }
