@@ -51,10 +51,17 @@ describe("migration replay from empty database", () => {
       "registration_submissions",
       "registrations",
       "vaccinations",
-      "vet_events",
+      "vet_documents",
+      "vet_encounters",
+      "vet_medications",
+      "vet_procedures",
+      "medical_alerts",
+      "weight_records",
     ]) {
       expect(tables).toContain(expected);
     }
+    // vet_events was superseded by the structured record (#174).
+    expect(tables).not.toContain("vet_events");
   });
 
   test("replaying migrations a second time is a no-op", async () => {

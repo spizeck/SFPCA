@@ -64,7 +64,8 @@ when the token is unset.
   authority (page content, site settings, FAQs). Postgres (Neon, via
   Drizzle) is the foundation for the **registry domain** — animals,
   people/households, ownership, registrations, payments, chips,
-  vaccinations, vet events, follow-ups, communications, audit. The boundary and migration
+  vaccinations, veterinary records (encounters, procedures, medications,
+  alerts, weights, documents), follow-ups, communications, audit. The boundary and migration
   plan are in `ARCHITECTURE.md`. New registry-domain data goes to
   `src/lib/db`/`src/lib/registry` — **never into Firestore**. During the
   staged cutover (Phases C–G) Firestore `animals`/`animalRegistrations`/
