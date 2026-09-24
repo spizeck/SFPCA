@@ -74,8 +74,12 @@ test.describe("owner portal", () => {
     await expect(confirm).toBeVisible();
     await confirm.click();
 
+    // .first() — React strict-mode double-invocation can stack a second
+    // identical toast; the assertion is about the confirmation landing.
     await expect(
-      page.getByText("Thanks — Rexley is confirmed for this year."),
+      page
+        .getByText("Thanks — Rexley is confirmed for this year.")
+        .first(),
     ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Confirmed for this year" }).first(),
