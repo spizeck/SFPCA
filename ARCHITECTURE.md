@@ -167,7 +167,8 @@ plain SQL.
 | `vaccinations` | Structured vaccination history (#173) | restrictive FK to `animals`; `due_on`/`valid_until` ≥ `administered_on`; `series_key` generated from `vaccine_name` — only the latest dose per (animal, series) drives the due/reminder projection; due-state derived, never stored; optional `encounter_id` links a dose to the visit it was given at |
 | `follow_ups` | Veterinary follow-up/recheck queue (#175) | status CHECK `open\|completed\|cancelled`; `resolved_at` set exactly when status leaves `open`; time-relative state (upcoming/due/overdue) derived by `followUpState()` — never stored; `reason` is the queue headline; `encounter_id` links a recheck to the visit that recommended it; `person_id` snapshots the owner at creation (history), the queue resolves the CURRENT owner separately; registration-linked rows are #177 operational work, not clinical |
 | `clinic_expectations` | Expected clinic animals (#194) | status CHECK `expected\|seen\|no_show\|cancelled`; `resolved_at` consistency CHECK mirrors follow_ups; urgency derived by `clinicExpectationState()` — never stored; restrictive animal FK — expectations are history; `encounter_id` (set null) records the real visit that fulfilled a `seen` expectation — never manufactured; `person_id` snapshots the owner at creation; `session_label` is a free-text hint, not a slot |
-| `communications` | Reminder ledger + send log | `unique(idempotency_key)` — safe retries; `vax-reminder:<vax>:<date>:<touch>` keys (#173 writes only `queued`/`skipped`; #172 owns the `sent`/`failed` delivery transition + `sent_at`) |
+| `communications` | Reminder ledger + send log | `unique(idempotency_key)` — safe retries; `<prefix>:<relatedId>:<cycleKey>:<touch>` keys; state machine `queued→sending→sent→delivered` with `failed`/`skipped` terminal; `sent_at`/`delivered_at` consistency CHECKs; recipient/subject/body snapshots preserve what was sent; `detail` is a bounded reason vocabulary, never free text |
+| `communication_preferences` | Per-person opt-outs (#172) | `unique(person_id, channel, kind)`; opt-outs suppress only kinds the reminder policy marks optional — operational notices are never silenced by a preference row |
 | `audit_events` | Append-only mutation history | entity type/id + before/after jsonb |
 
 **Where invariants live:** DB constraints — identity uniqueness, FK
@@ -234,6 +235,36 @@ auto-linking would fabricate attendance. Queue ordering is unchanged —
 expectations participate in the dated-work ranking (overdue → due →
 upcoming), ahead of alerts. #172 may later consume this list for
 clinic reminders; the model stores no delivery state.
+
+**Owner communications & reminders (#172):** automated follow-up is one
+pipeline with five separate stages — eligibility, intent, delivery,
+outcome, retry — and the `communications` ledger is authoritative for
+all of them (provider dashboards are diagnostic, never the truth).
+`src/lib/reminders/policy.ts` is the single place that defines when a
+reminder kind is eligible, its cooldown, and its touch cap — typed code
+config, not a rule engine. `src/lib/registry/reminders.ts` hosts one
+evaluator per kind (registered in `EVALUATORS`) and the
+`runReminderCycle` orchestration: evaluate → insert `queued`/`skipped`
+rows under deterministic idempotency keys → drain the queue through the
+`EmailSender` seam. `src/lib/registry/communications.ts` owns the
+ledger: claim is one conditional UPDATE (no lock across the provider
+call), failure classification is `rejected`/`unavailable`/`uncertain`,
+and only `unavailable` auto-retries — an uncertain send parks as
+`failed`/`interrupted` for staff reconcile, because a duplicate
+reminder is worse than a delayed one. Provider: **Resend**
+(`src/lib/email.ts`) — the row uuid is sent as its `Idempotency-Key`,
+and `/api/webhooks/resend` applies verified `delivered`/`bounced`/
+`failed`/`complained` events back onto rows by provider message id
+(forward transitions only, redelivery-safe). Delivery is scheduled by
+`/api/cron/reminders` (Vercel cron); `?dry_run=1` runs the same
+eligibility without writing or sending, and `/admin/communications`
+exposes the exception-first staff surface plus a preview button.
+**Active reminder kind: `vaccination-reminder` only** — eligibility is
+#173's `listDueVaccinations`. The #172 registration-due,
+unpaid-balance, and annual-confirmation kinds are deliberately absent
+from `REMINDER_KINDS`: `registrations`/`payments` have no writers and
+no "last confirmed" state exists, so their eligibility would be
+fabricated. They plug in as new evaluators once #166/#169/#170 land.
 
 ## 6. ID strategy
 
@@ -384,7 +415,10 @@ compatibility:
 |---|---|---|
 | `DATABASE_URL` | server-only runtime queries (pooled Neon `-pooler` host) — **required in every deployed env** | Vercel–Neon integration |
 | `DATABASE_URL_UNPOOLED` | schema/data migrations (unpooled direct host) | Vercel–Neon integration |
-| `CRON_SECRET` | bearer guard for `/api/cron/sweep-receipts` | operator-set (Production + Preview) |
+| `CRON_SECRET` | bearer guard for `/api/cron/*` routes | operator-set (Production + Preview) |
+| `RESEND_API_KEY` | Resend email delivery for `/api/cron/reminders` — unset → live runs refuse (503), dry-run still works | operator-set |
+| `EMAIL_FROM` | verified sender identity, e.g. `SFPCA <reminders@…>` | operator-set |
+| `RESEND_WEBHOOK_SECRET` | `whsec_…` signing secret for `/api/webhooks/resend` — unset → route refuses all requests | operator-set |
 | `ADMIN_EMAILS` | bootstrap/emergency admin allowlist — not the authz authority | operator-set |
 | `MIGRATION_CONFIRM_PROJECT` | `migrate:firestore --execute` guard | operator-set |
 

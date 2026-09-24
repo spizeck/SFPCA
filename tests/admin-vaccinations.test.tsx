@@ -125,7 +125,13 @@ function record(
   followUps: unknown[] = [],
   clinicExpectations: unknown[] = [],
 ) {
-  return { animal: ANIMAL, timeline, followUps, clinicExpectations };
+  return {
+    animal: ANIMAL,
+    timeline,
+    followUps,
+    clinicExpectations,
+    communications: [],
+  };
 }
 
 function expectationRow(data: Record<string, unknown> = {}) {

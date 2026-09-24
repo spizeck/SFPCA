@@ -24,6 +24,8 @@ Vercel Git integration ──► Next.js build ──► production deployment
 Firestore CMS write ──► onFirestoreChange ──► deploy hook POST
 (authenticated HTTPS)   ──► triggerRebuild ──► same deploy hook
 Vercel cron (daily)     ──► /api/cron/sweep-receipts ──► Storage cleanup
+Vercel cron (daily)     ──► /api/cron/reminders ──► evaluate → queue → send (Resend)
+Resend webhook          ──► /api/webhooks/resend ──► delivered/bounced/failed onto rows
 
 Firebase deploy (manual, CLI):
   functions/  ──► Cloud Functions (rebuild triggers only)
@@ -46,6 +48,8 @@ everything.
 | `onFirestoreChange` | `functions/index.js` | Cloud Functions v2 | manual `firebase deploy` | `firebase deploy` output / Firebase console → Functions | Cloud Logging, `subsystem:"rebuild"` |
 | `triggerRebuild` | `functions/index.js` | Cloud Functions v2 | manual `firebase deploy` | same | Cloud Logging |
 | Receipt sweep | `src/app/api/cron/sweep-receipts/route.ts`, `src/lib/registry/receipt-sweep.ts` | Vercel cron (`vercel.json`, daily 06:00 UTC) | automatic with Vercel deploy | Vercel → Deployments → Cron / Functions logs | Vercel → Logs, `subsystem:"receipt-cleanup"`; partial failures return 500 |
+| Reminder send | `src/app/api/cron/reminders/route.ts`, `src/lib/registry/reminders.ts`, `src/lib/registry/communications.ts` | Vercel cron (`vercel.json`, daily 12:00 UTC = 08:00 AST) | automatic with Vercel deploy | Vercel → Deployments → Cron; `/admin/communications` | Vercel → Logs, `subsystem:"communications"`; 503 when provider unconfigured |
+| Resend webhook | `src/app/api/webhooks/resend/route.ts` | Resend dashboard (endpoint + signing secret) | manual provider config | Resend dashboard → Webhooks | signature failures → 400; no secret → 503 |
 | Firestore rules | `firestore.rules` | Firestore | manual `firebase deploy --only firestore:rules` | Firebase console → Firestore → Rules | denied requests surface as `permission-denied` in app logs |
 | Storage rules | `storage.rules` | Cloud Storage | manual `firebase deploy --only storage` | Firebase console → Storage → Rules | `storage/unauthorized` in app logs |
 | Firestore indexes | `firestore.indexes.json` | Firestore | manual (currently none — see §7) | Firebase console → Firestore → Indexes | query failures in app logs |
@@ -82,7 +86,10 @@ files is not used by production code.
 | `ADMIN_EMAILS` | Bootstrap/emergency admin allowlist — NOT the authorization authority (Postgres `admin_users` is; see §21) | yes-ish — emails are personal data |
 | `DATABASE_URL` | Neon Postgres pooled endpoint — **required**: registry reads/writes + admin authz | **yes** (Vercel–Neon integration) |
 | `DATABASE_URL_UNPOOLED` | Neon unpooled endpoint for migrations/preview self-migrate | **yes** (Vercel–Neon integration) |
-| `CRON_SECRET` | Bearer guard for `/api/cron/sweep-receipts` | **yes** — random string, set in Production AND Preview |
+| `CRON_SECRET` | Bearer guard for `/api/cron/*` routes | **yes** — random string, set in Production AND Preview |
+| `RESEND_API_KEY` | Resend API key for reminder email delivery | **yes** — without it live reminder runs refuse (503); dry-run still works |
+| `EMAIL_FROM` | Verified sender identity, e.g. `SFPCA <reminders@…>` — domain must be verified in Resend | no |
+| `RESEND_WEBHOOK_SECRET` | `whsec_…` webhook signing secret | **yes** — without it the webhook route refuses everything (503) |
 | `NEXT_PUBLIC_GTM_ID` | Google Tag Manager container; injected only after analytics consent (§16); absent ⇒ no Google traffic | no |
 | `NEXT_PUBLIC_SITE_URL` | Canonical origin for sitemap/OG/canonical | no |
 | `SITE_MAINTENANCE_MODE` | `"true"` gates all public routes (§9) | no, but server-only — never `NEXT_PUBLIC_*` |
@@ -1399,3 +1406,106 @@ cleared on their next session POST.
 client paths, but post-cutover writes only exist in Postgres — a
 rollback needs the data direction decided explicitly (§11). The right
 response to a Postgres incident is fixing Postgres, not flipping back.
+
+## 22. Reminders & owner communications (#172)
+
+Automated owner reminders run as one pipeline: eligibility evaluation →
+idempotent queueing into `communications` → delivery drain → outcome
+recording. The database is the source of truth; the Resend dashboard is
+a diagnostic aid only.
+
+### 22a. What runs when
+
+- `/api/cron/reminders` — Vercel cron, daily 12:00 UTC (08:00 AST).
+  Auth: `Authorization: Bearer $CRON_SECRET`; fails closed when unset.
+- `/api/webhooks/resend` — Resend delivery events (delivered/bounced/
+  failed/complained), signature-verified via `RESEND_WEBHOOK_SECRET`;
+  fails closed when unset.
+- `/admin/communications` — staff surface: exception list, send
+  history, dry-run preview.
+
+**Active reminder kinds:** `vaccination-reminder` only — eligibility is
+the canonical `listDueVaccinations` query (#173). Registration-due,
+unpaid-balance, and annual-confirmation reminders are **not** active:
+`registrations`/`payments` have no writers and there is no authoritative
+"last confirmed" state. They activate as new evaluators after
+#166/#169/#170 land — see `src/lib/reminders/policy.ts` for the
+intended cadence of each deferred kind.
+
+### 22b. Enabling delivery (operator checklist)
+
+1. Verify the sender domain in Resend; create an API key.
+2. Vercel → Environment Variables (Production + Preview):
+   `RESEND_API_KEY`, `EMAIL_FROM` (e.g. `SFPCA <reminders@sabafpca.com>`),
+   `RESEND_WEBHOOK_SECRET` (from step 3).
+3. Resend → Webhooks → add endpoint
+   `https://www.sabafpca.com/api/webhooks/resend`, subscribe to
+   `email.delivered`, `email.bounced`, `email.failed`,
+   `email.complained`; copy the signing secret into step 2.
+4. Run a dry run (below) before the first scheduled send.
+
+Without `RESEND_API_KEY`/`EMAIL_FROM` the cron route returns 503 for
+live runs — it never silently queues mail that cannot send.
+
+### 22c. Dry run — always before bulk changes
+
+```
+curl -H "Authorization: Bearer $CRON_SECRET" \
+  "https://www.sabafpca.com/api/cron/reminders?dry_run=1"
+```
+
+Optional `&as_of=YYYY-MM-DD` makes the run reproducible. The response
+reports `evaluated`/`queued`/`skipped`/`suppressed` plus per-reason
+breakdowns. Dry-run writes nothing and cannot send — the provider is
+never constructed on that path. Staff can run the same evaluation from
+`/admin/communications` → "Preview next reminder run".
+
+### 22d. Communication states & exceptions
+
+`queued → sending → sent → delivered`; `failed` and `skipped` are
+terminal. `detail` carries the machine-readable reason:
+
+- Skips (fixable data gaps or recipient choice): `no-owner`,
+  `ambiguous-ownership`, `household-no-contact`, `missing-email`,
+  `invalid-email`, `opted-out`.
+- Failures: `provider-rejected`, `provider-unavailable` (auto-retries
+  while under the attempt cap), `retry-exhausted`, `interrupted`
+  (send outcome uncertain — **never auto-resent**), `bounced`,
+  `complained`, `delivery-failed`, `malformed`.
+
+**Staff workflow** (`/admin/communications`): fix the underlying record
+(ownership, email, medical record) → the exception clears on the next
+run, or requeue a `failed` row manually after checking Resend. For
+`interrupted` rows, verify in the Resend dashboard whether the send
+went out before requeueing — the provider may hold a copy.
+
+### 22e. Idempotency & retry model
+
+- `communications.idempotency_key` is unique —
+  `<prefix>:<relatedId>:<cycleKey>:<touch>` (e.g.
+  `vax-reminder:<vax>:<due-date>:reminder-1`). Repeated cron runs,
+  retries, and manual re-evaluation collapse to one row.
+- The row uuid is sent as Resend's `Idempotency-Key` — a same-day
+  provider retry of the same row cannot double-send.
+- Cooldown: 14 days between touches of one cycle; 3 touches max per
+  cycle (`vaccination-reminder` policy).
+- `unavailable` outcomes requeue automatically (bounded by 5 attempts);
+  `interrupted`/`rejected` are staff-only retries via the requeue
+  action (audited).
+
+### 22f. Preferences
+
+`communication_preferences` records per-(person, channel, kind)
+opt-outs — staff-recorded today (owner self-serve arrives with #166's
+portal). Opt-outs suppress only kinds the policy marks `optional`
+(currently `vaccination-reminder`); operational notices
+(registration/payment/confirmation, once active) are never silenced by
+a preference row. There is deliberately no global unsubscribe.
+
+### 22g. Observability
+
+Structured logs under `subsystem:"communications"` (`reminder-cron`,
+`resend-webhook`, drain operations) — counts and coarse reasons only,
+never recipient addresses or bodies. Sentry captures unexpected errors
+through the same logger. Delivery truth lives on the `communications`
+rows; webhook misses are visible as `sent`-not-`delivered` rows.
