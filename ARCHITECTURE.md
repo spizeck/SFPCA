@@ -122,8 +122,8 @@ The session route also stamps a Firebase custom claim
 (`admin`, `adminRole`) so Firestore/Storage rules keep authorizing
 client-SDK writes (CMS edits, team-photo uploads) now that the
 `admins/` collection is retired; the claim is cleared on refused
-logins. Owner accounts (#166) become `auth_identities` + `persons` rows —
-no second auth authority.
+logins. Owner accounts (#166) are `auth_identities` + `persons` rows —
+the same chain, no second auth authority; see §5 "Owner registry".
 
 ## 4. Stack selection
 
@@ -154,6 +154,8 @@ plain SQL.
 | `households` + `household_members` | Grouped people/animals | composite PK, role CHECK |
 | `animals` | Permanent animal identity | `unique(legacy_id)`; species/sex/lifecycle CHECKs; **no** registration/payment columns |
 | `ownerships` | Historical animal↔person/household | exactly one of person/household (`num_nonnulls=1`); `valid_to > valid_from` |
+| `ownership_confirmations` | Append-only annual-confirmation events (#166) | one row per deliberate "still mine, still on Saba" attestation; restrictive FKs — evidence survives owner churn; `person_id` is the attesting member, `confirmed_by_identity_id` the account used (null for staff-recorded) |
+| `owner_requests` | Owner-originated requests + staff resolution (#166) | status CHECK `pending\|approved\|rejected\|cancelled`; `resolved_at`/`resolved_by` set exactly when leaving `pending`; kind CHECK `account-claim\|no-longer-mine\|transfer\|lifecycle-*`; `payload` holds free-text hints (never link keys) |
 | `registration_submissions` | Intake events (today's `animalRegistrations`) | `unique(legacy_id)`; owner contact snapshot; receipt **path** only |
 | `registrations` | Per-animal per-year record | `unique(animal_id, year)` |
 | `payments` | Provider-neutral ledger | integer cents + currency; kind/status CHECKs; no cascade deletes |
@@ -236,6 +238,59 @@ expectations participate in the dated-work ranking (overdue → due →
 upcoming), ahead of alerts. #172 may later consume this list for
 clinic reminders; the model stores no delivery state.
 
+**Owner registry (#166):** the durable owner/household side of the
+animal registry, built on the #183 schema. The governing rule: **a
+login account is not the ownership record** — `persons`,
+`auth_identities`, `households`/`household_members`, `animals`, and
+`ownerships` stay separate concepts.
+
+- **Identity linking.** Every verified login upserts an
+  `auth_identities` row (`unique(provider, provider_uid)`, email is a
+  refreshed snapshot). `provisionOwnerLink` then resolves the person:
+  an already-linked identity stays linked; an unlinked identity with no
+  matching unclaimed person gets a **new** person (exposing nothing
+  that isn't the caller's own); an identity whose email matches an
+  unclaimed person files an `account-claim` **request** — a typed
+  registry email is never proof of identity, and staff approve the link
+  at `/admin/requests`. Session creation is best-effort: a Postgres
+  failure must not lock staff out of admin.
+- **Households.** `household_members` grants portal *authorization*,
+  never ownership: members of a household may view and attest for
+  household-owned animals, but the `ownerships` row names the household
+  and membership changes never rewrite animal history.
+- **Ownership intervals.** `[valid_from, valid_to)`; `valid_to NULL` is
+  current. Mutations close one interval and open another — history is
+  never overwritten. Same-owner overlapping intervals are rejected;
+  different-owner overlap is legitimate co-ownership.
+  `src/lib/registry/ownership.ts` is the canonical service: current/
+  history reads, create/close/transfer/correct mutations (audited),
+  and `currentOwnerPersonIdAt` / `resolveAnimalOwner` — the single
+  current-owner projection that vaccinations, the vet queue, medical
+  snapshots, and communications all delegate to (deterministic:
+  person rows preferred over household, earliest `valid_from`, id
+  tiebreak; sending paths fail closed on ambiguity).
+- **Owner portal.** `/portal` serves owner-scoped DTOs only
+  (`PortalAnimal`, `OwnerRequestRecord`, `PersonRecord`) — no staff
+  notes, medical data, communications, or other owners. Every action in
+  `portal/actions.ts` re-resolves session → identity → person and
+  re-verifies `getOwnedOwnership` — a client-supplied ownership id is
+  never proof. Unlinked identities see only the pending-claim state.
+- **Annual confirmation.** `ownership_confirmations` is the
+  authoritative evidence: one row per deliberate attestation recording
+  ownership, animal, person, date, method, and actor identity.
+  Eligibility derives from `MAX(confirmed_on)` and `valid_from` —
+  never `updated_at` — via the canonical
+  `listOwnershipsRequiringConfirmation` (#172's eligibility source).
+- **Requests.** `owner_requests` is the durable record of everything an
+  owner asks the registry to change. The portal writes `pending` rows;
+  `/admin/requests` resolves them, applying the real change (link
+  identity, close/transfer ownership) transactionally with the status
+  flip. `lifecycle-deceased`/`lifecycle-moved-off-saba` approval closes
+  the reporter's ownership interval but does **not** mutate
+  `animals.lifecycle_status` — that transition is #167's authoritative
+  job, and the resolution audit row is its seam. `listOwnerRequests` is
+  the canonical exception query #177's dashboard should compose.
+
 **Owner communications & reminders (#172):** automated follow-up is one
 pipeline with five separate stages — eligibility, intent, delivery,
 outcome, retry — and the `communications` ledger is authoritative for
@@ -259,12 +314,17 @@ and `/api/webhooks/resend` applies verified `delivered`/`bounced`/
 `/api/cron/reminders` (Vercel cron); `?dry_run=1` runs the same
 eligibility without writing or sending, and `/admin/communications`
 exposes the exception-first staff surface plus a preview button.
-**Active reminder kind: `vaccination-reminder` only** — eligibility is
-#173's `listDueVaccinations`. The #172 registration-due,
-unpaid-balance, and annual-confirmation kinds are deliberately absent
-from `REMINDER_KINDS`: `registrations`/`payments` have no writers and
-no "last confirmed" state exists, so their eligibility would be
-fabricated. They plug in as new evaluators once #166/#169/#170 land.
+**Active reminder kinds:** `vaccination-reminder` (#173's
+`listDueVaccinations`) and `annual-confirmation-reminder` (#166's
+`listOwnershipsRequiringConfirmation` — activated now that deliberate
+confirmation state exists; household-owned animals resolve to a
+contactable member, and the kind is non-optional so opt-out
+preferences cannot silence an obligation notice — the
+`communication_preferences` CHECK refuses the kind outright). The #172
+registration-due and unpaid-balance kinds remain deliberately absent
+from `REMINDER_KINDS`: `registrations`/`payments` have no writers, so
+their eligibility would be fabricated. They plug in as new evaluators
+once #169/#170 land.
 
 ## 6. ID strategy
 
@@ -442,6 +502,7 @@ parameters and row data are never logged.
 
 ## 15. Roadmap notes (#166–#179)
 
-Dependency findings are filed as follow-up issues; nothing in #166–#179
-is implemented here. The schema already contains the tables each issue
-needs (see §5), so they can proceed once the phase they depend on lands.
+Dependency findings are filed as follow-up issues. #166 (owner
+registry, portal, annual confirmation) is implemented — see §5.
+The schema already contains the tables the remaining issues need, so
+they can proceed once the phase they depend on lands.

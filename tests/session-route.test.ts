@@ -13,6 +13,8 @@ const {
   mockProvisionAdminUser,
   mockCookieSet,
   mockIsAdmin,
+  mockUpsertAuthIdentity,
+  mockProvisionOwnerLink,
 } = vi.hoisted(() => ({
   mockVerifyIdToken: vi.fn(),
   mockCreateSessionCookie: vi.fn(),
@@ -20,6 +22,8 @@ const {
   mockProvisionAdminUser: vi.fn(),
   mockCookieSet: vi.fn(),
   mockIsAdmin: vi.fn(),
+  mockUpsertAuthIdentity: vi.fn(),
+  mockProvisionOwnerLink: vi.fn(),
 }));
 
 vi.mock("@/lib/firebase-admin", () => ({
@@ -34,6 +38,16 @@ vi.mock("@/lib/firebase-admin", () => ({
 // insert semantics are exercised for real in tests/db.
 vi.mock("@/lib/registry/admin-users", () => ({
   provisionAdminUser: mockProvisionAdminUser,
+}));
+
+// Owner-side identity/provisioning seams (#166) — mocked so the route
+// tests exercise the route's own decisions; the real behavior is
+// covered against PGlite in tests/db.
+vi.mock("@/lib/registry/persons", () => ({
+  upsertAuthIdentity: mockUpsertAuthIdentity,
+}));
+vi.mock("@/lib/registry/owner-requests", () => ({
+  provisionOwnerLink: mockProvisionOwnerLink,
 }));
 
 // Partial mock: isAdmin is stubbed, but isExpectedAuthError stays real —
@@ -77,7 +91,21 @@ beforeEach(() => {
   mockProvisionAdminUser.mockReset();
   mockCookieSet.mockReset();
   mockIsAdmin.mockReset();
+  mockUpsertAuthIdentity.mockReset();
+  mockProvisionOwnerLink.mockReset();
   mockProvisionAdminUser.mockResolvedValue(null);
+  mockUpsertAuthIdentity.mockResolvedValue({
+    id: "identity-1",
+    provider: "firebase",
+    providerUid: "uid-1",
+    email: "user@example.com",
+    personId: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+  mockProvisionOwnerLink.mockResolvedValue({
+    status: "created",
+    person: { id: "person-1" },
+  });
 });
 
 describe("POST /api/auth/session", () => {
@@ -93,7 +121,11 @@ describe("POST /api/auth/session", () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body).toEqual({ authorized: true, role: "admin" });
+    expect(body).toMatchObject({
+      authorized: true,
+      isAdmin: true,
+      role: "admin",
+    });
     expect(mockVerifyIdToken).toHaveBeenCalledWith("valid-token");
     expect(mockCreateSessionCookie).toHaveBeenCalledWith("valid-token", {
       expiresIn: FIVE_DAYS_MS,
@@ -141,7 +173,7 @@ describe("POST /api/auth/session", () => {
     expect(mockCreateSessionCookie).not.toHaveBeenCalled();
   });
 
-  test("rejects a verified user who is not an admin and clears their claim", async () => {
+  test("issues an owner session for a verified non-admin and clears their claim", async () => {
     mockVerifyIdToken.mockResolvedValue({
       email: "user@example.com",
       email_verified: true,
@@ -150,15 +182,47 @@ describe("POST /api/auth/session", () => {
     mockIsAdmin.mockResolvedValue({ isAdmin: false });
 
     const response = await POST(postRequest({ idToken: "token" }));
-    expect(response.status).toBe(403);
-    expect((await response.json()).authorized).toBe(false);
-    expect(mockCreateSessionCookie).not.toHaveBeenCalled();
-    // A removed admin's rules-side access must not linger in a stale
-    // token — the claim is cleared on the rejected login.
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      authorized: true,
+      isAdmin: false,
+      owner: "created",
+    });
+    // The owner session cookie is real — but the admin claim is
+    // explicitly cleared so a removed admin's rules-side access cannot
+    // linger in a stale token.
+    expect(mockCreateSessionCookie).toHaveBeenCalled();
     expect(mockSetCustomUserClaims).toHaveBeenCalledWith("uid-1", {
       admin: false,
     });
     expect(mockProvisionAdminUser).not.toHaveBeenCalled();
+    // The owner-side identity was materialized and provisioned.
+    expect(mockUpsertAuthIdentity).toHaveBeenCalledWith({
+      providerUid: "uid-1",
+      email: "user@example.com",
+    });
+    expect(mockProvisionOwnerLink).toHaveBeenCalled();
+  });
+
+  test("still issues the session when owner provisioning fails", async () => {
+    mockVerifyIdToken.mockResolvedValue({
+      email: "user@example.com",
+      email_verified: true,
+      uid: "uid-2",
+    });
+    mockIsAdmin.mockResolvedValue({ isAdmin: false });
+    mockUpsertAuthIdentity.mockRejectedValue(new Error("db down"));
+
+    const response = await POST(postRequest({ idToken: "token" }));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      authorized: true,
+      isAdmin: false,
+      owner: "unavailable",
+    });
+    expect(mockCreateSessionCookie).toHaveBeenCalled();
   });
 
   test("rejects an invalid or malformed token with 401", async () => {

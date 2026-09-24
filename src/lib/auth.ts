@@ -1,5 +1,6 @@
 import { adminAuth } from "./firebase-admin";
 import { findAdminUser } from "./registry/admin-users";
+import { resolveOwnerSession } from "./registry/persons";
 import { logError } from "./logger";
 import { cookies } from "next/headers";
 
@@ -95,4 +96,38 @@ export async function requireAdmin() {
   }
 
   return { authorized: true, user, role };
+}
+
+// Owner-side session resolution (#166). The chain is deliberately the
+// whole of the authorization: session cookie → Firebase uid →
+// auth_identities → persons. A valid session alone proves WHO signed
+// in, never WHICH person they are — person comes back null while the
+// identity is unlinked (e.g. an account claim is pending staff review),
+// and portal surfaces must treat that as "no owner data", not as a
+// failure or a guess.
+export async function requireOwner() {
+  const user = await getCurrentUser();
+  if (!user) {
+    return { authorized: false, user: null, identity: null, person: null };
+  }
+  try {
+    const ctx = await resolveOwnerSession(user.uid);
+    if (!ctx) {
+      // Session exists but no registry identity row yet — provisioning
+      // happens in the session route; a missing row here means it failed
+      // or hasn't run. Deny cleanly rather than fabricating a link.
+      return { authorized: false, user, identity: null, person: null };
+    }
+    return {
+      authorized: true,
+      user,
+      identity: ctx.identity,
+      person: ctx.person,
+    };
+  } catch (error) {
+    // A Postgres outage must not silently grant or deny-by-accident —
+    // log it and fail closed.
+    logError("auth", "owner-session-resolve", error);
+    return { authorized: false, user, identity: null, person: null };
+  }
 }

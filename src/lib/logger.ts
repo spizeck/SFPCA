@@ -21,6 +21,8 @@ export type LogSubsystem =
   | "medical"
   | "communications"
   | "content"
+  | "portal"
+  | "owners"
   | "ui";
 
 export interface SafeError {

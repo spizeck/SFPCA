@@ -41,6 +41,7 @@ import { ClinicExpectationDialog } from "@/components/admin/medical/clinic-expec
 import { ClinicExpectationPanel } from "@/components/admin/medical/clinic-expectation-panel";
 import { MarkSeenDialog } from "@/components/admin/medical/mark-seen-dialog";
 import { CommunicationsPanel } from "@/components/admin/medical/communications-panel";
+import { OwnershipPanel } from "@/components/admin/medical/ownership-panel";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -138,8 +139,17 @@ export default function AnimalMedicalPage() {
     );
   }
 
-  const { animal, timeline, followUps, clinicExpectations, communications } =
-    record;
+  const {
+    animal,
+    timeline,
+    followUps,
+    clinicExpectations,
+    communications,
+    ownerships,
+    confirmations,
+    persons,
+    households,
+  } = record;
   const encounters = timeline
     .filter((i) => i.kind === "encounter")
     .map((i) => i.record as AdminVetEncounter);
@@ -252,6 +262,16 @@ export default function AnimalMedicalPage() {
           />
         </CardContent>
       </Card>
+
+      <OwnershipPanel
+        animalId={animal.id}
+        ownerships={ownerships}
+        confirmations={confirmations}
+        persons={persons}
+        households={households}
+        today={today}
+        onChanged={loadRecord}
+      />
 
       <CommunicationsPanel communications={communications} />
 

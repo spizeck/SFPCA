@@ -15,10 +15,10 @@ test.describe("admin journeys", () => {
 
     await expect(page).toHaveURL(/\/login/);
     await expect(
-      page.getByRole("heading", { name: "SFPCA Admin" }),
+      page.getByRole("heading", { name: "SFPCA" }),
     ).toBeVisible();
     await expect(
-      page.getByText("Sign in to access the admin dashboard"),
+      page.getByText("Sign in to your account"),
     ).toBeVisible();
   });
 
@@ -86,24 +86,25 @@ test.describe("admin journeys", () => {
     await expect(page).toHaveURL(/\/login/);
   });
 
-  test("a signed-in non-admin is denied a session and cannot enter /admin", async ({
+  test("a signed-in non-admin gets an owner session but cannot enter /admin", async ({
     page,
   }) => {
-    // The synthetic user has a verified email but no admins/ document:
-    // Firebase sign-in succeeds, session creation is refused, and the
-    // admin area stays unreachable.
+    // #166: a verified non-admin sign-in now provisions an owner-portal
+    // session (registry identity + fresh person — no admin_users row
+    // exists, so no authority is granted beyond "self"). The admin area
+    // still fails closed.
     await page.goto("/login");
     await page.getByLabel("Email").fill(E2E_USER_EMAIL);
     await page.getByLabel("Password").fill(E2E_USER_PASSWORD);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
 
+    await expect(page).toHaveURL("/portal");
     await expect(
-      page.getByText("Access Denied", { exact: true }),
+      page.getByRole("heading", { name: "Owner Portal" }),
     ).toBeVisible();
-    await expect(page).not.toHaveURL("/admin");
 
-    // No session was issued, so direct navigation still fails closed —
-    // even for nested routes.
+    // A valid owner session is not admin authority — direct navigation
+    // still fails closed, even for nested routes.
     await page.goto("/admin");
     await expect(page).toHaveURL(/\/login/);
     await page.goto("/admin/registrations");

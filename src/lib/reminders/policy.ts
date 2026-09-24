@@ -16,14 +16,18 @@
 //                                      registration state)
 //   'registration-payment-reminder'  — needs #170 (payment ledger +
 //                                      authoritative outstanding balance)
-//   'annual-confirmation-reminder'   — needs #166 (owner profiles +
-//                                      a real last-confirmed field —
-//                                      never derived from updated_at)
-
-// The reminder classes that exist today. 'vaccination-reminder' is the
-// only one whose eligibility source (#173's listDueVaccinations) is
-// implemented and authoritative.
-export const REMINDER_KINDS = ["vaccination-reminder"] as const;
+//   ('annual-confirmation-reminder' left this list in #166 — its
+//    eligibility source now exists)
+//
+// The reminder classes that exist today. 'vaccination-reminder' reads
+// #173's listDueVaccinations; 'annual-confirmation-reminder' (#166)
+// reads the canonical listOwnershipsRequiringConfirmation — an
+// ownership relationship is due when no deliberate confirmation row
+// exists within the period (never derived from updated_at).
+export const REMINDER_KINDS = [
+  "vaccination-reminder",
+  "annual-confirmation-reminder",
+] as const;
 export type ReminderKind = (typeof REMINDER_KINDS)[number];
 
 export function isReminderKind(value: string): value is ReminderKind {
@@ -62,6 +66,19 @@ export const REMINDER_POLICIES: Record<ReminderKind, ReminderPolicy> = {
     optional: true,
     cooldownDays: 14,
     maxTouches: 3,
+  },
+  // Annual ownership re-affirmation (#166). Operational, not optional:
+  // keeping the registry's owner records current is a responsibility of
+  // the registered owner, so no preference row can silence it. One
+  // reminder a month, twice per lapse — beyond that the relationship
+  // belongs to staff exception handling, not more mail.
+  "annual-confirmation-reminder": {
+    kind: "annual-confirmation-reminder",
+    keyPrefix: "confirm-reminder",
+    channel: "email",
+    optional: false,
+    cooldownDays: 30,
+    maxTouches: 2,
   },
 };
 

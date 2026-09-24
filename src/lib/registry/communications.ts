@@ -29,11 +29,9 @@ import {
   asc,
   desc,
   eq,
-  gt,
   inArray,
   isNull,
   lt,
-  lte,
   or,
   sql,
 } from "drizzle-orm";
@@ -42,7 +40,6 @@ import {
   auditEvents,
   communicationPreferences,
   communications,
-  ownerships,
   persons,
 } from "../db/schema";
 import { getRegistryDb } from "../db/client";
@@ -738,64 +735,8 @@ export async function communicationSummary(
   return summary;
 }
 
-// Strict current-owner resolution for reminder sending — deliberately
-// stricter than the read projections (which pick one owner
-// deterministically for display): for SENDING, more than one
-// simultaneously-valid ownership is ambiguous data, not a recipient.
-export type ResolvedOwner =
-  | { status: "ok"; personId: string; name: string; email: string | null }
-  | {
-      status: "skip";
-      detail: (typeof SKIP_REASONS)[number];
-      personId: string | null;
-    };
-
-export async function resolveAnimalOwner(
-  animalId: string,
-  asOf: string,
-  db: RegistryDb = getRegistryDb(),
-): Promise<ResolvedOwner> {
-  if (!UUID_RE.test(animalId)) {
-    return { status: "skip", detail: "no-owner", personId: null };
-  }
-  const rows = await db
-    .select({
-      ownershipPersonId: ownerships.personId,
-      householdId: ownerships.householdId,
-      personId: persons.id,
-      name: persons.fullName,
-      email: persons.email,
-    })
-    .from(ownerships)
-    .leftJoin(persons, eq(ownerships.personId, persons.id))
-    .where(
-      and(
-        eq(ownerships.animalId, animalId),
-        lte(ownerships.validFrom, asOf),
-        or(isNull(ownerships.validTo), gt(ownerships.validTo, asOf)),
-      ),
-    );
-  if (rows.length === 0) {
-    return { status: "skip", detail: "no-owner", personId: null };
-  }
-  // More than one simultaneously-valid ownership is ambiguous data —
-  // sending would mean guessing which person is responsible.
-  if (rows.length > 1) {
-    return { status: "skip", detail: "ambiguous-ownership", personId: null };
-  }
-  const row = rows[0];
-  if (!row.personId) {
-    // Household ownership carries no contactable person.
-    return {
-      status: "skip",
-      detail: "household-no-contact",
-      personId: null,
-    };
-  }
-  return {
-    status: "ok",
-    personId: row.personId,
-    name: row.name!,
-    email: row.email,
-  };
-}
+// Strict current-owner resolution lives in ownership.ts (#166) — the
+// canonical "who owns this animal" module — so every sender and every
+// display projection share one definition that cannot drift.
+export { resolveAnimalOwner } from "./ownership";
+export type { ResolvedOwner } from "./ownership";
