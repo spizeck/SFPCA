@@ -5,11 +5,11 @@
 // reads AUTHORITATIVE domain state and returns decisions; this module
 // owns persistence, idempotency-key derivation, counting, and delivery.
 // A kind registers only when its eligibility source is implemented —
-// today that is vaccination reminders alone (#173's canonical
-// listDueVaccinations). Registration-due (#169), unpaid-balance (#170),
-// and annual-confirmation (#166) reminders are deliberately absent:
-// their source tables have no writers yet, so any "eligibility" would
-// be fabricated. They plug in here once those issues land.
+// today that is vaccination reminders (#173's listDueVaccinations) and
+// annual-confirmation reminders (#166's listOwnershipsRequiring-
+// Confirmation). Registration-due (#169) and unpaid-balance (#170)
+// reminders are deliberately absent: their source tables have no
+// writers yet, so any "eligibility" would be fabricated.
 //
 // Dry-run runs the same evaluation but writes nothing and never sends —
 // it cannot send: the delivery drain is not invoked and no provider
@@ -18,11 +18,15 @@
 import "server-only";
 
 import { and, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
-import { communications, ownerships } from "../db/schema";
+import { communications, ownerships, persons } from "../db/schema";
 import { getRegistryDb } from "../db/client";
 import { getSiteUrl } from "../seo";
 import { VACCINATION_DUE_SOON_DAYS } from "../vaccinations";
 import { listDueVaccinations } from "./vaccinations";
+import {
+  householdContactFor,
+  listOwnershipsRequiringConfirmation,
+} from "./ownership";
 import {
   daysSince,
   isSendTouch,
@@ -32,7 +36,10 @@ import {
   skipTouch,
   type ReminderKind,
 } from "../reminders/policy";
-import { renderVaccinationReminder } from "../reminders/templates";
+import {
+  renderAnnualConfirmationReminder,
+  renderVaccinationReminder,
+} from "../reminders/templates";
 import {
   deliverQueuedCommunications,
   EMAIL_RE,
@@ -249,10 +256,160 @@ export const evaluateVaccinationReminders: ReminderEvaluator = async (
   return items;
 };
 
+// --- Annual confirmation reminders ----------------------------------------------
+
+// The #166 evaluator: eligibility is the canonical
+// listOwnershipsRequiringConfirmation — current owner↔animal
+// relationships whose last deliberate confirmation is older than the
+// period (or never happened; valid_from seeds the clock). Each row IS
+// one relationship, so co-owners are reminded independently — there is
+// no single-recipient ambiguity the way vaccination sends have. The
+// cycle key is the relationship's due date, stable for the whole lapse.
+export const evaluateAnnualConfirmationReminders: ReminderEvaluator =
+  async (ctx, db) => {
+    const policy = REMINDER_POLICIES["annual-confirmation-reminder"];
+    const due = await listOwnershipsRequiringConfirmation(
+      { asOf: ctx.asOf },
+      db,
+    );
+    if (due.length === 0) return [];
+
+    const ownershipIds = due.map((d) => d.ownershipId);
+    const personIds = due
+      .map((d) => d.personId)
+      .filter((id): id is string => id !== null);
+    const householdIds = due
+      .map((d) => d.householdId)
+      .filter((id): id is string => id !== null);
+
+    const [existingRows, personRows, householdContacts] = await Promise.all([
+      db
+        .select({
+          relatedId: communications.relatedId,
+          cycleKey: communications.cycleKey,
+          touch: communications.touch,
+          createdAt: communications.createdAt,
+        })
+        .from(communications)
+        .where(
+          and(
+            eq(communications.kind, "annual-confirmation-reminder"),
+            eq(communications.relatedType, "ownership"),
+            inArray(communications.relatedId, ownershipIds),
+          ),
+        ),
+      personIds.length > 0
+        ? db
+            .select({ id: persons.id, email: persons.email })
+            .from(persons)
+            .where(inArray(persons.id, personIds))
+        : Promise.resolve([]),
+      householdContactFor(householdIds, db),
+    ]);
+    const emailByPersonId = new Map(personRows.map((p) => [p.id, p.email]));
+
+    const items: EvaluatedReminder[] = [];
+    for (const row of due) {
+      const cycleRows = existingRows.filter(
+        (r) => r.relatedId === row.ownershipId && r.cycleKey === row.dueOn,
+      );
+      const sendTouches = cycleRows.filter((r) => isSendTouch(r.touch));
+
+      const base = {
+        kind: "annual-confirmation-reminder" as const,
+        relatedType: "ownership",
+        relatedId: row.ownershipId,
+        cycleKey: row.dueOn,
+        animalId: row.animalId,
+      };
+
+      if (sendTouches.length >= policy.maxTouches) {
+        items.push({
+          ...base,
+          touch: sendTouch(sendTouches.length + 1),
+          decision: { type: "suppress", detail: "exhausted" },
+        });
+        continue;
+      }
+      const lastTouchAt = sendTouches
+        .map((r) => r.createdAt.getTime())
+        .reduce((a, b) => Math.max(a, b), 0);
+      if (
+        lastTouchAt > 0 &&
+        daysSince(new Date(lastTouchAt), ctx.asOf) < policy.cooldownDays
+      ) {
+        items.push({
+          ...base,
+          touch: sendTouch(sendTouches.length + 1),
+          decision: { type: "suppress", detail: "cooldown" },
+        });
+        continue;
+      }
+
+      const touch = sendTouch(sendTouches.length + 1);
+      const skip = (detail: string, personId: string | null = null) =>
+        items.push({
+          ...base,
+          touch: skipTouch(detail),
+          decision: { type: "skip", personId, detail },
+        });
+
+      // Recipient: the person-side owner's email, or the owning
+      // household's contactable member. No opt-out check — operational
+      // kinds are not suppressible by preference rows.
+      let recipientId: string | null;
+      let recipientName: string;
+      let recipientEmail: string | null;
+      if (row.personId) {
+        recipientId = row.personId;
+        recipientName = row.personName ?? "Owner";
+        recipientEmail = emailByPersonId.get(row.personId) ?? null;
+      } else {
+        const contact = householdContacts.get(row.householdId!);
+        if (!contact) {
+          skip("household-no-contact");
+          continue;
+        }
+        recipientId = contact.personId;
+        recipientName = contact.name;
+        recipientEmail = contact.email;
+      }
+      if (!recipientEmail) {
+        skip("missing-email", recipientId);
+        continue;
+      }
+      if (!EMAIL_RE.test(recipientEmail)) {
+        skip("invalid-email", recipientId);
+        continue;
+      }
+
+      const rendered = renderAnnualConfirmationReminder({
+        ownerName: recipientName,
+        animalName: row.animalName,
+        dueOn: row.dueOn,
+        siteUrl: ctx.siteUrl,
+      });
+      items.push({
+        ...base,
+        touch,
+        decision: {
+          type: "send",
+          personId: recipientId,
+          recipient: recipientEmail,
+          subject: rendered.subject,
+          bodyText: rendered.text,
+          bodyHtml: rendered.html,
+        },
+      });
+    }
+    return items;
+  };
+
 // Registered evaluators — one per implemented reminder kind. Deferred
 // classes are documented in policy.ts and intentionally absent here.
 const EVALUATORS: Record<ReminderKind, ReminderEvaluator> = {
   "vaccination-reminder": evaluateVaccinationReminders,
+  "annual-confirmation-reminder": evaluateAnnualConfirmationReminders,
 };
 
 const REGISTERED_KINDS = Object.keys(EVALUATORS) as ReminderKind[];

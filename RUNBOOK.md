@@ -1424,13 +1424,15 @@ a diagnostic aid only.
 - `/admin/communications` — staff surface: exception list, send
   history, dry-run preview.
 
-**Active reminder kinds:** `vaccination-reminder` only — eligibility is
-the canonical `listDueVaccinations` query (#173). Registration-due,
-unpaid-balance, and annual-confirmation reminders are **not** active:
-`registrations`/`payments` have no writers and there is no authoritative
-"last confirmed" state. They activate as new evaluators after
-#166/#169/#170 land — see `src/lib/reminders/policy.ts` for the
-intended cadence of each deferred kind.
+**Active reminder kinds:** `vaccination-reminder` (eligibility is
+#173's canonical `listDueVaccinations`) and `annual-confirmation-reminder`
+(eligibility is #166's `listOwnershipsRequiringConfirmation` — the
+append-only `ownership_confirmations` table is the authoritative "last
+confirmed" source; household-owned animals resolve to a contactable
+member). Registration-due and unpaid-balance reminders remain **not**
+active: `registrations`/`payments` have no writers. They activate as
+new evaluators after #169/#170 land — see `src/lib/reminders/policy.ts`
+for the intended cadence of each deferred kind.
 
 ### 22b. Enabling delivery (operator checklist)
 
@@ -1488,7 +1490,8 @@ went out before requeueing — the provider may hold a copy.
 - The row uuid is sent as Resend's `Idempotency-Key` — a same-day
   provider retry of the same row cannot double-send.
 - Cooldown: 14 days between touches of one cycle; 3 touches max per
-  cycle (`vaccination-reminder` policy).
+  cycle (`vaccination-reminder` policy). `annual-confirmation-reminder`
+  uses a 30-day cooldown and 2 touches (`confirm-reminder:` keys).
 - `unavailable` outcomes requeue automatically (bounded by 5 attempts);
   `interrupted`/`rejected` are staff-only retries via the requeue
   action (audited).
@@ -1496,11 +1499,13 @@ went out before requeueing — the provider may hold a copy.
 ### 22f. Preferences
 
 `communication_preferences` records per-(person, channel, kind)
-opt-outs — staff-recorded today (owner self-serve arrives with #166's
-portal). Opt-outs suppress only kinds the policy marks `optional`
-(currently `vaccination-reminder`); operational notices
-(registration/payment/confirmation, once active) are never silenced by
-a preference row. There is deliberately no global unsubscribe.
+opt-outs — staff-recorded today (owners manage contact details in the
+portal but not per-kind opt-outs). Opt-outs suppress only kinds the
+policy marks `optional` (currently `vaccination-reminder`);
+operational notices — `annual-confirmation-reminder` and the deferred
+registration/payment kinds — are never silenced by a preference row
+(the `kind` CHECK refuses non-optional kinds outright). There is
+deliberately no global unsubscribe.
 
 ### 22g. Observability
 
@@ -1509,3 +1514,53 @@ Structured logs under `subsystem:"communications"` (`reminder-cron`,
 never recipient addresses or bodies. Sentry captures unexpected errors
 through the same logger. Delivery truth lives on the `communications`
 rows; webhook misses are visible as `sent`-not-`delivered` rows.
+
+## 23. Owner portal & registry requests (#166)
+
+### 23a. What owners can do
+
+`/portal` (session-gated, `noindex`) is the owner-facing surface: contact
+details, household membership, currently-owned animals, annual
+confirmation ("still living on Saba and associated with me"), and
+change reports. Owners cannot apply ownership, identity, or lifecycle
+changes themselves — reports land as `pending` `owner_requests` rows.
+
+### 23b. Staff review workflow
+
+`/admin/requests` is the focused queue. Kinds:
+
+- **Account claim** — filed automatically at login when the sign-in
+  email matches an unclaimed `persons` row. Approving links the
+  `auth_identities` row to the staff-chosen person; rejecting leaves
+  the account unlinked. Never link without verifying the claimant out
+  of band — a matching email is not proof of identity.
+- **No longer mine** — approving closes the reporter's ownership
+  interval (effective date optional). The animal becomes ownerless and
+  stays in history; assign a new owner from the animal record if known.
+- **Transfer to new owner** — the owner's typed target is free text,
+  never a link. Approving requires staff to pick the real person or
+  household; the old interval closes and the new one opens atomically.
+- **Report deceased / Moved off Saba** — approving ends the reporter's
+  ownership. The animal's `lifecycle_status` is NOT changed (that's
+  #167's job — record the real status from the animal record once it
+  exists). The audit row is the handoff.
+
+Owners see outcomes on their next portal visit; there is no owner
+notification on resolution (a deliberate gap, not a bug).
+
+### 23c. People & households
+
+`/admin/persons` manages registry people, auth-identity links, and
+household membership. Linking/unlinking an identity changes who can see
+what — it is audited and reversible, but verify before linking an
+account to a person with animals. Person records are never deleted
+through the UI; historical ownership references them.
+
+### 23d. Failure modes
+
+- Portal shows "Account under review" = identity unlinked (claim
+  pending or provisioning failed). Check `/admin/requests` first;
+  `subsystem:"session"` logs record provisioning errors.
+- Owner reports a missing animal: check ownership history on the animal
+  record — a closed interval means a transfer/report was resolved;
+  an absent row means the link never existed.

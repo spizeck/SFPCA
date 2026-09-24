@@ -44,6 +44,7 @@ import {
   weightRecords,
 } from "../db/schema";
 import { getRegistryDb } from "../db/client";
+import { currentOwnerPersonIdAt } from "./ownership";
 import {
   ALERT_KINDS,
   ALERT_SEVERITIES,
@@ -532,28 +533,13 @@ async function encounterBelongsTo(
 
 // The current owner's person id — snapshot for follow_ups so the queue
 // knows who to reach without re-deriving ownership at send time.
+// Delegates to the canonical ownership projection (#166).
 async function currentOwnerPersonId(
   tx: Queryable,
   animalId: string,
   today: string,
 ): Promise<string | null> {
-  // Person rows only — a household ownership has no personId to
-  // snapshot; preferring it would silently lose the owner contact
-  // (mirrors the person-first ordering in listDueVaccinations).
-  const [row] = await tx
-    .select({ personId: ownerships.personId })
-    .from(ownerships)
-    .where(
-      and(
-        eq(ownerships.animalId, animalId),
-        isNotNull(ownerships.personId),
-        lte(ownerships.validFrom, today),
-        or(isNull(ownerships.validTo), gt(ownerships.validTo, today)),
-      ),
-    )
-    .orderBy(asc(ownerships.validFrom), asc(ownerships.id))
-    .limit(1);
-  return row?.personId ?? null;
+  return currentOwnerPersonIdAt(tx, animalId, today);
 }
 
 // Generic guarded update: row lock + expected updated_at + audit row,

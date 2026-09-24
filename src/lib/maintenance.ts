@@ -14,6 +14,14 @@ function isAdminPath(pathname: string): boolean {
   return pathname === "/admin" || pathname.startsWith("/admin/");
 }
 
+// The owner portal (#166) — authenticated owner self-service. Session-
+// gated like /admin and maintenance-exempt like /login: annual
+// confirmation and owner reports must stay reachable while the public
+// site is under construction (the reminder emails link here).
+function isPortalPath(pathname: string): boolean {
+  return pathname === "/portal" || pathname.startsWith("/portal/");
+}
+
 function isAuthApiPath(pathname: string): boolean {
   return pathname === "/api/auth" || pathname.startsWith("/api/auth/");
 }
@@ -43,7 +51,9 @@ const MAINTENANCE_EXEMPT_PREFIXES = [
 
 export function isMaintenanceExemptPath(pathname: string): boolean {
   if (MAINTENANCE_EXEMPT_PATHS.has(pathname)) return true;
-  if (isAdminPath(pathname) || isAuthApiPath(pathname)) return true;
+  if (isAdminPath(pathname) || isAuthApiPath(pathname) || isPortalPath(pathname)) {
+    return true;
+  }
   return MAINTENANCE_EXEMPT_PREFIXES.some((prefix) =>
     pathname.startsWith(prefix),
   );
@@ -51,16 +61,16 @@ export function isMaintenanceExemptPath(pathname: string): boolean {
 
 export type ProxyAction = "allow" | "login" | "maintenance";
 
-// Single routing decision for every request. The admin session gate is
-// evaluated first so that maintenance mode can never bypass or alter it:
-// in maintenance mode an unauthenticated /admin request still goes to
-// /login, and an authenticated one still reaches the admin area.
+// Single routing decision for every request. The session gates are
+// evaluated before maintenance so maintenance mode can never bypass or
+// alter them: an unauthenticated /admin or /portal request always goes
+// to /login, and an authenticated one still reaches it.
 export function getProxyAction(
   pathname: string,
   hasSession: boolean,
   env: Record<string, string | undefined> = process.env,
 ): ProxyAction {
-  if (isAdminPath(pathname)) {
+  if (isAdminPath(pathname) || isPortalPath(pathname)) {
     return hasSession ? "allow" : "login";
   }
   if (isMaintenanceMode(env) && !isMaintenanceExemptPath(pathname)) {

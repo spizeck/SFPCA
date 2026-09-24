@@ -84,3 +84,45 @@ export function renderVaccinationReminder(
 
   return { subject, text, html };
 }
+
+export interface AnnualConfirmationReminderContext {
+  ownerName: string;
+  animalName: string;
+  // The date this relationship's annual confirmation fell due (ISO).
+  dueOn: string;
+  siteUrl: string;
+}
+
+// Annual "is this animal still living on Saba and associated with you?"
+// nudge (#166). Links to the owner portal — the only place the
+// confirmation can actually be recorded.
+export function renderAnnualConfirmationReminder(
+  ctx: AnnualConfirmationReminderContext,
+): RenderedEmail {
+  const portalUrl = absoluteUrl("/portal", {
+    NEXT_PUBLIC_SITE_URL: ctx.siteUrl,
+  });
+
+  const subject = `Annual confirmation needed for ${ctx.animalName}`;
+  const text = [
+    `Hello ${ctx.ownerName},`,
+    ``,
+    `Each year the ${ORG_NAME} asks registered owners to confirm their animals so our records stay accurate.`,
+    ``,
+    `The annual confirmation for ${ctx.animalName} was due on ${ctx.dueOn}. Please sign in to the owner portal and confirm that ${ctx.animalName} is still living on Saba and in your care:`,
+    `${portalUrl}`,
+    ``,
+    `If ${ctx.animalName} is no longer in your care, has died, or has left Saba, you can report that in the portal too — it only takes a minute and keeps the registry correct.`,
+    ``,
+    `— ${ORG_NAME}`,
+  ].join("\n");
+
+  const html = htmlShell([
+    `Hello ${escapeHtml(ctx.ownerName)},`,
+    `Each year the ${escapeHtml(ORG_NAME)} asks registered owners to confirm their animals so our records stay accurate.`,
+    `The annual confirmation for <strong>${escapeHtml(ctx.animalName)}</strong> was due on <strong>${escapeHtml(ctx.dueOn)}</strong>. Please <a href="${escapeHtml(portalUrl)}">sign in to the owner portal</a> and confirm that ${escapeHtml(ctx.animalName)} is still living on Saba and in your care.`,
+    `If ${escapeHtml(ctx.animalName)} is no longer in your care, has died, or has left Saba, you can report that in the portal too — it keeps the registry correct.`,
+  ]);
+
+  return { subject, text, html };
+}

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminAuth } from "@/lib/firebase-admin";
 import { isAdmin, isExpectedAuthError } from "@/lib/auth";
 import { provisionAdminUser } from "@/lib/registry/admin-users";
+import { upsertAuthIdentity } from "@/lib/registry/persons";
+import { provisionOwnerLink } from "@/lib/registry/owner-requests";
 import { logError, logWarn } from "@/lib/logger";
 import { cookies } from "next/headers";
 
@@ -34,6 +36,8 @@ function sessionCookieAttributes() {
   };
 }
 
+export type OwnerLinkStatus = "linked" | "created" | "pending-claim" | "unavailable";
+
 export async function POST(request: NextRequest) {
   if (!isSameOrigin(request)) {
     return NextResponse.json({ authorized: false }, { status: 403 });
@@ -44,6 +48,8 @@ export async function POST(request: NextRequest) {
 
     const decodedToken = await adminAuth().verifyIdToken(idToken);
     const email = decodedToken.email!;
+    const displayName =
+      typeof decodedToken.name === "string" ? decodedToken.name : null;
 
     // Firestore/Storage rules require a verified email for admin access;
     // enforce the same boundary for session creation.
@@ -53,30 +59,52 @@ export async function POST(request: NextRequest) {
 
     const { isAdmin: userIsAdmin, role } = await isAdmin(email);
 
-    if (!userIsAdmin) {
+    if (userIsAdmin) {
+      // Provision the Postgres admin_users row (insert-only; never
+      // rewrites a staff-managed role). Covers ADMIN_EMAILS bootstrap on
+      // first login and self-heals a missing row for Postgres-listed
+      // admins.
+      await provisionAdminUser(email);
+
+      // The Firestore admins/ collection is retired: rules-side
+      // authorization for client-SDK writes (CMS saves, team photos,
+      // receipt uploads) rides on this custom claim instead. The client
+      // must force-refresh its ID token after a successful session POST
+      // for the claim to reach rules-evaluated requests.
+      await adminAuth().setCustomUserClaims(decodedToken.uid, {
+        admin: true,
+        adminRole: role ?? "admin",
+      });
+    } else {
+      // #166: non-admin verified users get an owner-portal session.
       // Clear any stale admin claim so a removed admin's rules-side
       // access ends on the next token refresh instead of lingering.
       await adminAuth().setCustomUserClaims(decodedToken.uid, {
         admin: false,
       });
-      return NextResponse.json({ authorized: false }, { status: 403 });
     }
 
-    // Provision the Postgres admin_users row (insert-only; never
-    // rewrites a staff-managed role). Covers ADMIN_EMAILS bootstrap on
-    // first login and self-heals a missing row for Postgres-listed
-    // admins.
-    await provisionAdminUser(email);
-
-    // The Firestore admins/ collection is retired: rules-side
-    // authorization for client-SDK writes (CMS saves, team photos,
-    // receipt uploads) rides on this custom claim instead. The client
-    // must force-refresh its ID token after a successful session POST
-    // for the claim to reach rules-evaluated requests.
-    await adminAuth().setCustomUserClaims(decodedToken.uid, {
-      admin: true,
-      adminRole: role ?? "admin",
-    });
+    // Every verified login materializes an auth_identities row, then the
+    // owner-side link: an already-linked identity stays linked, an
+    // unlinked one with no matching unclaimed person gets a fresh person
+    // (exposing nothing that isn't the caller's own), and an email-matched
+    // one files an 'account-claim' request for staff review — a typed
+    // registry email is never proof of identity. Provisioning is best-
+    // effort: a Postgres failure must not lock staff out of admin.
+    let ownerStatus: OwnerLinkStatus = "unavailable";
+    try {
+      const identity = await upsertAuthIdentity({
+        providerUid: decodedToken.uid,
+        email: email ?? null,
+      });
+      const linked = await provisionOwnerLink(identity, {
+        displayName,
+        actorLabel: email ?? decodedToken.uid,
+      });
+      ownerStatus = linked.status;
+    } catch (error) {
+      logError("session", "owner-provision", error);
+    }
 
     const expiresIn = 60 * 60 * 24 * 5 * 1000;
     const sessionCookie = await adminAuth().createSessionCookie(idToken, { expiresIn });
@@ -87,12 +115,17 @@ export async function POST(request: NextRequest) {
       maxAge: expiresIn,
     });
 
-    return NextResponse.json({ authorized: true, role });
+    return NextResponse.json({
+      authorized: true,
+      isAdmin: userIsAdmin,
+      role,
+      owner: ownerStatus,
+    });
   } catch (error) {
     // Malformed JSON and invalid/expired/revoked ID tokens are routine
     // client failures (and attacker-craftable) — warn only, never
     // error-level noise. Anything else is a Firebase/infra failure
-    // locking out legitimate admins.
+    // locking out legitimate users.
     if (isExpectedAuthError(error) || error instanceof SyntaxError) {
       logWarn("session", "create", "session request rejected");
     } else {

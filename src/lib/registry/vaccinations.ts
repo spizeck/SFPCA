@@ -52,6 +52,7 @@ import {
   type VaccinationDueState,
 } from "../vaccinations";
 import { insertCommunication } from "./communications";
+import { currentOwnershipSq } from "./ownership";
 import type { RegistryDb } from "./public-animals";
 
 const UUID_RE =
@@ -420,32 +421,10 @@ export async function listDueVaccinations(
     )
     .as("latest_doses");
 
-  // Ownership valid at asOf: [valid_from, valid_to) — an open-ended
-  // valid_to is "still current". DISTINCT ON guarantees at most one
-  // owner per animal even if bad data leaves two rows valid at once.
-  const currentOwnership = db
-    .selectDistinctOn([ownerships.animalId], {
-      animalId: ownerships.animalId,
-      personId: ownerships.personId,
-      householdId: ownerships.householdId,
-    })
-    .from(ownerships)
-    .where(
-      and(
-        lte(ownerships.validFrom, asOf),
-        or(isNull(ownerships.validTo), gt(ownerships.validTo, asOf)),
-      ),
-    )
-    .orderBy(
-      ownerships.animalId,
-      // Deterministic pick under inconsistent data: a person beats a
-      // household (person rows carry contact details), then earliest
-      // valid_from, then id as a stable tiebreak.
-      asc(sql`(${ownerships.personId} IS NULL)`),
-      asc(ownerships.validFrom),
-      asc(ownerships.id),
-    )
-    .as("current_ownership");
+  // Ownership valid at asOf: [valid_from, valid_to) — the canonical
+  // projection lives in ownership.ts (#166); every "current owner" read
+  // shares one definition so they can never drift.
+  const currentOwnership = currentOwnershipSq(db, asOf, "current_ownership");
 
   const sent = db
     .select({

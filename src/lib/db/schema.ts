@@ -188,6 +188,15 @@ export const animals = pgTable(
 
 // Historical ownership — animal ↔ person OR household. Never rewritten:
 // an ownership change closes validTo on the old row and opens a new one.
+// Intervals are [valid_from, valid_to): an open-ended valid_to is "still
+// current", and valid_to is the first day the relationship no longer
+// holds. Multiple simultaneously-valid rows are legitimate co-ownership
+// (e.g. two partners each recorded) — the canonical projections in
+// src/lib/registry/ownership.ts pick deterministically for display and
+// fail closed on ambiguity where guessing would be wrong (reminder
+// sends). note is staff context for why the interval exists ("transfer
+// approved via owner request", "registration import") — attribution
+// lives in audit_events.
 export const ownerships = pgTable(
   "ownerships",
   {
@@ -199,10 +208,15 @@ export const ownerships = pgTable(
     householdId: uuid("household_id").references(() => households.id),
     validFrom: date("valid_from", { mode: "string" }).notNull(),
     validTo: date("valid_to", { mode: "string" }),
+    note: text("note"),
     createdAt: createdAt(),
   },
   (t) => [
     index("ownerships_animal_idx").on(t.animalId),
+    // The owner-portal hot reads: "my animals" by person, and by every
+    // household the person belongs to.
+    index("ownerships_person_idx").on(t.personId),
+    index("ownerships_household_idx").on(t.householdId),
     check(
       "ownerships_one_owner_side_check",
       sql`num_nonnulls(${t.personId}, ${t.householdId}) = 1`,
@@ -210,6 +224,148 @@ export const ownerships = pgTable(
     check(
       "ownerships_valid_range_check",
       sql`${t.validTo} IS NULL OR ${t.validTo} > ${t.validFrom}`,
+    ),
+  ],
+);
+
+// Annual ownership confirmations (#166) — append-only evidence that a
+// person explicitly affirmed "this animal is still living on Saba and
+// associated with me". A row is an EVENT, not mutable state: the
+// relationship's last-confirmed date is MAX(confirmed_on) and history
+// is never rewritten. person_id is the confirmed owner (for household
+// ownerships, the member who attested); confirmed_by_identity_id is the
+// authenticated account that submitted it (null for staff-recorded or
+// imported confirmations). animal_id is denormalized from the ownership
+// (immutable) so per-animal history reads don't re-join.
+export const ownershipConfirmations = pgTable(
+  "ownership_confirmations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownershipId: uuid("ownership_id")
+      .notNull()
+      .references(() => ownerships.id), // restrictive — evidence of the relationship
+    animalId: uuid("animal_id")
+      .notNull()
+      .references(() => animals.id), // restrictive — history
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => persons.id), // restrictive — history
+    confirmedByIdentityId: uuid("confirmed_by_identity_id").references(
+      () => authIdentities.id,
+      { onDelete: "set null" },
+    ),
+    confirmedOn: date("confirmed_on", { mode: "string" })
+      .notNull()
+      .defaultNow(),
+    method: text("method").notNull(),
+    // Staff display label when method='staff' ("volunteer Maria at
+    // clinic") — the owner-portal path leaves it null because the
+    // identity link is the attribution.
+    actorLabel: text("actor_label"),
+    notes: text("notes"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("ownership_confirmations_ownership_idx").on(t.ownershipId),
+    index("ownership_confirmations_animal_idx").on(t.animalId),
+    index("ownership_confirmations_confirmed_idx").on(t.confirmedOn),
+    check(
+      "ownership_confirmations_method_check",
+      sql`${t.method} IN ('owner-portal','staff')`,
+    ),
+  ],
+);
+
+// Owner-originated requests (#166) — the durable record of everything an
+// owner asks the registry to change, plus the staff decision. Portal
+// actions never mutate ownership/identity/lifecycle directly for
+// high-impact or ambiguous changes: they write a 'pending' row here and
+// staff resolve it. This is the canonical owner/registry exception query
+// #177's dashboard should compose.
+//
+// Kind semantics:
+//   'account-claim'            — a verified login claims an existing
+//                                person record; person_id is null until
+//                                staff pick the person at resolution
+//                                (payload.candidatePersonIds lists the
+//                                email-matched possibilities)
+//   'no-longer-mine'           — owner reports the animal left their
+//                                care; new owner unknown
+//   'transfer'                 — owner names a new owner (payload carries
+//                                the free-text target contact — never
+//                                auto-resolved into a link)
+//   'lifecycle-deceased'       — owner reports the animal died
+//   'lifecycle-moved-off-saba' — owner reports the animal left Saba
+//
+// For the animal-scoped kinds, person_id is the reporting owner,
+// ownership_id the relationship acted on, animal_id the animal. For
+// 'account-claim', auth_identity_id is the claiming account and
+// person_id is filled in with the linked person on approval.
+export const ownerRequests = pgTable(
+  "owner_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: text("kind").notNull(),
+    authIdentityId: uuid("auth_identity_id").references(
+      () => authIdentities.id,
+      { onDelete: "set null" },
+    ),
+    personId: uuid("person_id").references(() => persons.id, {
+      onDelete: "set null",
+    }),
+    animalId: uuid("animal_id").references(() => animals.id, {
+      onDelete: "set null",
+    }),
+    ownershipId: uuid("ownership_id").references(() => ownerships.id, {
+      onDelete: "set null",
+    }),
+    // The submitter's bounded free-text detail ("moved to a farm in
+    // May", "gave her to my cousin"). Never trusted as fact — staff
+    // verify at resolution.
+    detail: text("detail"),
+    // Structured extras per kind — transfer target contact,
+    // claim candidates, reported effective date.
+    payload: jsonb("payload"),
+    status: text("status").notNull().default("pending"),
+    resolutionNote: text("resolution_note"),
+    // Staff display label of the resolver (audit_events carries the
+    // identity link; this keeps the row readable on its own).
+    resolvedBy: text("resolved_by"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true, mode: "date" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    // The staff queue hot read: pending work, oldest first.
+    index("owner_requests_pending_idx")
+      .on(t.createdAt)
+      .where(sql`${t.status} = 'pending'`),
+    index("owner_requests_person_idx").on(t.personId),
+    index("owner_requests_animal_idx").on(t.animalId),
+    index("owner_requests_identity_idx").on(t.authIdentityId),
+    // One pending request per (account, kind, animal) — a resubmission
+    // of "no longer mine" while the first is still open is a duplicate,
+    // not a second work item. COALESCE keeps nulls comparable.
+    uniqueIndex("owner_requests_pending_dedup")
+      .on(
+        t.authIdentityId,
+        t.kind,
+        sql`coalesce(${t.animalId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
+      )
+      .where(sql`${t.status} = 'pending'`),
+    check(
+      "owner_requests_kind_check",
+      sql`${t.kind} IN ('account-claim','no-longer-mine','transfer','lifecycle-deceased','lifecycle-moved-off-saba')`,
+    ),
+    check(
+      "owner_requests_status_check",
+      sql`${t.status} IN ('pending','approved','rejected','cancelled')`,
+    ),
+    // resolved_at is set exactly when the row leaves 'pending' — same
+    // consistency rule as follow_ups/clinic_expectations.
+    check(
+      "owner_requests_resolved_consistency_check",
+      sql`(${t.status} = 'pending') = (${t.resolvedAt} IS NULL)`,
     ),
   ],
 );

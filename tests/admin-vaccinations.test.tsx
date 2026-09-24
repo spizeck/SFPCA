@@ -131,6 +131,10 @@ function record(
     followUps,
     clinicExpectations,
     communications: [],
+    ownerships: [],
+    confirmations: [],
+    persons: [],
+    households: [],
   };
 }
 

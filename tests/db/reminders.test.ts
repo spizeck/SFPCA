@@ -68,10 +68,13 @@ async function seedDueVaccination({
 }) {
   const person = await seedOwner(email);
   const animal = await seedAnimal(animalName);
+  // Recent valid_from keeps the relationship inside its first
+  // confirmation period — the #166 annual-confirmation evaluator must
+  // not see these fixtures as due.
   await db.insert(schema.ownerships).values({
     animalId: animal.id,
     personId: person.id,
-    validFrom: "2025-01-01",
+    validFrom: "2026-03-01",
   });
   const created = await createVaccination(
     {
@@ -247,7 +250,7 @@ describe("recipient resolution — every ambiguous shape skips closed", () => {
         await db.insert(schema.ownerships).values({
           animalId: animal.id,
           householdId: household.id,
-          validFrom: "2025-01-01",
+          validFrom: "2026-03-01",
         });
         const created = await createVaccination(
           {
@@ -296,7 +299,7 @@ describe("recipient resolution — every ambiguous shape skips closed", () => {
         await db.insert(schema.ownerships).values({
           animalId: animal.id,
           personId: second.id,
-          validFrom: "2025-06-01",
+          validFrom: "2026-06-01",
         });
         return vaccination;
       },
@@ -398,6 +401,142 @@ describe("recipient resolution — every ambiguous shape skips closed", () => {
     expect(firstRow.personId).toBe(first.id);
     expect(nextRow.recipient).toBe("new-owner@example.com");
     expect(nextRow.personId).toBe(second.id);
+  });
+});
+
+describe("annual-confirmation reminders (#166)", () => {
+  // A relationship whose last affirmation is older than the period.
+  async function seedOverdueOwnership() {
+    const person = await seedOwner("annual@example.com");
+    const animal = await seedAnimal("Annual");
+    const [ownership] = await db
+      .insert(schema.ownerships)
+      .values({
+        animalId: animal.id,
+        personId: person.id,
+        validFrom: "2025-01-01",
+      })
+      .returning();
+    return { person, animal, ownership };
+  }
+
+  test("a stale relationship queues a confirmation reminder, idempotently", async () => {
+    const { person, animal, ownership } = await seedOverdueOwnership();
+    const result = await runReminderCycle({ asOf: AS_OF }, db);
+    expect(result.queued).toBe(1);
+
+    const [row] = await commsFor(ownership.id);
+    expect(row).toMatchObject({
+      personId: person.id,
+      animalId: animal.id,
+      kind: "annual-confirmation-reminder",
+      status: "queued",
+      relatedType: "ownership",
+      touch: "reminder-1",
+      recipient: "annual@example.com",
+    });
+    // cycleKey = the relationship's due date — stable across the lapse.
+    expect(row.cycleKey).toBe("2026-01-01");
+    expect(row.idempotencyKey).toBe(
+      `confirm-reminder:${ownership.id}:2026-01-01:reminder-1`,
+    );
+    expect(row.bodyText).toContain(animal.name);
+    expect(row.bodyText).toContain("/portal");
+
+    const again = await runReminderCycle({ asOf: AS_OF }, db);
+    expect(again.queued).toBe(0);
+    expect(again.suppressed).toBe(1);
+  });
+
+  test("a confirmation resets eligibility — no reminder the next cycle", async () => {
+    const { person, ownership } = await seedOverdueOwnership();
+    const { recordOwnershipConfirmation } = await import(
+      "@/lib/registry/ownership"
+    );
+    await recordOwnershipConfirmation(
+      {
+        ownershipId: ownership.id,
+        personId: person.id,
+        method: "owner-portal",
+        confirmedOn: AS_OF,
+      },
+      db,
+    );
+    const result = await runReminderCycle({ asOf: AS_OF }, db);
+    expect(result.queued).toBe(0);
+    expect(await commsFor(ownership.id)).toHaveLength(0);
+  });
+
+  test("operational kind is not preference-suppressible", async () => {
+    // Two layers enforce this: the policy marks the kind non-optional
+    // (the evaluator never consults communication_preferences for it),
+    // and the DB check on preferences refuses the kind outright — an
+    // opt-out row for it cannot even be expressed.
+    expect(REMINDER_POLICIES["annual-confirmation-reminder"].optional).toBe(
+      false,
+    );
+    const { person } = await seedOverdueOwnership();
+    await expect(
+      setCommunicationPreference(
+        {
+          personId: person.id,
+          channel: "email",
+          kind: "annual-confirmation-reminder",
+          optedOut: true,
+        },
+        "staff@test.dev",
+        db,
+      ),
+    ).rejects.toThrow();
+  });
+
+  test("household ownership reaches the contactable member", async () => {
+    const member = await seedOwner("hh-member@example.com", "HH Member");
+    const [household] = await db
+      .insert(schema.households)
+      .values({ name: "HH" })
+      .returning();
+    await db.insert(schema.householdMembers).values({
+      householdId: household.id,
+      personId: member.id,
+      role: "primary",
+    });
+    const animal = await seedAnimal("HH Pet");
+    const [ownership] = await db
+      .insert(schema.ownerships)
+      .values({
+        animalId: animal.id,
+        householdId: household.id,
+        validFrom: "2025-01-01",
+      })
+      .returning();
+
+    const result = await runReminderCycle({ asOf: AS_OF }, db);
+    expect(result.queued).toBe(1);
+    const [row] = await commsFor(ownership.id);
+    expect(row.recipient).toBe("hh-member@example.com");
+    expect(row.personId).toBe(member.id);
+  });
+
+  test("owner with no email skips 'missing-email'", async () => {
+    const person = await seedOwner(null);
+    const animal = await seedAnimal("NoMail");
+    const [ownership] = await db
+      .insert(schema.ownerships)
+      .values({
+        animalId: animal.id,
+        personId: person.id,
+        validFrom: "2025-01-01",
+      })
+      .returning();
+    const result = await runReminderCycle({ asOf: AS_OF }, db);
+    const [row] = await commsFor(ownership.id);
+    expect(row).toMatchObject({
+      status: "skipped",
+      detail: "missing-email",
+      personId: person.id,
+    });
+    expect(result.queued).toBe(0);
   });
 });
 

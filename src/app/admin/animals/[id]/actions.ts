@@ -39,6 +39,24 @@ import {
   listCommunicationsForAnimal,
   type AdminCommunication,
 } from "@/lib/registry/communications";
+import {
+  closeOwnership,
+  correctOwnership,
+  createOwnership,
+  listConfirmationsForAnimal,
+  listOwnershipHistory,
+  recordOwnershipConfirmation,
+  transferOwnership,
+  type OwnershipConfirmation,
+  type OwnershipRecord,
+  type OwnershipWriteInput,
+} from "@/lib/registry/ownership";
+import {
+  listHouseholds,
+  listPersons,
+  type HouseholdRecord,
+  type PersonRecord,
+} from "@/lib/registry/persons";
 import { logError, type LogSubsystem } from "@/lib/logger";
 
 export interface AnimalMedicalRecord {
@@ -56,6 +74,14 @@ export interface AnimalMedicalRecord {
   // Communication history about this animal (#172) — reminder sends,
   // skips, and failures, newest first.
   communications: AdminCommunication[];
+  // Full ownership history (#166) — every interval, open and closed,
+  // newest first. History is never rewritten; this is the audit view.
+  ownerships: OwnershipRecord[];
+  // Deliberate annual-confirmation events for this animal (#166).
+  confirmations: OwnershipConfirmation[];
+  // Picker data for the ownership panel.
+  persons: PersonRecord[];
+  households: HouseholdRecord[];
 }
 
 // One round-trip for the detail page: animal header + timeline +
@@ -68,19 +94,41 @@ export async function getAnimalMedicalAction(
   if (!authorized) throw new Error("Unauthorized");
   const animal = await getAdminAnimal(registryId);
   if (!animal) return null;
-  const [timeline, followUps, clinicExpectations, communications] =
-    await Promise.all([
-      listMedicalTimeline(animal.id),
-      listFollowUpsForAnimal(animal.id),
-      listClinicExpectationsForAnimal(animal.id),
-      listCommunicationsForAnimal(animal.id),
-    ]);
-  return { animal, timeline, followUps, clinicExpectations, communications };
+  const [
+    timeline,
+    followUps,
+    clinicExpectations,
+    communications,
+    ownerships,
+    confirmations,
+    persons,
+    households,
+  ] = await Promise.all([
+    listMedicalTimeline(animal.id),
+    listFollowUpsForAnimal(animal.id),
+    listClinicExpectationsForAnimal(animal.id),
+    listCommunicationsForAnimal(animal.id),
+    listOwnershipHistory(animal.id),
+    listConfirmationsForAnimal(animal.id),
+    listPersons(),
+    listHouseholds(),
+  ]);
+  return {
+    animal,
+    timeline,
+    followUps,
+    clinicExpectations,
+    communications,
+    ownerships,
+    confirmations,
+    persons,
+    households,
+  };
 }
 
 export interface SaveResult {
   ok: boolean;
-  reason?: "invalid" | "not-found" | "conflict";
+  reason?: "invalid" | "not-found" | "conflict" | "overlap" | "not-owner" | "not-current";
   field?: string;
 }
 
@@ -88,7 +136,17 @@ export interface SaveResult {
 // needs the failure metadata.
 type MutationOutcome =
   | { ok: true }
-  | { ok: false; reason: "not-found" | "conflict" | "invalid"; field?: string };
+  | {
+      ok: false;
+      reason:
+        | "not-found"
+        | "conflict"
+        | "invalid"
+        | "overlap"
+        | "not-owner"
+        | "not-current";
+      field?: string;
+    };
 
 function toSaveResult(result: MutationOutcome): SaveResult {
   if (result.ok) return { ok: true };
@@ -185,4 +243,75 @@ export async function saveWeightAction(
       ? updateWeightRecord(weightId, input, expectedUpdatedAt ?? "", actor)
       : createWeightRecord(input, actor),
   );
+}
+
+// --- Ownership (#166) -------------------------------------------------------------
+
+export async function saveOwnershipAction(
+  input: OwnershipWriteInput,
+): Promise<SaveResult> {
+  return save("owners", async (actor) => {
+    const result = await createOwnership(input, actor);
+    return result.ok ? { ok: true } : result;
+  });
+}
+
+export async function closeOwnershipAction(
+  ownershipId: string,
+  validTo: string,
+): Promise<SaveResult> {
+  return save("owners", async (actor) => {
+    const result = await closeOwnership(ownershipId, validTo, actor);
+    return result.ok ? { ok: true } : result;
+  });
+}
+
+export async function transferOwnershipAction(
+  ownershipId: string,
+  validTo: string,
+  newOwner: { personId?: string | null; householdId?: string | null },
+  note?: string | null,
+): Promise<SaveResult> {
+  return save("owners", async (actor) => {
+    const result = await transferOwnership(
+      { ownershipId, validTo, newOwner, note },
+      actor,
+    );
+    return result.ok ? { ok: true } : result;
+  });
+}
+
+export async function correctOwnershipAction(
+  ownershipId: string,
+  input: { validFrom: string; validTo?: string | null; note?: string | null },
+  expectedCreatedAt: string,
+): Promise<SaveResult> {
+  return save("owners", async (actor) => {
+    const result = await correctOwnership(
+      ownershipId,
+      input,
+      expectedCreatedAt,
+      actor,
+    );
+    return result.ok ? { ok: true } : result;
+  });
+}
+
+// Staff-recorded confirmation — a phone call or in-person affirmation
+// counts the same as a portal click; method:'staff' records who did it.
+export async function recordOwnershipConfirmationAction(
+  ownershipId: string,
+  personId: string,
+  notes?: string | null,
+): Promise<SaveResult> {
+  return save("owners", async (actor) => {
+    const result = await recordOwnershipConfirmation({
+      ownershipId,
+      personId,
+      method: "staff",
+      actorLabel: actor,
+      notes,
+    });
+    return result.ok ? { ok: true } : result;
+  });
 }

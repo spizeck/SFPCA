@@ -39,6 +39,7 @@ import {
   todayIsoDate,
 } from "../vaccinations";
 import { listDueVaccinations } from "./vaccinations";
+import { currentOwnershipSq } from "./ownership";
 import type { RegistryDb } from "./public-animals";
 
 // How far ahead the queue looks by default — matches the shared
@@ -163,31 +164,12 @@ export async function listVetQueue(
   }
   const horizon = addDaysToIsoDate(asOf, withinDays);
 
-  // Same ownership projection as listDueVaccinations: one current owner
-  // per animal at asOf, person preferred over household, deterministic
-  // under inconsistent data. Only the NAME is projected — the queue
-  // needs context, not contact details (#172 resolves recipients when
-  // it sends).
-  const currentOwnership = db
-    .selectDistinctOn([ownerships.animalId], {
-      animalId: ownerships.animalId,
-      personId: ownerships.personId,
-      householdId: ownerships.householdId,
-    })
-    .from(ownerships)
-    .where(
-      and(
-        lte(ownerships.validFrom, asOf),
-        or(isNull(ownerships.validTo), gt(ownerships.validTo, asOf)),
-      ),
-    )
-    .orderBy(
-      ownerships.animalId,
-      asc(sql`(${ownerships.personId} IS NULL)`),
-      asc(ownerships.validFrom),
-      asc(ownerships.id),
-    )
-    .as("vet_queue_ownership");
+  // The canonical current-owner projection (#166's ownership.ts) — one
+  // owner per animal at asOf, person preferred over household,
+  // deterministic under inconsistent data. Only the NAME is projected:
+  // the queue needs context, not contact details (#172 resolves
+  // recipients when it sends).
+  const currentOwnership = currentOwnershipSq(db, asOf, "vet_queue_ownership");
 
   const [followUpRows, clinicRows, alertRows, dueVaccinations] =
     await Promise.all([

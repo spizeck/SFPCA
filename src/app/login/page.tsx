@@ -75,14 +75,13 @@ export default function LoginPage() {
         // token so rules-evaluated client writes (CMS, team photos)
         // carry it immediately.
         await result.user.getIdToken(true);
-        router.push("/admin");
+        // Staff land on /admin; owners land on the owner portal. The
+        // session route decides — the login page never guesses.
+        router.push(data.isAdmin ? "/admin" : "/portal");
       } else if (response.status === 403) {
-        // The server refused to issue a session (non-admin or unverified
-        // account). Drop the client-side Firebase session too so it
-        // can't linger after a denied login.
         toast({
           title: "Access Denied",
-          description: "This account is not authorized for admin access. Please contact the site administrator to have your account added to the admin list.",
+          description: "This account is not authorized. Please contact the site administrator.",
           variant: "destructive",
         });
         await auth.signOut();
@@ -123,14 +122,11 @@ export default function LoginPage() {
         // See handleGoogleSignIn: pick up the admin custom claim set by
         // the session route before rules-evaluated client writes run.
         await result.user.getIdToken(true);
-        router.push("/admin");
+        router.push(data.isAdmin ? "/admin" : "/portal");
       } else if (response.status === 403) {
-        // The server refused to issue a session (non-admin or unverified
-        // account). Drop the client-side Firebase session too so it
-        // can't linger after a denied login.
         toast({
           title: "Access Denied",
-          description: "This account is not authorized for admin access. Please contact the site administrator to have your account added to the admin list.",
+          description: "This account is not authorized. Please contact the site administrator.",
           variant: "destructive",
         });
         await auth.signOut();
@@ -158,13 +154,12 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const result = await createUserWithEmailAndPassword(auth, email, password);
-      
+
       toast({
         title: "Account Created",
-        description: "Your account has been created successfully! Please contact the site administrator to be added to the admin list.",
+        description: "Your account has been created successfully! Sign in to continue.",
       });
-      
-      // Sign out the user since they're not admin yet
+
       await auth.signOut();
       
       // Reset form
@@ -228,8 +223,8 @@ export default function LoginPage() {
       <ThemeToggle />
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <h1 className="text-2xl font-semibold tracking-tight">SFPCA Admin</h1>
-          <CardDescription>{isSignIn ? "Sign in to access the admin dashboard" : "Create a new account"}</CardDescription>
+          <h1 className="text-2xl font-semibold tracking-tight">SFPCA</h1>
+          <CardDescription>{isSignIn ? "Sign in to your account" : "Create a new account"}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-center space-x-2">
@@ -326,9 +321,9 @@ export default function LoginPage() {
           </Button>
           
           <p className="text-xs text-muted-foreground text-center pt-4">
-            {isSignIn 
-              ? "Admin access is required. Contact the site administrator if you need an account."
-              : "After creating your account, contact the site administrator to be added to the admin list."
+            {isSignIn
+              ? "Staff and registered animal owners sign in here."
+              : "Create an account to access the owner portal."
             }
           </p>
         </CardContent>
