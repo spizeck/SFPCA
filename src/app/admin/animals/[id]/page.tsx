@@ -15,6 +15,7 @@ import {
   type AnimalMedicalRecord,
 } from "./actions";
 import type {
+  AdminFollowUp,
   AdminMedicalAlert,
   AdminVetEncounter,
   AdminVetMedication,
@@ -33,6 +34,8 @@ import { AlertDialog } from "@/components/admin/medical/alert-dialog";
 import { ProcedureDialog } from "@/components/admin/medical/procedure-dialog";
 import { MedicationDialog } from "@/components/admin/medical/medication-dialog";
 import { WeightDialog } from "@/components/admin/medical/weight-dialog";
+import { FollowUpDialog } from "@/components/admin/medical/follow-up-dialog";
+import { FollowUpPanel } from "@/components/admin/medical/follow-up-panel";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -41,7 +44,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ArrowLeft, Plus, CalendarClock } from "lucide-react";
+import { ArrowLeft, Plus } from "lucide-react";
 import { logError } from "@/lib/logger";
 import { LoadError } from "@/components/admin/load-error";
 
@@ -51,7 +54,8 @@ type DialogType =
   | "procedure"
   | "medication"
   | "weight"
-  | "alert";
+  | "alert"
+  | "follow-up";
 
 export default function AnimalMedicalPage() {
   const params = useParams<{ id: string }>();
@@ -63,7 +67,10 @@ export default function AnimalMedicalPage() {
   const [notFound, setNotFound] = useState(false);
   const [dialog, setDialog] = useState<{
     type: DialogType;
+    // Timeline records edit via `editing`; follow-ups are not timeline
+    // items so they travel on their own field.
     editing: MedicalTimelineItem | null;
+    followUp?: AdminFollowUp | null;
   } | null>(null);
   // Derived states are date-relative; fix "today" when the page loads
   // so rows don't shift mid-session.
@@ -122,7 +129,7 @@ export default function AnimalMedicalPage() {
     );
   }
 
-  const { animal, timeline, openFollowUps } = record;
+  const { animal, timeline, followUps } = record;
   const encounters = timeline
     .filter((i) => i.kind === "encounter")
     .map((i) => i.record as AdminVetEncounter);
@@ -152,34 +159,14 @@ export default function AnimalMedicalPage() {
 
       <ActiveAlerts timeline={timeline} />
 
-      {openFollowUps.length > 0 && (
-        <section
-          aria-label="Open follow-ups"
-          className="mb-4 space-y-2"
-        >
-          {openFollowUps.map((fu) => (
-            <div
-              key={fu.id}
-              className="flex items-center gap-3 rounded-md border border-blue-200 bg-blue-50 p-3"
-            >
-              <CalendarClock className="h-5 w-5 text-blue-600 shrink-0" />
-              <div className="min-w-0">
-                <span className="font-medium">
-                  {fu.kind === "recheck" ? "Recheck" : fu.kind} due{" "}
-                  {fu.dueOn}
-                  {fu.dueOn < today ? " (overdue)" : ""}
-                </span>
-                {fu.notes && (
-                  <span className="text-sm text-muted-foreground">
-                    {" "}
-                    — {fu.notes}
-                  </span>
-                )}
-              </div>
-            </div>
-          ))}
-        </section>
-      )}
+      <FollowUpPanel
+        followUps={followUps}
+        encounters={encounters}
+        today={today}
+        onChanged={loadRecord}
+        onAdd={() => openDialog("follow-up", null)}
+        onEdit={(fu) => setDialog({ type: "follow-up", editing: null, followUp: fu })}
+      />
 
       <Card>
         <CardHeader className="space-y-3">
@@ -318,6 +305,16 @@ export default function AnimalMedicalPage() {
             : null
         }
         open={dialog?.type === "alert"}
+        onOpenChange={(o) => !o && closeDialog()}
+        onSaved={loadRecord}
+        today={today}
+      />
+      <FollowUpDialog
+        animalId={animal.id}
+        animalName={animal.name}
+        encounters={encounters}
+        editing={dialog?.type === "follow-up" ? (dialog.followUp ?? null) : null}
+        open={dialog?.type === "follow-up"}
         onOpenChange={(o) => !o && closeDialog()}
         onSaved={loadRecord}
         today={today}

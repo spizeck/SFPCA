@@ -14,6 +14,9 @@ const {
   mockSaveMedication,
   mockSaveAlert,
   mockSaveWeight,
+  mockSaveFollowUp,
+  mockCompleteFollowUp,
+  mockCancelFollowUp,
   mockToast,
 } = vi.hoisted(() => ({
   mockGetAnimalMedical: vi.fn(),
@@ -23,6 +26,9 @@ const {
   mockSaveMedication: vi.fn(),
   mockSaveAlert: vi.fn(),
   mockSaveWeight: vi.fn(),
+  mockSaveFollowUp: vi.fn(),
+  mockCompleteFollowUp: vi.fn(),
+  mockCancelFollowUp: vi.fn(),
   mockToast: vi.fn(),
 }));
 
@@ -34,6 +40,13 @@ vi.mock("@/app/admin/animals/[id]/actions", () => ({
   saveMedicationAction: mockSaveMedication,
   saveAlertAction: mockSaveAlert,
   saveWeightAction: mockSaveWeight,
+}));
+
+// The follow-up panel/dialog call the shared work-queue actions (#175).
+vi.mock("@/app/admin/vet/actions", () => ({
+  saveFollowUpAction: mockSaveFollowUp,
+  completeFollowUpAction: mockCompleteFollowUp,
+  cancelFollowUpAction: mockCancelFollowUp,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -94,8 +107,8 @@ function vaxItem(data: Record<string, unknown>) {
   };
 }
 
-function record(timeline: unknown[] = [], openFollowUps: unknown[] = []) {
-  return { animal: ANIMAL, timeline, openFollowUps };
+function record(timeline: unknown[] = [], followUps: unknown[] = []) {
+  return { animal: ANIMAL, timeline, followUps };
 }
 
 beforeEach(() => {
@@ -107,6 +120,9 @@ beforeEach(() => {
   mockSaveMedication.mockResolvedValue({ ok: true });
   mockSaveAlert.mockResolvedValue({ ok: true });
   mockSaveWeight.mockResolvedValue({ ok: true });
+  mockSaveFollowUp.mockResolvedValue({ ok: true });
+  mockCompleteFollowUp.mockResolvedValue({ ok: true });
+  mockCancelFollowUp.mockResolvedValue({ ok: true });
 });
 
 describe("admin animal medical record", () => {
@@ -364,7 +380,7 @@ describe("admin animal medical record", () => {
     ).toBeInTheDocument();
   });
 
-  test("open follow-ups surface as a needs-attention banner", async () => {
+  test("open follow-ups surface as actionable items, resolved ones as history", async () => {
     mockGetAnimalMedical.mockResolvedValue(
       record([], [
         {
@@ -375,18 +391,128 @@ describe("admin animal medical record", () => {
           kind: "recheck",
           dueOn: "2020-01-01", // safely overdue regardless of today
           status: "open",
-          notes: "Recheck limp",
+          reason: "Recheck limp",
+          notes: null,
+          resolvedAt: null,
           createdAt: "2020-01-01T00:00:00.000Z",
+          updatedAt: "2020-01-01T00:00:00.000Z",
+        },
+        {
+          id: "fu-2",
+          animalId: "animal-uuid-1",
+          personId: null,
+          encounterId: null,
+          kind: "recheck",
+          dueOn: "2020-02-01",
+          status: "completed",
+          reason: "Suture removal",
+          notes: null,
+          resolvedAt: "2020-02-01T10:00:00.000Z",
+          createdAt: "2020-01-15T00:00:00.000Z",
+          updatedAt: "2020-02-01T10:00:00.000Z",
         },
       ]),
     );
     render(<AnimalMedicalPage />);
 
-    const banner = await screen.findByLabelText("Open follow-ups");
+    // The open item is actionable: state badge + resolve controls.
+    expect(await screen.findByText("Recheck limp")).toBeInTheDocument();
+    expect(screen.getByText("Overdue")).toBeInTheDocument();
     expect(
-      within(banner).getByText(/Recheck due 2020-01-01/),
+      screen.getByRole("button", { name: "Complete Recheck limp" }),
     ).toBeInTheDocument();
-    expect(within(banner).getByText(/overdue/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Cancel Recheck limp" }),
+    ).toBeInTheDocument();
+
+    // The completed item is history — inside the collapsed details
+    // (DOM-present but closed), with no action buttons.
+    const summary = screen.getByText(/Resolved history/);
+    const details = summary.closest("details") as HTMLElement;
+    expect(details).not.toHaveAttribute("open");
+    expect(
+      within(details).getByText("Suture removal"),
+    ).toBeInTheDocument();
+    // Only one occurrence — the open list doesn't carry it.
+    expect(screen.getAllByText("Suture removal")).toHaveLength(1);
+    expect(
+      within(details).queryByRole("button", {
+        name: "Complete Suture removal",
+      }),
+    ).toBeNull();
+  });
+
+  test("completing a follow-up calls the action with the concurrency token and reloads", async () => {
+    mockGetAnimalMedical.mockResolvedValue(
+      record([], [
+        {
+          id: "fu-9",
+          animalId: "animal-uuid-1",
+          personId: null,
+          encounterId: null,
+          kind: "recheck",
+          dueOn: "2099-01-01",
+          status: "open",
+          reason: "Recheck limp",
+          notes: null,
+          resolvedAt: null,
+          createdAt: "2020-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ]),
+    );
+    render(<AnimalMedicalPage />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Complete Recheck limp" }),
+    );
+    await waitFor(() =>
+      expect(mockCompleteFollowUp).toHaveBeenCalledWith(
+        "fu-9",
+        "2026-01-01T00:00:00.000Z",
+      ),
+    );
+    // The record reloads so the item leaves the open list.
+    await waitFor(() =>
+      expect(mockGetAnimalMedical).toHaveBeenCalledTimes(2),
+    );
+  });
+
+  test("cancelling a follow-up confirms before acting", async () => {
+    mockGetAnimalMedical.mockResolvedValue(
+      record([], [
+        {
+          id: "fu-9",
+          animalId: "animal-uuid-1",
+          personId: null,
+          encounterId: null,
+          kind: "recheck",
+          dueOn: "2099-01-01",
+          status: "open",
+          reason: "Recheck limp",
+          notes: null,
+          resolvedAt: null,
+          createdAt: "2020-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ]),
+    );
+    render(<AnimalMedicalPage />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Cancel Recheck limp" }),
+    );
+    // Nothing happens until the destructive-style confirm.
+    expect(mockCancelFollowUp).not.toHaveBeenCalled();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Cancel follow-up" }),
+    );
+    await waitFor(() =>
+      expect(mockCancelFollowUp).toHaveBeenCalledWith(
+        "fu-9",
+        "2026-01-01T00:00:00.000Z",
+      ),
+    );
   });
 
   test("logging a visit can schedule a recheck in one flow", async () => {

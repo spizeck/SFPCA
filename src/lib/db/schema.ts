@@ -679,6 +679,14 @@ export const vaccinations = pgTable(
 // here (#174 seam) — this is the one due-date system, not a parallel
 // one. personId snapshots the current owner at creation time so the
 // queue knows who to reach without re-deriving ownership.
+//
+// State model: 'open' is the only live status; 'completed'/'cancelled'
+// are terminal and stamp resolved_at (enforced by the consistency
+// CHECK). Time-relative state — upcoming / due / overdue — is DERIVED
+// from due_on vs today by followUpState() in src/lib/medical.ts, never
+// stored, so a row can never silently go stale. There is no delete path
+// in the domain service: completing or cancelling preserves the full
+// record and the audit_events trail.
 export const followUps = pgTable(
   "follow_ups",
   {
@@ -699,19 +707,33 @@ export const followUps = pgTable(
       onDelete: "set null",
     }),
     kind: text("kind").notNull(),
+    // Why the item is on the list ("suture removal", "recheck limp") —
+    // the headline the queue renders. notes carries extra detail.
+    reason: text("reason"),
     dueOn: date("due_on", { mode: "string" }).notNull(),
     status: text("status").notNull().default("open"),
     notes: text("notes"),
     resolvedAt: timestamp("resolved_at", { withTimezone: true, mode: "date" }),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
   (t) => [
     index("follow_ups_due_idx").on(t.dueOn),
     // Per-animal open follow-ups — the medical record reads these.
     index("follow_ups_animal_idx").on(t.animalId),
+    // The work-queue hot read: open items ordered by due date.
+    index("follow_ups_open_due_idx")
+      .on(t.dueOn)
+      .where(sql`${t.status} = 'open'`),
     check(
       "follow_ups_status_check",
-      sql`${t.status} IN ('open','done','cancelled')`,
+      sql`${t.status} IN ('open','completed','cancelled')`,
+    ),
+    // resolved_at is set exactly when the row leaves 'open' — mirrors
+    // the medical_alerts resolved_on consistency rule.
+    check(
+      "follow_ups_resolved_consistency_check",
+      sql`(${t.status} = 'open') = (${t.resolvedAt} IS NULL)`,
     ),
   ],
 );

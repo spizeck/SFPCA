@@ -18,8 +18,8 @@ import {
   createProcedure,
   createWeightRecord,
   listEncountersForAnimal,
+  listFollowUpsForAnimal,
   listMedicalTimeline,
-  listOpenFollowUps,
   updateAlert,
   updateEncounter,
   updateMedication,
@@ -235,11 +235,13 @@ describe("encounters", () => {
       record: { weightGrams: 12400, encounterId: created.record.id },
     });
 
-    const followUps = await listOpenFollowUps(animal.id, db);
+    const followUps = await listFollowUpsForAnimal(animal.id, db);
     expect(followUps).toHaveLength(1);
     expect(followUps[0]).toMatchObject({
       kind: "recheck",
       dueOn: "2026-07-01",
+      reason: "Recheck limp",
+      status: "open",
       encounterId: created.record.id,
       // The owner valid today is snapshotted so #175 doesn't re-derive.
       personId: person.id,

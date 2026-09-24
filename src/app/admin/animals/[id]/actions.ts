@@ -18,8 +18,8 @@ import {
   createMedication,
   createProcedure,
   createWeightRecord,
+  listFollowUpsForAnimal,
   listMedicalTimeline,
-  listOpenFollowUps,
   updateAlert,
   updateEncounter,
   updateMedication,
@@ -40,13 +40,14 @@ export interface AnimalMedicalRecord {
   // Unified chronological feed — encounters, vaccinations, procedures,
   // medications, weights, alert recordings (newest first).
   timeline: MedicalTimelineItem[];
-  // Open rechecks/follow-ups for this animal — the #175 seam rendered
-  // as actionable "needs attention" context, not history.
-  openFollowUps: AdminFollowUp[];
+  // All follow-ups for this animal — open items first, then resolved
+  // history (#175). The page partitions them; resolved rows render as
+  // completion history, never as actionable items.
+  followUps: AdminFollowUp[];
 }
 
 // One round-trip for the detail page: animal header + timeline +
-// open follow-ups. Returns null when the animal does not exist — the
+// follow-ups. Returns null when the animal does not exist — the
 // page renders a not-found state rather than an error.
 export async function getAnimalMedicalAction(
   registryId: string,
@@ -55,11 +56,11 @@ export async function getAnimalMedicalAction(
   if (!authorized) throw new Error("Unauthorized");
   const animal = await getAdminAnimal(registryId);
   if (!animal) return null;
-  const [timeline, openFollowUps] = await Promise.all([
+  const [timeline, followUps] = await Promise.all([
     listMedicalTimeline(animal.id),
-    listOpenFollowUps(animal.id),
+    listFollowUpsForAnimal(animal.id),
   ]);
-  return { animal, timeline, openFollowUps };
+  return { animal, timeline, followUps };
 }
 
 export interface SaveResult {

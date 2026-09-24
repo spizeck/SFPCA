@@ -65,6 +65,47 @@ export const ALERT_SEVERITY_LABELS: Record<AlertSeverity, string> = {
 // recheck — the seam #175's work queue reads.
 export const RECHECK_FOLLOW_UP_KIND = "recheck";
 
+// --- Follow-up / recheck state (#175) --------------------------------------
+//
+// Stored status is deliberately coarse: 'open' is the only live state;
+// 'completed' and 'cancelled' are terminal. The time-relative states a
+// volunteer actually scans for — upcoming / due / overdue — are DERIVED
+// from due_on vs today, never stored, so nothing can go stale.
+//
+// Boundary semantics (tested in tests/medical.test.ts):
+//   due_on <  today → overdue
+//   due_on == today → due        (due today is DUE, not overdue)
+//   due_on >  today → upcoming
+export const FOLLOW_UP_STATUSES = ["open", "completed", "cancelled"] as const;
+export type FollowUpStatus = (typeof FOLLOW_UP_STATUSES)[number];
+
+export type FollowUpState =
+  | "overdue"
+  | "due"
+  | "upcoming"
+  | "completed"
+  | "cancelled";
+
+export function followUpState(
+  dueOn: string,
+  status: string,
+  today: string,
+): FollowUpState {
+  if (status === "completed") return "completed";
+  if (status === "cancelled") return "cancelled";
+  if (dueOn < today) return "overdue";
+  if (dueOn === today) return "due";
+  return "upcoming";
+}
+
+export const FOLLOW_UP_STATE_LABELS: Record<FollowUpState, string> = {
+  overdue: "Overdue",
+  due: "Due today",
+  upcoming: "Upcoming",
+  completed: "Completed",
+  cancelled: "Cancelled",
+};
+
 // --- Weight (authoritative unit is integer grams) ---------------------------
 
 const GRAMS_PER_LB = 453.59237;
