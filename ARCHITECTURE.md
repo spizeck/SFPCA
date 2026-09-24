@@ -81,7 +81,7 @@ cron) keyed on Postgres `registration_submissions` existence.
 | `admins` → `admin_users` | **Postgres** (done, #183) | Staff authorization is registry domain |
 | `homepage`, `siteSettings`, `vetServices`, `animalAdoptions`, `animalRegistration` (page copy), `faq` | **Firestore (stays)** | Low-churn CMS content behind the rebuild-trigger pipeline; relational modeling buys nothing and would break `onFirestoreChange` → rebuild |
 | `receipts/`, `team-photos/` | **Firebase Storage (stays)** | Binary objects never live in Postgres; Postgres stores path references only |
-| Future: ownership, registrations, payments, chips, vet events, follow-ups, communications, audit | **Postgres** | Relational + historical by definition |
+| Ownership, registrations, payments, chips, medical records, follow-ups, communications, audit | **Postgres** | Relational + historical by definition |
 
 Naming convention that makes authority obvious:
 
@@ -165,7 +165,7 @@ plain SQL.
 | `weight_records` | Longitudinal weight | integer `weight_grams` — no ambiguous unit strings |
 | `vet_documents` | Clinical document references (lab reports, certificates) | `storage_path ~ '^vet-docs/'` CHECK; uploader + Storage rules deferred — relational shape only |
 | `vaccinations` | Structured vaccination history (#173) | restrictive FK to `animals`; `due_on`/`valid_until` ≥ `administered_on`; `series_key` generated from `vaccine_name` — only the latest dose per (animal, series) drives the due/reminder projection; due-state derived, never stored; optional `encounter_id` links a dose to the visit it was given at |
-| `follow_ups` | Manual recheck queue (#175) | status CHECK; vaccination due-ness is derived — not materialized here; `encounter_id` links a recheck to the visit that recommended it — the seam #175's work queue reads |
+| `follow_ups` | Veterinary follow-up/recheck queue (#175) | status CHECK `open\|completed\|cancelled`; `resolved_at` set exactly when status leaves `open`; time-relative state (upcoming/due/overdue) derived by `followUpState()` — never stored; `reason` is the queue headline; `encounter_id` links a recheck to the visit that recommended it; `person_id` snapshots the owner at creation (history), the queue resolves the CURRENT owner separately; registration-linked rows are #177 operational work, not clinical |
 | `communications` | Reminder ledger + send log | `unique(idempotency_key)` — safe retries; `vax-reminder:<vax>:<date>:<touch>` keys (#173 writes only `queued`/`skipped`; #172 owns the `sent`/`failed` delivery transition + `sent_at`) |
 | `audit_events` | Append-only mutation history | entity type/id + before/after jsonb |
 
@@ -191,6 +191,26 @@ encounter links to them, never duplicates them. All medical FKs to
 churn; corrections are audited edits with optimistic concurrency, not
 deletes. This is a continuity record, not an EMR: no scheduling,
 billing, prescribing, or diagnosis coding.
+
+**Veterinary work queue (#175):** `/admin/vet` is the staff action
+list — "what needs attention" across all animals, read through
+`src/lib/registry/vet-queue.ts` (`listVetQueue`/`vetQueueSummary`). It
+composes three sources into one urgency-sorted list: open `follow_ups`
+(rechecks — created inline by encounters or standalone from the animal
+record), vaccinations due/overdue **delegated to `listDueVaccinations`**
+(#173's canonical query — the queue never re-derives vaccine state, and
+the reminder foundation can never disagree with the queue), and active
+`medical_alerts` at `critical`/`important` severity (`info` alerts stay
+on the record — context, not tasks). Boundary semantics: `due_on <
+today` is overdue, `= today` is due, `> today` is upcoming. Completing
+or cancelling a follow-up is a guarded transition (row lock +
+`updated_at` token, audited under `complete`/`cancel`) that stamps
+`resolved_at` — there is no delete path, resolved rows render as
+collapsed history on the animal record. Reminder delivery is **#172's**
+job — the queue exposes the canonical data set; scheduling,
+preferences, retries, and send history live there. The broader
+exception dashboard is **#177's** — it should compose
+`vetQueueSummary()` rather than re-query these tables.
 
 ## 6. ID strategy
 

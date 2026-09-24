@@ -142,12 +142,18 @@ export interface AdminFollowUp {
   id: string;
   animalId: string | null;
   personId: string | null;
+  registrationId: string | null;
   encounterId: string | null;
   kind: string;
+  // Why the item exists ("suture removal") — the queue headline.
+  // Pre-#175 rows stored this in notes; the migration moved it here.
+  reason: string | null;
   dueOn: string;
   status: string;
   notes: string | null;
+  resolvedAt: string | null;
   createdAt: string;
+  updatedAt: string;
 }
 
 type AnyRow = { createdAt: Date; updatedAt: Date };
@@ -178,6 +184,13 @@ function alertDto(row: typeof medicalAlerts.$inferSelect): AdminMedicalAlert {
 }
 function weightDto(row: typeof weightRecords.$inferSelect): AdminWeightRecord {
   return { ...row, ...iso(row) };
+}
+function followUpDto(row: typeof followUps.$inferSelect): AdminFollowUp {
+  return {
+    ...row,
+    resolvedAt: row.resolvedAt?.toISOString() ?? null,
+    ...iso(row),
+  };
 }
 
 // --- Inputs -----------------------------------------------------------------
@@ -242,6 +255,16 @@ export interface WeightWriteInput {
   encounterId?: string | null;
   measuredOn: string;
   weightGrams: number;
+  notes?: string | null;
+}
+
+export interface FollowUpWriteInput {
+  animalId: string;
+  encounterId?: string | null;
+  dueOn: string;
+  // Why this item is on the list — required so a queue row never reads
+  // as a bare date with no instruction.
+  reason: string;
   notes?: string | null;
 }
 
@@ -403,6 +426,23 @@ export function validateWeightInput(
   return null;
 }
 
+// A follow-up may be dated in the past — logging a recheck that already
+// slipped is legitimate; it lands on the queue as overdue. Only the
+// date shape is enforced.
+export function validateFollowUpInput(
+  input: FollowUpWriteInput,
+): string | null {
+  if (!UUID_RE.test(input.animalId)) return "animalId";
+  if (input.encounterId != null && !UUID_RE.test(input.encounterId)) {
+    return "encounterId";
+  }
+  if (!isIsoDateString(input.dueOn)) return "dueOn";
+  const reason = clean(input.reason);
+  if (!reason || reason.length > 500) return "reason";
+  if (!textOk(input.notes)) return "notes";
+  return null;
+}
+
 // --- Shared mutation plumbing --------------------------------------------------
 
 export type MedicalMutationResult<T> =
@@ -464,9 +504,11 @@ async function currentOwnerPersonId(
 // identical semantics to updateVaccination. `check` runs after the row
 // lock — use it for validations that need the authoritative row (e.g.
 // an encounter link must belong to the ROW's animal, not whatever
-// animalId the caller sent, since animalId is write-once).
+// animalId the caller sent, since animalId is write-once). `action`
+// names the audit event — transitions like complete/cancel audit
+// under their own verb instead of a generic "update".
 async function guardedUpdate<
-  T extends { id: string; animalId: string } & AnyRow,
+  T extends { id: string } & AnyRow,
   R,
 >(
   tx: Tx,
@@ -477,6 +519,7 @@ async function guardedUpdate<
     check?: (before: T) => Promise<MedicalMutationResult<R> | null>;
     applyUpdate: () => Promise<T | undefined>;
     entityType: string;
+    action?: string;
     toDto: (row: T) => R;
     actorLabel: string;
   },
@@ -497,7 +540,7 @@ async function guardedUpdate<
     actorLabel: opts.actorLabel,
     entityType: opts.entityType,
     entityId: opts.id,
-    action: "update",
+    action: opts.action ?? "update",
     before: opts.toDto(before),
     after: opts.toDto(after),
   });
@@ -507,15 +550,17 @@ async function guardedUpdate<
 // Reusable `check` for updates: an encounter link is only valid if the
 // encounter exists AND belongs to the locked row's animal — never the
 // caller-supplied animalId, which is write-once and may be stale/wrong.
+// A null row animalId (follow_ups allows it) can never take a link.
 function encounterLinkCheck(
   tx: Queryable,
   encounterId: string | null | undefined,
 ) {
-  return async (before: { animalId: string }) => {
+  return async (before: { animalId: string | null }) => {
     const cleaned = clean(encounterId);
     if (
       cleaned !== null &&
-      !(await encounterBelongsTo(tx, cleaned, before.animalId))
+      (before.animalId === null ||
+        !(await encounterBelongsTo(tx, cleaned, before.animalId)))
     ) {
       return {
         ok: false as const,
@@ -600,7 +645,7 @@ export async function createEncounter(
           encounterId: row.id,
           kind: RECHECK_FOLLOW_UP_KIND,
           dueOn: input.followUp.dueOn,
-          notes: clean(input.followUp.reason),
+          reason: clean(input.followUp.reason),
         })
         .returning();
       await tx.insert(auditEvents).values({
@@ -608,11 +653,7 @@ export async function createEncounter(
         entityType: "follow_up",
         entityId: fu.id,
         action: "create",
-        after: {
-          ...fu,
-          resolvedAt: fu.resolvedAt?.toISOString() ?? null,
-          createdAt: fu.createdAt.toISOString(),
-        },
+        after: followUpDto(fu),
       });
     }
 
@@ -1177,10 +1218,23 @@ export async function listMedicalTimeline(
   return items;
 }
 
-// Open follow-ups for one animal, soonest due first — shown on the
-// medical record so a recommended recheck can't hide inside a visit's
-// plan text.
-export async function listOpenFollowUps(
+// --- Follow-ups (#175) --------------------------------------------------------
+//
+// follow_ups is the authoritative record for manually created veterinary
+// rechecks. The lifecycle is: 'open' → 'completed' | 'cancelled'. There
+// is deliberately NO delete — resolution preserves the reason, due date,
+// originating encounter, and animal, and stamps resolved_at. The
+// audit_events row records who acted. person_id is a creation-time
+// snapshot of the owner at that moment; it is never rewritten, so an
+// ownership change can't erase who the follow-up was opened against
+// (the queue resolves the CURRENT owner separately for contact context).
+
+// All veterinary follow-ups for one animal — open items first (soonest
+// due), then resolved history (most recently resolved first). The
+// medical record shows both: open items are actionable, resolved ones
+// are the completion history. Registration-linked rows are excluded —
+// they are operational work for #177's dashboard, not clinical care.
+export async function listFollowUpsForAnimal(
   animalId: string,
   db: RegistryDb = getRegistryDb(),
 ): Promise<AdminFollowUp[]> {
@@ -1188,17 +1242,191 @@ export async function listOpenFollowUps(
   const rows = await db
     .select()
     .from(followUps)
-    .where(and(eq(followUps.animalId, animalId), eq(followUps.status, "open")))
-    .orderBy(asc(followUps.dueOn), asc(followUps.id));
-  return rows.map((r) => ({
-    id: r.id,
-    animalId: r.animalId,
-    personId: r.personId,
-    encounterId: r.encounterId,
-    kind: r.kind,
-    dueOn: r.dueOn,
-    status: r.status,
-    notes: r.notes,
-    createdAt: r.createdAt.toISOString(),
-  }));
+    .where(
+      and(eq(followUps.animalId, animalId), isNull(followUps.registrationId)),
+    );
+  const open = rows
+    .filter((r) => r.status === "open")
+    .sort((a, b) => a.dueOn.localeCompare(b.dueOn) || a.id.localeCompare(b.id));
+  const resolved = rows
+    .filter((r) => r.status !== "open")
+    .sort(
+      (a, b) =>
+        (b.resolvedAt?.getTime() ?? 0) - (a.resolvedAt?.getTime() ?? 0) ||
+        a.id.localeCompare(b.id),
+    );
+  return [...open, ...resolved].map(followUpDto);
+}
+
+// Standalone recheck creation — a vet can queue a follow-up without
+// logging a full encounter. Encounters also create these inline
+// (kind 'recheck'); both paths write the same shape.
+export async function createFollowUp(
+  input: FollowUpWriteInput,
+  actorLabel: string,
+  db: RegistryDb = getRegistryDb(),
+): Promise<MedicalMutationResult<AdminFollowUp>> {
+  const invalidField = validateFollowUpInput(input);
+  if (invalidField) return { ok: false, reason: "invalid", field: invalidField };
+
+  return db.transaction(async (tx) => {
+    if (!(await animalExists(tx, input.animalId))) {
+      return { ok: false as const, reason: "not-found" as const };
+    }
+    const encounterId = clean(input.encounterId);
+    if (
+      encounterId !== null &&
+      !(await encounterBelongsTo(tx, encounterId, input.animalId))
+    ) {
+      return {
+        ok: false as const,
+        reason: "invalid" as const,
+        field: "encounterId",
+      };
+    }
+    const personId = await currentOwnerPersonId(
+      tx,
+      input.animalId,
+      todayIsoDate(),
+    );
+    const [row] = await tx
+      .insert(followUps)
+      .values({
+        animalId: input.animalId,
+        personId,
+        encounterId,
+        kind: RECHECK_FOLLOW_UP_KIND,
+        dueOn: input.dueOn,
+        reason: clean(input.reason),
+        notes: clean(input.notes),
+      })
+      .returning();
+    await tx.insert(auditEvents).values({
+      actorLabel,
+      entityType: "follow_up",
+      entityId: row.id,
+      action: "create",
+      after: followUpDto(row),
+    });
+    return { ok: true, record: followUpDto(row) };
+  });
+}
+
+// Correct/reschedule an OPEN follow-up. Resolved items are history —
+// they are not editable (a wrong resolution means cancel/complete is
+// not reversible; the audit trail preserves what happened).
+export async function updateFollowUp(
+  id: string,
+  input: FollowUpWriteInput,
+  expectedUpdatedAt: string,
+  actorLabel: string,
+  db: RegistryDb = getRegistryDb(),
+): Promise<MedicalMutationResult<AdminFollowUp>> {
+  const invalidField = validateFollowUpInput(input);
+  if (invalidField) return { ok: false, reason: "invalid", field: invalidField };
+  if (!UUID_RE.test(id)) return { ok: false, reason: "not-found" };
+
+  return db.transaction(async (tx) =>
+    guardedUpdate(tx, {
+      id,
+      expectedUpdatedAt,
+      actorLabel,
+      entityType: "follow_up",
+      toDto: followUpDto,
+      selectFrom: async () =>
+        (
+          await tx
+            .select()
+            .from(followUps)
+            .where(eq(followUps.id, id))
+            .for("update")
+        )[0],
+      check: async (before) => {
+        if (before.status !== "open") {
+          return { ok: false as const, reason: "conflict" as const };
+        }
+        return encounterLinkCheck(tx, input.encounterId)(before);
+      },
+      applyUpdate: async () =>
+        (
+          await tx
+            .update(followUps)
+            .set({
+              encounterId: clean(input.encounterId),
+              dueOn: input.dueOn,
+              reason: clean(input.reason),
+              notes: clean(input.notes),
+              updatedAt: new Date(),
+            })
+            .where(eq(followUps.id, id))
+            .returning()
+        )[0],
+    }),
+  );
+}
+
+// open → 'completed' | 'cancelled', stamping resolved_at. The row lock +
+// expected updatedAt mean a second resolution attempt surfaces as
+// "conflict" rather than silently re-writing a terminal state.
+async function transitionFollowUp(
+  id: string,
+  target: "completed" | "cancelled",
+  expectedUpdatedAt: string,
+  actorLabel: string,
+  db: RegistryDb,
+): Promise<MedicalMutationResult<AdminFollowUp>> {
+  if (!UUID_RE.test(id)) return { ok: false, reason: "not-found" };
+
+  return db.transaction(async (tx) =>
+    guardedUpdate(tx, {
+      id,
+      expectedUpdatedAt,
+      actorLabel,
+      entityType: "follow_up",
+      action: target === "completed" ? "complete" : "cancel",
+      toDto: followUpDto,
+      selectFrom: async () =>
+        (
+          await tx
+            .select()
+            .from(followUps)
+            .where(eq(followUps.id, id))
+            .for("update")
+        )[0],
+      check: async (before) =>
+        before.status === "open"
+          ? null
+          : { ok: false as const, reason: "conflict" as const },
+      applyUpdate: async () =>
+        (
+          await tx
+            .update(followUps)
+            .set({
+              status: target,
+              resolvedAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .where(eq(followUps.id, id))
+            .returning()
+        )[0],
+    }),
+  );
+}
+
+export async function completeFollowUp(
+  id: string,
+  expectedUpdatedAt: string,
+  actorLabel: string,
+  db: RegistryDb = getRegistryDb(),
+): Promise<MedicalMutationResult<AdminFollowUp>> {
+  return transitionFollowUp(id, "completed", expectedUpdatedAt, actorLabel, db);
+}
+
+export async function cancelFollowUp(
+  id: string,
+  expectedUpdatedAt: string,
+  actorLabel: string,
+  db: RegistryDb = getRegistryDb(),
+): Promise<MedicalMutationResult<AdminFollowUp>> {
+  return transitionFollowUp(id, "cancelled", expectedUpdatedAt, actorLabel, db);
 }

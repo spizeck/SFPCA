@@ -6,6 +6,7 @@
 import { describe, test, expect } from "vitest";
 import {
   compareTimelineItems,
+  followUpState,
   formatWeightGrams,
   isMedicationActive,
   isPastOrTodayIsoDate,
@@ -92,5 +93,29 @@ describe("isPastOrTodayIsoDate", () => {
     expect(isPastOrTodayIsoDate("2026-03-02", "2026-03-01")).toBe(false);
     expect(isPastOrTodayIsoDate("2026-02-30", "2026-03-01")).toBe(false);
     expect(isPastOrTodayIsoDate("not-a-date", "2026-03-01")).toBe(false);
+  });
+});
+
+// #175: the queue's headline state is derived, never stored. The exact
+// boundary is part of the contract — due today is DUE, not overdue.
+describe("followUpState", () => {
+  const TODAY = "2026-10-15";
+
+  test("terminal stored states win over any date", () => {
+    expect(followUpState("2020-01-01", "completed", TODAY)).toBe("completed");
+    expect(followUpState("2099-01-01", "cancelled", TODAY)).toBe("cancelled");
+  });
+
+  test("open items derive overdue / due / upcoming from due_on vs today", () => {
+    expect(followUpState("2026-10-14", "open", TODAY)).toBe("overdue");
+    // The boundary: due today is 'due', not overdue.
+    expect(followUpState(TODAY, "open", TODAY)).toBe("due");
+    expect(followUpState("2026-10-16", "open", TODAY)).toBe("upcoming");
+  });
+
+  test("an unexpected stored status still derives a date-relative state", () => {
+    // Defensive: an unknown status behaves like 'open' — the date is
+    // the only trustworthy signal.
+    expect(followUpState("2026-10-14", "legacy-done", TODAY)).toBe("overdue");
   });
 });
