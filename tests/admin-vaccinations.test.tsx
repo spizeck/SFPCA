@@ -9,16 +9,31 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const {
   mockGetAnimalMedical,
   mockSaveVaccination,
+  mockSaveEncounter,
+  mockSaveProcedure,
+  mockSaveMedication,
+  mockSaveAlert,
+  mockSaveWeight,
   mockToast,
 } = vi.hoisted(() => ({
   mockGetAnimalMedical: vi.fn(),
   mockSaveVaccination: vi.fn(),
+  mockSaveEncounter: vi.fn(),
+  mockSaveProcedure: vi.fn(),
+  mockSaveMedication: vi.fn(),
+  mockSaveAlert: vi.fn(),
+  mockSaveWeight: vi.fn(),
   mockToast: vi.fn(),
 }));
 
 vi.mock("@/app/admin/animals/[id]/actions", () => ({
   getAnimalMedicalAction: mockGetAnimalMedical,
   saveVaccinationAction: mockSaveVaccination,
+  saveEncounterAction: mockSaveEncounter,
+  saveProcedureAction: mockSaveProcedure,
+  saveMedicationAction: mockSaveMedication,
+  saveAlertAction: mockSaveAlert,
+  saveWeightAction: mockSaveWeight,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -60,20 +75,38 @@ function vaxRow(data: Record<string, unknown>) {
     administeredBy: null,
     notes: null,
     documentPath: null,
+    encounterId: null,
     createdAt: "2025-10-01T00:00:00.000Z",
     updatedAt: "2025-10-01T00:00:00.000Z",
     ...data,
   };
 }
 
-function record(vaccinations: unknown[] = []) {
-  return { animal: ANIMAL, vaccinations };
+// Wrap a record DTO in its timeline-item envelope (the service orders;
+// tests pass items already newest-first).
+function vaxItem(data: Record<string, unknown>) {
+  const vax = vaxRow(data);
+  return {
+    kind: "vaccination" as const,
+    date: vax.administeredOn,
+    createdAt: vax.createdAt,
+    record: vax,
+  };
+}
+
+function record(timeline: unknown[] = [], openFollowUps: unknown[] = []) {
+  return { animal: ANIMAL, timeline, openFollowUps };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockGetAnimalMedical.mockResolvedValue(record());
   mockSaveVaccination.mockResolvedValue({ ok: true });
+  mockSaveEncounter.mockResolvedValue({ ok: true });
+  mockSaveProcedure.mockResolvedValue({ ok: true });
+  mockSaveMedication.mockResolvedValue({ ok: true });
+  mockSaveAlert.mockResolvedValue({ ok: true });
+  mockSaveWeight.mockResolvedValue({ ok: true });
 });
 
 describe("admin animal medical record", () => {
@@ -107,20 +140,20 @@ describe("admin animal medical record", () => {
     const today = new Date().toISOString().slice(0, 10);
     mockGetAnimalMedical.mockResolvedValue(
       record([
-        vaxRow({
+        vaxItem({
           id: "vax-overdue",
           vaccineName: "DHPP",
           administeredOn: "2024-01-01",
           dueOn: "2025-01-01",
           administeredBy: "Dr. A",
         }),
-        vaxRow({
+        vaxItem({
           id: "vax-current",
           vaccineName: "Rabies",
           administeredOn: "2026-01-01",
           dueOn: "2099-01-01",
         }),
-        vaxRow({
+        vaxItem({
           id: "vax-none",
           vaccineName: "Bordetella",
           administeredOn: today,
@@ -143,7 +176,7 @@ describe("admin animal medical record", () => {
   test("add dialog validates required fields without calling the action", async () => {
     render(<AnimalMedicalPage />);
     await waitFor(() =>
-      expect(screen.getByText(/No vaccinations recorded/)).toBeInTheDocument(),
+      expect(screen.getByText(/No medical history recorded/)).toBeInTheDocument(),
     );
 
     fireEvent.click(screen.getByRole("button", { name: /Add vaccination/ }));
@@ -161,7 +194,7 @@ describe("admin animal medical record", () => {
   test("submitting sends the registry id and reloads the record", async () => {
     render(<AnimalMedicalPage />);
     await waitFor(() =>
-      expect(screen.getByText(/No vaccinations recorded/)).toBeInTheDocument(),
+      expect(screen.getByText(/No medical history recorded/)).toBeInTheDocument(),
     );
 
     fireEvent.click(screen.getByRole("button", { name: /Add vaccination/ }));
@@ -194,7 +227,7 @@ describe("admin animal medical record", () => {
   });
 
   test("editing prefills the form and passes the optimistic-concurrency token", async () => {
-    mockGetAnimalMedical.mockResolvedValue(record([vaxRow({})]));
+    mockGetAnimalMedical.mockResolvedValue(record([vaxItem({})]));
     render(<AnimalMedicalPage />);
     await waitFor(() => expect(screen.getByText("Rabies")).toBeInTheDocument());
 
@@ -220,7 +253,7 @@ describe("admin animal medical record", () => {
   });
 
   test("a concurrency conflict tells staff to reopen the record", async () => {
-    mockGetAnimalMedical.mockResolvedValue(record([vaxRow({})]));
+    mockGetAnimalMedical.mockResolvedValue(record([vaxItem({})]));
     mockSaveVaccination.mockResolvedValue({ ok: false, reason: "conflict" });
     render(<AnimalMedicalPage />);
     await waitFor(() => expect(screen.getByText("Rabies")).toBeInTheDocument());
@@ -250,7 +283,7 @@ describe("admin animal medical record", () => {
     });
     render(<AnimalMedicalPage />);
     await waitFor(() =>
-      expect(screen.getByText(/No vaccinations recorded/)).toBeInTheDocument(),
+      expect(screen.getByText(/No medical history recorded/)).toBeInTheDocument(),
     );
 
     fireEvent.click(screen.getByRole("button", { name: /Add vaccination/ }));
@@ -271,5 +304,148 @@ describe("admin animal medical record", () => {
       ),
     );
     expect(within(dialog).getByLabelText("Vaccine")).toHaveValue("Rabies");
+  });
+
+  test("active alerts render as a prominent banner, resolved ones do not", async () => {
+    mockGetAnimalMedical.mockResolvedValue(
+      record([
+        {
+          kind: "alert",
+          date: "2026-01-01",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          record: {
+            id: "alert-1",
+            animalId: "animal-uuid-1",
+            encounterId: null,
+            kind: "allergy",
+            severity: "critical",
+            summary: "Penicillin allergy",
+            details: "Anaphylaxis on prior course",
+            status: "active",
+            recordedOn: "2026-01-01",
+            resolvedOn: null,
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          },
+        },
+        {
+          kind: "alert",
+          date: "2025-06-01",
+          createdAt: "2025-06-01T00:00:00.000Z",
+          record: {
+            id: "alert-2",
+            animalId: "animal-uuid-1",
+            encounterId: null,
+            kind: "condition",
+            severity: "info",
+            summary: "Resolved ear infection",
+            details: null,
+            status: "resolved",
+            recordedOn: "2025-06-01",
+            resolvedOn: "2025-07-01",
+            createdAt: "2025-06-01T00:00:00.000Z",
+            updatedAt: "2025-07-01T00:00:00.000Z",
+          },
+        },
+      ]),
+    );
+    render(<AnimalMedicalPage />);
+
+    const banner = await screen.findByLabelText("Active medical alerts");
+    expect(
+      within(banner).getByText("Penicillin allergy"),
+    ).toBeInTheDocument();
+    // Resolved alerts stay in the timeline but leave the banner.
+    expect(
+      within(banner).queryByText(/Resolved ear infection/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Resolved ear infection/),
+    ).toBeInTheDocument();
+  });
+
+  test("open follow-ups surface as a needs-attention banner", async () => {
+    mockGetAnimalMedical.mockResolvedValue(
+      record([], [
+        {
+          id: "fu-1",
+          animalId: "animal-uuid-1",
+          personId: null,
+          encounterId: null,
+          kind: "recheck",
+          dueOn: "2020-01-01", // safely overdue regardless of today
+          status: "open",
+          notes: "Recheck limp",
+          createdAt: "2020-01-01T00:00:00.000Z",
+        },
+      ]),
+    );
+    render(<AnimalMedicalPage />);
+
+    const banner = await screen.findByLabelText("Open follow-ups");
+    expect(
+      within(banner).getByText(/Recheck due 2020-01-01/),
+    ).toBeInTheDocument();
+    expect(within(banner).getByText(/overdue/)).toBeInTheDocument();
+  });
+
+  test("logging a visit can schedule a recheck in one flow", async () => {
+    render(<AnimalMedicalPage />);
+    await waitFor(() =>
+      expect(
+        screen.getByText(/No medical history recorded/),
+      ).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Log visit" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/Reason/), {
+      target: { value: "Annual check" },
+    });
+    fireEvent.click(
+      within(dialog).getByRole("checkbox", { name: /Schedule a recheck/ }),
+    );
+    fireEvent.change(within(dialog).getByLabelText("Recheck date"), {
+      target: { value: "2027-01-15" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Recheck for"), {
+      target: { value: "Booster check" },
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Save entry" }),
+    );
+
+    await waitFor(() =>
+      expect(mockSaveEncounter).toHaveBeenCalledWith(
+        expect.objectContaining({
+          animalId: "animal-uuid-1",
+          kind: "visit",
+          reason: "Annual check",
+          followUp: { dueOn: "2027-01-15", reason: "Booster check" },
+        }),
+        null,
+        undefined,
+      ),
+    );
+  });
+
+  test("a visit without a reason shows a field error, not a save", async () => {
+    render(<AnimalMedicalPage />);
+    await waitFor(() =>
+      expect(
+        screen.getByText(/No medical history recorded/),
+      ).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Log visit" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Save entry" }),
+    );
+
+    await waitFor(() =>
+      expect(within(dialog).getByRole("alert")).toBeInTheDocument(),
+    );
+    expect(mockSaveEncounter).not.toHaveBeenCalled();
   });
 });

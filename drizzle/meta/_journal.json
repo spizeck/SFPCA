@@ -29,6 +29,20 @@
       "when": 1790206614510,
       "tag": "0003_lucky_omega_flight",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790210681483,
+      "tag": "0004_dapper_moondragon",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790210697546,
+      "tag": "0005_tired_red_shift",
+      "breakpoints": true
     }
   ]
 }

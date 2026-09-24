@@ -44,6 +44,7 @@ registry data in Firestore is now a mistake, not a shortcut.
 | `registration_submissions` (Postgres) | **operational, PII** | admin-only; never public | `registry/registrations.ts` | `animal-registration/actions.ts` (public intake); `admin/registrations/actions.ts` (review) |
 | `admin_users` (Postgres) | **authz config** | server-only | `registry/admin-users.ts` → `isAdmin()` | `provisionAdminUser` (session route, insert-only) / SQL |
 | `vaccinations` (Postgres) | **operational, medical** | admin-only; never public | `registry/vaccinations.ts` | `admin/animals/[id]/actions.ts` server actions |
+| `vet_encounters` / `vet_procedures` / `vet_medications` / `medical_alerts` / `weight_records` / `vet_documents` (Postgres) | **operational, medical** | admin-only; never public | `registry/medical.ts` | `admin/animals/[id]/actions.ts` server actions |
 | `audit_events` (Postgres) | **audit** | server-only | (append-only) | domain services, transactional with mutations |
 | Firestore `animals`/`animalRegistrations`/`admins` | **retired** | deny-all in rules for every principal | — none — | — none — |
 
@@ -51,7 +52,10 @@ Storage prefixes: `receipts/<submission uuid>` (private PII — public
 constrained create only; no client read/update/delete for anyone; staff
 view via server-minted signed URLs; orphan cleanup via Admin SDK sweep),
 `team-photos/` (public read, admin-claim image upload <5 MB). `images/`
-and `animals/` are deny-all.
+and `animals/` are deny-all. `vet-docs/` is reserved for clinical
+documents (#174 establishes `vet_documents` rows referencing it) —
+private, staff-only; the uploader and its Storage rules land with the
+document-upload feature, until then the prefix stays deny-all.
 
 Firebase Auth: email/password, session cookie (`/api/auth/session`).
 Authorization = Postgres `admin_users` lookup in `isAdmin()`; the session
@@ -154,9 +158,14 @@ plain SQL.
 | `registrations` | Per-animal per-year record | `unique(animal_id, year)` |
 | `payments` | Provider-neutral ledger | integer cents + currency; kind/status CHECKs; no cascade deletes |
 | `microchip_records` | Chip assignments w/ history | partial `unique(chip_number) WHERE assigned_to IS NULL` — one active assignment |
-| `vet_events` | General/unstructured vet history (exam, treatment, surgery, note) | event-type CHECK; structured vaccinations live in `vaccinations` |
-| `vaccinations` | Structured vaccination history (#173) | restrictive FK to `animals`; `due_on`/`valid_until` ≥ `administered_on`; `series_key` generated from `vaccine_name` — only the latest dose per (animal, series) drives the due/reminder projection; due-state derived, never stored |
-| `follow_ups` | Manual recheck queue (#175) | status CHECK; vaccination due-ness is derived — not materialized here |
+| `vet_encounters` | One dated clinical record per row (#174) — `kind` CHECK `visit`/`history`/`note` absorbs structured visits AND the old `vet_events` roles (reported history, standalone notes) | concise optional text fields (reason/complaint/findings/assessment/plan/notes); `visit` requires `reason`; no SOAP machinery |
+| `vet_procedures` | Significant interventions incl. spay/neuter (#174) | kind CHECK; `performed_on` nullable (unknown historical dates); optional `encounter_id` |
+| `vet_medications` | Medication/course history — treatment record, not prescribing | `end_on ≥ start_on` or null (ongoing); "active" derived, never stored |
+| `medical_alerts` | Allergies/contraindications/conditions that must never hide in notes | `resolved_on` set exactly when `status='resolved'` |
+| `weight_records` | Longitudinal weight | integer `weight_grams` — no ambiguous unit strings |
+| `vet_documents` | Clinical document references (lab reports, certificates) | `storage_path ~ '^vet-docs/'` CHECK; uploader + Storage rules deferred — relational shape only |
+| `vaccinations` | Structured vaccination history (#173) | restrictive FK to `animals`; `due_on`/`valid_until` ≥ `administered_on`; `series_key` generated from `vaccine_name` — only the latest dose per (animal, series) drives the due/reminder projection; due-state derived, never stored; optional `encounter_id` links a dose to the visit it was given at |
+| `follow_ups` | Manual recheck queue (#175) | status CHECK; vaccination due-ness is derived — not materialized here; `encounter_id` links a recheck to the visit that recommended it — the seam #175's work queue reads |
 | `communications` | Reminder ledger + send log | `unique(idempotency_key)` — safe retries; `vax-reminder:<vax>:<date>:<touch>` keys (#173 writes only `queued`/`skipped`; #172 owns the `sent`/`failed` delivery transition + `sent_at`) |
 | `audit_events` | Append-only mutation history | entity type/id + before/after jsonb |
 
@@ -164,6 +173,24 @@ plain SQL.
 integrity, closed status vocabularies, ownership ranges, money shape.
 Domain services — lifecycle transitions, dedupe, reminder scheduling.
 UI validation — form shape only, never trusted.
+
+**Veterinary continuity model (#174):** the admin animal page is a
+single chronological timeline (`listMedicalTimeline`) combining
+encounters, vaccinations, procedures, medications, weights, and alerts
+— a rotating vet scans one list instead of six tables. Encounters are
+deliberately concise: optional free-text sections instead of a SOAP
+schema. `vet_events` was **removed** — nothing wrote it, and keeping a
+second free-form medical table would leave two competing models. Its
+roles are absorbed: a standalone note is an encounter `kind='note'`,
+reported/unverifiable history is `kind='history'`. Provider attribution
+is **free text** on each record (rotating/visiting vets are not registry
+persons; a login account must never gate historical attribution).
+`vaccinations` and `microchip_records` remain authoritative — an
+encounter links to them, never duplicates them. All medical FKs to
+`animals` are restrictive so history survives registration/owner
+churn; corrections are audited edits with optimistic concurrency, not
+deletes. This is a continuity record, not an EMR: no scheduling,
+billing, prescribing, or diagnosis coding.
 
 ## 6. ID strategy
 

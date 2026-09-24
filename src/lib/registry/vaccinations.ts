@@ -30,6 +30,7 @@ import {
   ownerships,
   persons,
   vaccinations,
+  vetEncounters,
 } from "../db/schema";
 import { getRegistryDb } from "../db/client";
 import {
@@ -51,6 +52,9 @@ const MAX_NOTES = 2000;
 export interface AdminVaccination {
   id: string;
   animalId: string;
+  // Optional link to the encounter where this dose was given (#174) —
+  // null for standalone/historical records.
+  encounterId: string | null;
   vaccineName: string;
   // DB-generated series identity (normalized vaccine_name). Doses
   // sharing an (animalId, seriesKey) are one vaccine series — the
@@ -72,6 +76,7 @@ export interface AdminVaccination {
 const VACCINATION_COLUMNS = {
   id: vaccinations.id,
   animalId: vaccinations.animalId,
+  encounterId: vaccinations.encounterId,
   vaccineName: vaccinations.vaccineName,
   seriesKey: vaccinations.seriesKey,
   administeredOn: vaccinations.administeredOn,
@@ -102,6 +107,8 @@ export interface VaccinationWriteInput {
   // for. Updates never move a record between animals — correcting a
   // misfiled record means fixing it, not reassigning history.
   animalId: string;
+  // Optional: the encounter during which this dose was given.
+  encounterId?: string | null;
   vaccineName: string;
   administeredOn: string;
   dueOn?: string | null;
@@ -124,6 +131,9 @@ export function validateVaccinationInput(
   today: string = todayIsoDate(),
 ): string | null {
   if (!UUID_RE.test(input.animalId)) return "animalId";
+  if (input.encounterId != null && !UUID_RE.test(input.encounterId)) {
+    return "encounterId";
+  }
   if (
     typeof input.vaccineName !== "string" ||
     !input.vaccineName.trim() ||
@@ -172,6 +182,7 @@ export function validateVaccinationInput(
 function writeValues(input: VaccinationWriteInput) {
   return {
     animalId: input.animalId,
+    encounterId: input.encounterId ?? null,
     vaccineName: input.vaccineName.trim(),
     administeredOn: input.administeredOn,
     dueOn: clean(input.dueOn),
@@ -229,6 +240,19 @@ export async function createVaccination(
       .where(eq(animals.id, input.animalId));
     if (!animal) return { ok: false as const, reason: "not-found" as const };
 
+    // An encounter link is only valid if the encounter exists AND
+    // belongs to the same animal — cross-animal links would corrupt
+    // the record (same rule as the medical service).
+    if (input.encounterId != null) {
+      const [enc] = await tx
+        .select({ animalId: vetEncounters.animalId })
+        .from(vetEncounters)
+        .where(eq(vetEncounters.id, input.encounterId));
+      if (!enc || enc.animalId !== input.animalId) {
+        return { ok: false as const, reason: "invalid" as const, field: "encounterId" };
+      }
+    }
+
     const [row] = await tx
       .insert(vaccinations)
       .values(writeValues(input))
@@ -270,6 +294,18 @@ export async function updateVaccination(
     if (!before) return { ok: false as const, reason: "not-found" as const };
     if (before.updatedAt.getTime() !== expectedMs) {
       return { ok: false as const, reason: "conflict" as const };
+    }
+
+    // The encounter link must resolve to an encounter on THIS animal's
+    // record (the row's animalId is authoritative, not the input's).
+    if (input.encounterId != null) {
+      const [enc] = await tx
+        .select({ animalId: vetEncounters.animalId })
+        .from(vetEncounters)
+        .where(eq(vetEncounters.id, input.encounterId));
+      if (!enc || enc.animalId !== before.animalId) {
+        return { ok: false as const, reason: "invalid" as const, field: "encounterId" };
+      }
     }
 
     // animalId is write-once — spread excludes it from the update set.
@@ -423,6 +459,7 @@ export async function listDueVaccinations(
     .select({
       id: latestDoses.id,
       animalId: latestDoses.animalId,
+      encounterId: latestDoses.encounterId,
       vaccineName: latestDoses.vaccineName,
       seriesKey: latestDoses.seriesKey,
       administeredOn: latestDoses.administeredOn,

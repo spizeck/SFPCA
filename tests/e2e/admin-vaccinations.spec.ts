@@ -45,7 +45,7 @@ test.describe("admin vaccination records", () => {
       page.getByRole("heading", { name: "E2E Vaccination Dog" }),
     ).toBeVisible();
     await expect(
-      page.getByText("No vaccinations recorded yet."),
+      page.getByText("No medical history recorded yet."),
     ).toBeVisible();
 
     // Record a rabies dose with a next-due date.

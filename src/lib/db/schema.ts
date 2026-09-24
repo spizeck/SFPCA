@@ -366,32 +366,236 @@ export const microchipRecords = pgTable(
   ],
 );
 
-// Lightweight veterinary-event foundation — exams, notes, treatments.
-// Not a full EMR; details jsonb carries event-specific payload until the
-// dedicated issues (#174) flesh out per-type shape. Structured
-// vaccination records live in `vaccinations` (#173) — a 'vaccination'
-// vet_event remains legal only for unverifiable historical mentions
-// (e.g. "owner reports rabies ~2021") that lack structured fields.
-export const vetEvents = pgTable(
-  "vet_events",
+// NOTE: vet_events was dropped in migration 0005 — vet_encounters
+// (kind 'history'/'note') absorbed its standalone-history role, and
+// structured records live in vaccinations/procedures/medications/
+// alerts/weights. There is intentionally no second "loose event" table:
+// two parallel models would leave it ambiguous where a fact belongs.
+//
+// Veterinary encounters (#174) — the hub of the continuity record.
+// `kind` deliberately absorbs what vet_events used to cover, so there
+// is ONE dated clinical-record model, not two competing ones:
+//   'visit'   — an actual consultation/exam (provider, reason, exam notes)
+//   'history' — a recorded past fact or claim ("owner reports spay
+//               ~2021 at another clinic") with no SFPCA visit
+//   'note'    — a standalone clinical note not tied to a visit
+// Text fields stay free text on purpose — concise fields for volunteers,
+// not a SOAP/EMR field-explosion. Structured data that must be queried
+// (vaccinations, weights, alerts, procedures, medications) lives in its
+// own table and links back via encounter_id.
+export const vetEncounters = pgTable(
+  "vet_encounters",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     animalId: uuid("animal_id")
       .notNull()
       .references(() => animals.id), // restrictive — medical history
-    eventType: text("event_type").notNull(),
+    kind: text("kind").notNull().default("visit"),
+    // The visit date, or the date a history/note entry applies to
+    // (approximate past dates live in notes when fuzzy).
     occurredOn: date("occurred_on", { mode: "string" }).notNull(),
+    // Free-text provider: rotating/visiting vets are not registry
+    // persons — attribution must survive access changes, so no FK.
+    provider: text("provider"),
+    // Why the animal was seen; the service requires it for 'visit'.
+    reason: text("reason"),
+    // Presenting complaint / concise history.
+    complaint: text("complaint"),
+    findings: text("findings"), // examination findings
+    assessment: text("assessment"), // diagnosis/assessment
+    plan: text("plan"), // treatment plan
+    notes: text("notes"), // anything else
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("vet_encounters_animal_idx").on(t.animalId, t.occurredOn),
+    check(
+      "vet_encounters_kind_check",
+      sql`${t.kind} IN ('visit','history','note')`,
+    ),
+  ],
+);
+
+// Significant treatments/procedures (#174). `kind` carries the
+// structured vocabulary — 'spay'/'neuter' are the authoritative
+// sterilization record (reporting reads these; there is intentionally
+// NO animals.sterilized column duplicating this truth). performed_on is
+// nullable because historical procedures often have no known date
+// ("was already spayed at intake"); the approximation lives in notes.
+export const vetProcedures = pgTable(
+  "vet_procedures",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    animalId: uuid("animal_id")
+      .notNull()
+      .references(() => animals.id), // restrictive — medical history
+    // The encounter it happened during — null for standalone/historical
+    // records. Restrictive: deleting an encounter must not erase the
+    // procedure fact.
+    encounterId: uuid("encounter_id").references(() => vetEncounters.id),
+    kind: text("kind").notNull(),
+    performedOn: date("performed_on", { mode: "string" }),
+    provider: text("provider"),
+    description: text("description").notNull(),
+    notes: text("notes"), // outcome, complications
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("vet_procedures_animal_idx").on(t.animalId, t.performedOn),
+    index("vet_procedures_encounter_idx").on(t.encounterId),
+    check(
+      "vet_procedures_kind_check",
+      sql`${t.kind} IN ('spay','neuter','surgery','dental','wound','other')`,
+    ),
+  ],
+);
+
+// Medication/treatment history (#174) — "what meds matter", not
+// prescribing infrastructure (no dispensing, refills, or pharmacy
+// state). Active = derived: start_on <= today AND (end_on IS NULL OR
+// end_on >= today) — never a stored status that goes stale.
+export const vetMedications = pgTable(
+  "vet_medications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    animalId: uuid("animal_id")
+      .notNull()
+      .references(() => animals.id), // restrictive — medical history
+    encounterId: uuid("encounter_id").references(() => vetEncounters.id),
+    medication: text("medication").notNull(),
+    dose: text("dose"), // e.g. "10 mg", "0.5 ml" — display text
+    route: text("route"), // e.g. oral, topical, injectable
+    frequency: text("frequency"), // e.g. "BID", "once daily"
+    startOn: date("start_on", { mode: "string" }).notNull(),
+    endOn: date("end_on", { mode: "string" }), // null = ongoing
+    instructions: text("instructions"), // with food, taper, etc.
+    prescribedBy: text("prescribed_by"),
+    notes: text("notes"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("vet_medications_animal_idx").on(t.animalId, t.startOn),
+    index("vet_medications_encounter_idx").on(t.encounterId),
+    check(
+      "vet_medications_range_check",
+      sql`${t.endOn} IS NULL OR ${t.endOn} >= ${t.startOn}`,
+    ),
+  ],
+);
+
+// Medical alerts / important conditions (#174) — allergies,
+// contraindications, chronic conditions. These must surface prominently
+// on the animal record and never get buried inside old encounter text,
+// so they are a first-class table with an explicit active/resolved
+// lifecycle (resolve = set resolved_on, not delete — history survives).
+export const medicalAlerts = pgTable(
+  "medical_alerts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    animalId: uuid("animal_id")
+      .notNull()
+      .references(() => animals.id), // restrictive — medical history
+    encounterId: uuid("encounter_id").references(() => vetEncounters.id),
+    kind: text("kind").notNull(),
+    severity: text("severity").notNull().default("important"),
+    // The alert itself: "Penicillin allergy", "Grade III heart murmur".
     summary: text("summary").notNull(),
-    // Vaccination validity window — drives future reminders (#172/#173).
-    validUntil: date("valid_until", { mode: "string" }),
-    details: jsonb("details"),
+    details: text("details"),
+    status: text("status").notNull().default("active"),
+    recordedOn: date("recorded_on", { mode: "string" }).notNull(),
+    resolvedOn: date("resolved_on", { mode: "string" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("medical_alerts_animal_idx").on(t.animalId),
+    // The hot read path: active alerts per animal (banner) and the
+    // cross-animal "active alerts" scan (#175 work queue).
+    index("medical_alerts_active_idx")
+      .on(t.animalId)
+      .where(sql`${t.status} = 'active'`),
+    check(
+      "medical_alerts_kind_check",
+      sql`${t.kind} IN ('allergy','contraindication','condition','other')`,
+    ),
+    check(
+      "medical_alerts_severity_check",
+      sql`${t.severity} IN ('info','important','critical')`,
+    ),
+    check(
+      "medical_alerts_status_check",
+      sql`${t.status} IN ('active','resolved')`,
+    ),
+    // resolved_on is set exactly when status is 'resolved'.
+    check(
+      "medical_alerts_resolved_consistency_check",
+      sql`(${t.status} = 'resolved') = (${t.resolvedOn} IS NOT NULL)`,
+    ),
+    check(
+      "medical_alerts_resolved_range_check",
+      sql`${t.resolvedOn} IS NULL OR ${t.resolvedOn} >= ${t.recordedOn}`,
+    ),
+  ],
+);
+
+// Weight history (#174) — longitudinal, queryable. weight_grams is an
+// integer count of grams so the unit can never be ambiguous; the UI
+// converts kg/lb on entry and formats on display.
+export const weightRecords = pgTable(
+  "weight_records",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    animalId: uuid("animal_id")
+      .notNull()
+      .references(() => animals.id), // restrictive — medical history
+    encounterId: uuid("encounter_id").references(() => vetEncounters.id),
+    measuredOn: date("measured_on", { mode: "string" }).notNull(),
+    weightGrams: integer("weight_grams").notNull(),
+    notes: text("notes"), // e.g. body-condition score, "post-spay"
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("weight_records_animal_idx").on(t.animalId, t.measuredOn),
+    index("weight_records_encounter_idx").on(t.encounterId),
+    // >0 is the real invariant; the upper bound only catches typos —
+    // 200 kg covers any plausible patient.
+    check(
+      "weight_records_grams_check",
+      sql`${t.weightGrams} > 0 AND ${t.weightGrams} <= 200000`,
+    ),
+  ],
+);
+
+// Clinical document references (#174) — lab reports, certificates,
+// referral letters. Only the Storage object path is stored (like
+// payment_receipt_path / vaccinations.document_path); the uploader and
+// the vet-docs/* Storage rules are deferred — this table establishes
+// the relational shape so later work doesn't remodel.
+export const vetDocuments = pgTable(
+  "vet_documents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    animalId: uuid("animal_id")
+      .notNull()
+      .references(() => animals.id), // restrictive — medical history
+    encounterId: uuid("encounter_id").references(() => vetEncounters.id),
+    vaccinationId: uuid("vaccination_id").references(() => vaccinations.id),
+    storagePath: text("storage_path").notNull(),
+    label: text("label").notNull(),
+    notes: text("notes"),
+    uploadedBy: text("uploaded_by"), // actor label snapshot
     createdAt: createdAt(),
   },
   (t) => [
-    index("vet_events_animal_idx").on(t.animalId),
+    index("vet_documents_animal_idx").on(t.animalId),
+    index("vet_documents_encounter_idx").on(t.encounterId),
     check(
-      "vet_events_type_check",
-      sql`${t.eventType} IN ('vaccination','exam','treatment','surgery','note','other')`,
+      "vet_documents_path_check",
+      sql`${t.storagePath} ~ '^vet-docs/'`,
     ),
   ],
 );
@@ -418,9 +622,9 @@ export const vetEvents = pgTable(
 // a clinical vaccine ontology — a misspelled name forms its own series
 // until the name is corrected, which re-derives the key automatically.
 //
-// No vet_visits/encounters table yet: vaccinations legitimately have no
-// visit (historical backfill, external clinic records). #174 can add a
-// nullable visit_id without migrating data.
+// encounter_id optionally ties a dose to the visit where it was given
+// (#174); it stays nullable because vaccinations legitimately have no
+// encounter (historical backfill, external clinic records).
 export const vaccinations = pgTable(
   "vaccinations",
   {
@@ -428,6 +632,7 @@ export const vaccinations = pgTable(
     animalId: uuid("animal_id")
       .notNull()
       .references(() => animals.id), // restrictive — medical history
+    encounterId: uuid("encounter_id").references(() => vetEncounters.id),
     vaccineName: text("vaccine_name").notNull(),
     seriesKey: text("series_key")
       .notNull()
@@ -470,7 +675,10 @@ export const vaccinations = pgTable(
 
 // --- Operational queues -----------------------------------------------------
 
-// Follow-up / recheck queue (#175).
+// Follow-up / recheck queue (#175). Encounters create 'recheck' rows
+// here (#174 seam) — this is the one due-date system, not a parallel
+// one. personId snapshots the current owner at creation time so the
+// queue knows who to reach without re-deriving ownership.
 export const followUps = pgTable(
   "follow_ups",
   {
@@ -485,6 +693,11 @@ export const followUps = pgTable(
       () => registrations.id,
       { onDelete: "set null" },
     ),
+    // Originating encounter (#174) — set null so closing/removing a
+    // visit record never erases an open recheck.
+    encounterId: uuid("encounter_id").references(() => vetEncounters.id, {
+      onDelete: "set null",
+    }),
     kind: text("kind").notNull(),
     dueOn: date("due_on", { mode: "string" }).notNull(),
     status: text("status").notNull().default("open"),
@@ -494,6 +707,8 @@ export const followUps = pgTable(
   },
   (t) => [
     index("follow_ups_due_idx").on(t.dueOn),
+    // Per-animal open follow-ups — the medical record reads these.
+    index("follow_ups_animal_idx").on(t.animalId),
     check(
       "follow_ups_status_check",
       sql`${t.status} IN ('open','done','cancelled')`,
