@@ -15,6 +15,20 @@
       "when": 1790160157536,
       "tag": "0001_outgoing_lady_mastermind",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790199116943,
+      "tag": "0002_parched_longshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790206614510,
+      "tag": "0003_lucky_omega_flight",
+      "breakpoints": true
     }
   ]
 }

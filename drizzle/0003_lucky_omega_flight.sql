@@ -1,0 +1,2 @@
+ALTER TABLE "vaccinations" ADD COLUMN "series_key" text GENERATED ALWAYS AS (lower(regexp_replace("vaccine_name", '[^a-zA-Z0-9]+', '', 'g'))) STORED NOT NULL;--> statement-breakpoint
+CREATE INDEX "vaccinations_series_idx" ON "vaccinations" USING btree ("animal_id","series_key");
