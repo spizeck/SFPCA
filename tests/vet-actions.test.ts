@@ -13,6 +13,11 @@ const {
   mockUpdateFollowUp,
   mockCompleteFollowUp,
   mockCancelFollowUp,
+  mockCreateExpectation,
+  mockUpdateExpectation,
+  mockMarkSeen,
+  mockMarkNoShow,
+  mockCancelExpectation,
 } = vi.hoisted(() => ({
   mockRequireAdmin: vi.fn(),
   mockListVetQueue: vi.fn(),
@@ -21,6 +26,11 @@ const {
   mockUpdateFollowUp: vi.fn(),
   mockCompleteFollowUp: vi.fn(),
   mockCancelFollowUp: vi.fn(),
+  mockCreateExpectation: vi.fn(),
+  mockUpdateExpectation: vi.fn(),
+  mockMarkSeen: vi.fn(),
+  mockMarkNoShow: vi.fn(),
+  mockCancelExpectation: vi.fn(),
 }));
 
 vi.mock("@/lib/auth", () => ({
@@ -38,13 +48,22 @@ vi.mock("@/lib/registry/medical", () => ({
   updateFollowUp: mockUpdateFollowUp,
   completeFollowUp: mockCompleteFollowUp,
   cancelFollowUp: mockCancelFollowUp,
+  createClinicExpectation: mockCreateExpectation,
+  updateClinicExpectation: mockUpdateExpectation,
+  markClinicExpectationSeen: mockMarkSeen,
+  markClinicExpectationNoShow: mockMarkNoShow,
+  cancelClinicExpectation: mockCancelExpectation,
 }));
 
 import {
+  cancelClinicExpectationAction,
   cancelFollowUpAction,
   completeFollowUpAction,
   getVetQueueAction,
   getVetQueueSummaryAction,
+  markClinicNoShowAction,
+  markClinicSeenAction,
+  saveClinicExpectationAction,
   saveFollowUpAction,
 } from "@/app/admin/vet/actions";
 
@@ -61,6 +80,12 @@ const INPUT = {
   reason: "Recheck limp",
 };
 
+const CLINIC_INPUT = {
+  animalId: "00000000-0000-4000-8000-000000000001",
+  expectedOn: "2026-11-01",
+  reason: "Vaccination visit",
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockListVetQueue.mockResolvedValue([]);
@@ -69,6 +94,11 @@ beforeEach(() => {
   mockUpdateFollowUp.mockResolvedValue({ ok: true, record: {} });
   mockCompleteFollowUp.mockResolvedValue({ ok: true, record: {} });
   mockCancelFollowUp.mockResolvedValue({ ok: true, record: {} });
+  mockCreateExpectation.mockResolvedValue({ ok: true, record: {} });
+  mockUpdateExpectation.mockResolvedValue({ ok: true, record: {} });
+  mockMarkSeen.mockResolvedValue({ ok: true, record: {} });
+  mockMarkNoShow.mockResolvedValue({ ok: true, record: {} });
+  mockCancelExpectation.mockResolvedValue({ ok: true, record: {} });
 });
 
 describe("unauthorized calls never reach the registry", () => {
@@ -84,6 +114,20 @@ describe("unauthorized calls never reach the registry", () => {
     ],
     ["completeFollowUpAction", () => completeFollowUpAction("fu-id", "ts")],
     ["cancelFollowUpAction", () => cancelFollowUpAction("fu-id", "ts")],
+    [
+      "saveClinicExpectationAction (create)",
+      () => saveClinicExpectationAction(CLINIC_INPUT, null),
+    ],
+    [
+      "saveClinicExpectationAction (update)",
+      () => saveClinicExpectationAction(CLINIC_INPUT, "ex-id", "ts"),
+    ],
+    ["markClinicSeenAction", () => markClinicSeenAction("ex-id", "ts")],
+    ["markClinicNoShowAction", () => markClinicNoShowAction("ex-id", "ts")],
+    [
+      "cancelClinicExpectationAction",
+      () => cancelClinicExpectationAction("ex-id", "ts"),
+    ],
   ])("%s throws Unauthorized", async (_name, call) => {
     await expect(call()).rejects.toThrow("Unauthorized");
   });
@@ -95,6 +139,11 @@ describe("unauthorized calls never reach the registry", () => {
     expect(mockUpdateFollowUp).not.toHaveBeenCalled();
     expect(mockCompleteFollowUp).not.toHaveBeenCalled();
     expect(mockCancelFollowUp).not.toHaveBeenCalled();
+    expect(mockCreateExpectation).not.toHaveBeenCalled();
+    expect(mockUpdateExpectation).not.toHaveBeenCalled();
+    expect(mockMarkSeen).not.toHaveBeenCalled();
+    expect(mockMarkNoShow).not.toHaveBeenCalled();
+    expect(mockCancelExpectation).not.toHaveBeenCalled();
   });
 });
 
@@ -138,6 +187,50 @@ describe("authorized calls", () => {
     expect(mockCancelFollowUp).toHaveBeenCalledWith(
       "fu-1",
       "2026-01-01T00:00:00Z",
+      "vet@example.com",
+    );
+  });
+
+  test("clinic expectation actions route correctly with token and actor", async () => {
+    await saveClinicExpectationAction(CLINIC_INPUT, null);
+    expect(mockCreateExpectation).toHaveBeenCalledWith(
+      CLINIC_INPUT,
+      "vet@example.com",
+    );
+
+    await saveClinicExpectationAction(CLINIC_INPUT, "ex-1", "ts-1");
+    expect(mockUpdateExpectation).toHaveBeenCalledWith(
+      "ex-1",
+      CLINIC_INPUT,
+      "ts-1",
+      "vet@example.com",
+    );
+
+    await markClinicSeenAction("ex-1", "ts-1");
+    expect(mockMarkSeen).toHaveBeenCalledWith(
+      "ex-1",
+      "ts-1",
+      "vet@example.com",
+      null,
+    );
+    await markClinicSeenAction("ex-1", "ts-1", "enc-9");
+    expect(mockMarkSeen).toHaveBeenLastCalledWith(
+      "ex-1",
+      "ts-1",
+      "vet@example.com",
+      "enc-9",
+    );
+
+    await markClinicNoShowAction("ex-1", "ts-1");
+    expect(mockMarkNoShow).toHaveBeenCalledWith(
+      "ex-1",
+      "ts-1",
+      "vet@example.com",
+    );
+    await cancelClinicExpectationAction("ex-1", "ts-1");
+    expect(mockCancelExpectation).toHaveBeenCalledWith(
+      "ex-1",
+      "ts-1",
       "vet@example.com",
     );
   });

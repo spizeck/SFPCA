@@ -604,7 +604,9 @@ describe("veterinary work queue", () => {
         ? `fu:${i.reason}`
         : i.kind === "alert"
           ? `alert:${i.severity}`
-          : `vax:${i.vaccineName}`;
+          : i.kind === "clinic"
+            ? `clinic:${i.reason}`
+            : `vax:${i.vaccineName}`;
     expect(mine.map(key)).toEqual([
       "fu:Old overdue",
       "fu:Recent overdue",

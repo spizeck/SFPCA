@@ -34,6 +34,7 @@ import {
 import {
   animals,
   auditEvents,
+  clinicExpectations,
   followUps,
   medicalAlerts,
   ownerships,
@@ -156,6 +157,25 @@ export interface AdminFollowUp {
   updatedAt: string;
 }
 
+// A scheduled/expected clinic attendance (#194). Distinct from a
+// follow-up (medical work to do) and from an encounter (a visit that
+// happened): this records that the animal is EXPECTED at a clinic
+// session. encounterId is optional and only meaningful once seen.
+export interface AdminClinicExpectation {
+  id: string;
+  animalId: string;
+  personId: string | null;
+  encounterId: string | null;
+  expectedOn: string;
+  sessionLabel: string | null;
+  reason: string;
+  status: string;
+  notes: string | null;
+  resolvedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 type AnyRow = { createdAt: Date; updatedAt: Date };
 
 // A transaction is structurally the query API — helpers accept the
@@ -186,6 +206,15 @@ function weightDto(row: typeof weightRecords.$inferSelect): AdminWeightRecord {
   return { ...row, ...iso(row) };
 }
 function followUpDto(row: typeof followUps.$inferSelect): AdminFollowUp {
+  return {
+    ...row,
+    resolvedAt: row.resolvedAt?.toISOString() ?? null,
+    ...iso(row),
+  };
+}
+function clinicExpectationDto(
+  row: typeof clinicExpectations.$inferSelect,
+): AdminClinicExpectation {
   return {
     ...row,
     resolvedAt: row.resolvedAt?.toISOString() ?? null,
@@ -264,6 +293,17 @@ export interface FollowUpWriteInput {
   dueOn: string;
   // Why this item is on the list — required so a queue row never reads
   // as a bare date with no instruction.
+  reason: string;
+  notes?: string | null;
+}
+
+export interface ClinicExpectationWriteInput {
+  animalId: string;
+  expectedOn: string;
+  // Optional session hint ("Saturday AM clinic") — a label, not a slot.
+  sessionLabel?: string | null;
+  // Why the animal is coming — required for the same reason as a
+  // follow-up reason: the queue headline must never be a bare date.
   reason: string;
   notes?: string | null;
 }
@@ -437,6 +477,22 @@ export function validateFollowUpInput(
     return "encounterId";
   }
   if (!isIsoDateString(input.dueOn)) return "dueOn";
+  const reason = clean(input.reason);
+  if (!reason || reason.length > 500) return "reason";
+  if (!textOk(input.notes)) return "notes";
+  return null;
+}
+
+// An expectation may be dated in the past for the same reason a
+// follow-up may: recording "Rex was expected yesterday and didn't
+// come" is legitimate — it lands on the queue as overdue until staff
+// mark seen or no-show. Only the date shape is enforced.
+export function validateClinicExpectationInput(
+  input: ClinicExpectationWriteInput,
+): string | null {
+  if (!UUID_RE.test(input.animalId)) return "animalId";
+  if (!isIsoDateString(input.expectedOn)) return "expectedOn";
+  if (!shortOk(input.sessionLabel)) return "sessionLabel";
   const reason = clean(input.reason);
   if (!reason || reason.length > 500) return "reason";
   if (!textOk(input.notes)) return "notes";
@@ -1429,4 +1485,248 @@ export async function cancelFollowUp(
   db: RegistryDb = getRegistryDb(),
 ): Promise<MedicalMutationResult<AdminFollowUp>> {
   return transitionFollowUp(id, "cancelled", expectedUpdatedAt, actorLabel, db);
+}
+
+// --- Clinic expectations (#194) -------------------------------------------------
+//
+// clinic_expectations records "this animal is expected at the clinic on
+// this date, for this reason" — scheduling intent for periodic vet
+// coverage, not a recheck (follow_ups) and not a visit record
+// (vet_encounters). Lifecycle: 'expected' → 'seen' | 'no_show' |
+// 'cancelled', all terminal, all audited, resolved_at stamped. There is
+// NO delete — expectations are history and survive resolution and
+// ownership changes. person_id snapshots the owner at creation for the
+// same reason follow_ups does; the queue resolves the CURRENT owner
+// separately.
+//
+// Marking 'seen' optionally links the vet_encounters row that fulfilled
+// the expectation. The link is never manufactured: an animal that
+// arrived but has no logged encounter is still 'seen' with a null
+// encounter — clinical facts belong to the encounter record alone.
+
+export async function listClinicExpectationsForAnimal(
+  animalId: string,
+  db: RegistryDb = getRegistryDb(),
+): Promise<AdminClinicExpectation[]> {
+  if (!UUID_RE.test(animalId)) return [];
+  const rows = await db
+    .select()
+    .from(clinicExpectations)
+    .where(eq(clinicExpectations.animalId, animalId));
+  const live = rows
+    .filter((r) => r.status === "expected")
+    .sort(
+      (a, b) =>
+        a.expectedOn.localeCompare(b.expectedOn) || a.id.localeCompare(b.id),
+    );
+  const resolved = rows
+    .filter((r) => r.status !== "expected")
+    .sort(
+      (a, b) =>
+        (b.resolvedAt?.getTime() ?? 0) - (a.resolvedAt?.getTime() ?? 0) ||
+        a.id.localeCompare(b.id),
+    );
+  return [...live, ...resolved].map(clinicExpectationDto);
+}
+
+export async function createClinicExpectation(
+  input: ClinicExpectationWriteInput,
+  actorLabel: string,
+  db: RegistryDb = getRegistryDb(),
+): Promise<MedicalMutationResult<AdminClinicExpectation>> {
+  const invalidField = validateClinicExpectationInput(input);
+  if (invalidField) return { ok: false, reason: "invalid", field: invalidField };
+
+  return db.transaction(async (tx) => {
+    if (!(await animalExists(tx, input.animalId))) {
+      return { ok: false as const, reason: "not-found" as const };
+    }
+    const personId = await currentOwnerPersonId(
+      tx,
+      input.animalId,
+      todayIsoDate(),
+    );
+    const [row] = await tx
+      .insert(clinicExpectations)
+      .values({
+        animalId: input.animalId,
+        personId,
+        expectedOn: input.expectedOn,
+        sessionLabel: clean(input.sessionLabel),
+        reason: clean(input.reason)!,
+        notes: clean(input.notes),
+      })
+      .returning();
+    await tx.insert(auditEvents).values({
+      actorLabel,
+      entityType: "clinic_expectation",
+      entityId: row.id,
+      action: "create",
+      after: clinicExpectationDto(row),
+    });
+    return { ok: true, record: clinicExpectationDto(row) };
+  });
+}
+
+// Correct/reschedule an UNRESOLVED expectation. Terminal rows are
+// history — a wrong resolution is corrected by creating a new
+// expectation, not by editing the past.
+export async function updateClinicExpectation(
+  id: string,
+  input: ClinicExpectationWriteInput,
+  expectedUpdatedAt: string,
+  actorLabel: string,
+  db: RegistryDb = getRegistryDb(),
+): Promise<MedicalMutationResult<AdminClinicExpectation>> {
+  const invalidField = validateClinicExpectationInput(input);
+  if (invalidField) return { ok: false, reason: "invalid", field: invalidField };
+  if (!UUID_RE.test(id)) return { ok: false, reason: "not-found" };
+
+  return db.transaction(async (tx) =>
+    guardedUpdate(tx, {
+      id,
+      expectedUpdatedAt,
+      actorLabel,
+      entityType: "clinic_expectation",
+      toDto: clinicExpectationDto,
+      selectFrom: async () =>
+        (
+          await tx
+            .select()
+            .from(clinicExpectations)
+            .where(eq(clinicExpectations.id, id))
+            .for("update")
+        )[0],
+      check: async (before) =>
+        before.status === "expected"
+          ? null
+          : { ok: false as const, reason: "conflict" as const },
+      applyUpdate: async () =>
+        (
+          await tx
+            .update(clinicExpectations)
+            .set({
+              expectedOn: input.expectedOn,
+              sessionLabel: clean(input.sessionLabel),
+              reason: clean(input.reason)!,
+              notes: clean(input.notes),
+              updatedAt: new Date(),
+            })
+            .where(eq(clinicExpectations.id, id))
+            .returning()
+        )[0],
+    }),
+  );
+}
+
+// 'expected' → terminal. The row lock + expected updatedAt make a
+// second resolution surface as "conflict" — two staff members can't
+// double-resolve the same expectation. 'seen' additionally accepts an
+// optional encounterId — the real visit that fulfilled it, validated
+// against the row's animal (never caller-supplied data, never a fake
+// encounter).
+async function transitionClinicExpectation(
+  id: string,
+  target: "seen" | "no_show" | "cancelled",
+  expectedUpdatedAt: string,
+  actorLabel: string,
+  encounterId: string | null,
+  db: RegistryDb,
+): Promise<MedicalMutationResult<AdminClinicExpectation>> {
+  if (!UUID_RE.test(id)) return { ok: false, reason: "not-found" };
+  if (encounterId !== null && !UUID_RE.test(encounterId)) {
+    return { ok: false, reason: "invalid", field: "encounterId" };
+  }
+
+  return db.transaction(async (tx) =>
+    guardedUpdate(tx, {
+      id,
+      expectedUpdatedAt,
+      actorLabel,
+      entityType: "clinic_expectation",
+      action:
+        target === "seen"
+          ? "seen"
+          : target === "no_show"
+            ? "no-show"
+            : "cancel",
+      toDto: clinicExpectationDto,
+      selectFrom: async () =>
+        (
+          await tx
+            .select()
+            .from(clinicExpectations)
+            .where(eq(clinicExpectations.id, id))
+            .for("update")
+        )[0],
+      check: async (before) => {
+        if (before.status !== "expected") {
+          return { ok: false as const, reason: "conflict" as const };
+        }
+        return encounterLinkCheck(tx, encounterId)(before);
+      },
+      applyUpdate: async () =>
+        (
+          await tx
+            .update(clinicExpectations)
+            .set({
+              status: target,
+              ...(target === "seen" ? { encounterId } : {}),
+              resolvedAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .where(eq(clinicExpectations.id, id))
+            .returning()
+        )[0],
+    }),
+  );
+}
+
+export async function markClinicExpectationSeen(
+  id: string,
+  expectedUpdatedAt: string,
+  actorLabel: string,
+  encounterId: string | null = null,
+  db: RegistryDb = getRegistryDb(),
+): Promise<MedicalMutationResult<AdminClinicExpectation>> {
+  return transitionClinicExpectation(
+    id,
+    "seen",
+    expectedUpdatedAt,
+    actorLabel,
+    encounterId,
+    db,
+  );
+}
+
+export async function markClinicExpectationNoShow(
+  id: string,
+  expectedUpdatedAt: string,
+  actorLabel: string,
+  db: RegistryDb = getRegistryDb(),
+): Promise<MedicalMutationResult<AdminClinicExpectation>> {
+  return transitionClinicExpectation(
+    id,
+    "no_show",
+    expectedUpdatedAt,
+    actorLabel,
+    null,
+    db,
+  );
+}
+
+export async function cancelClinicExpectation(
+  id: string,
+  expectedUpdatedAt: string,
+  actorLabel: string,
+  db: RegistryDb = getRegistryDb(),
+): Promise<MedicalMutationResult<AdminClinicExpectation>> {
+  return transitionClinicExpectation(
+    id,
+    "cancelled",
+    expectedUpdatedAt,
+    actorLabel,
+    null,
+    db,
+  );
 }

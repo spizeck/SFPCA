@@ -18,6 +18,7 @@ import {
   createMedication,
   createProcedure,
   createWeightRecord,
+  listClinicExpectationsForAnimal,
   listFollowUpsForAnimal,
   listMedicalTimeline,
   updateAlert,
@@ -25,6 +26,7 @@ import {
   updateMedication,
   updateProcedure,
   updateWeightRecord,
+  type AdminClinicExpectation,
   type AdminFollowUp,
   type AlertWriteInput,
   type EncounterWriteInput,
@@ -44,6 +46,9 @@ export interface AnimalMedicalRecord {
   // history (#175). The page partitions them; resolved rows render as
   // completion history, never as actionable items.
   followUps: AdminFollowUp[];
+  // Expected clinic attendances — live items first, then resolved
+  // history (#194). Same partition rule as follow-ups.
+  clinicExpectations: AdminClinicExpectation[];
 }
 
 // One round-trip for the detail page: animal header + timeline +
@@ -56,11 +61,12 @@ export async function getAnimalMedicalAction(
   if (!authorized) throw new Error("Unauthorized");
   const animal = await getAdminAnimal(registryId);
   if (!animal) return null;
-  const [timeline, followUps] = await Promise.all([
+  const [timeline, followUps, clinicExpectations] = await Promise.all([
     listMedicalTimeline(animal.id),
     listFollowUpsForAnimal(animal.id),
+    listClinicExpectationsForAnimal(animal.id),
   ]);
-  return { animal, timeline, followUps };
+  return { animal, timeline, followUps, clinicExpectations };
 }
 
 export interface SaveResult {

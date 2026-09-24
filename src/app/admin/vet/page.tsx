@@ -1,10 +1,11 @@
 "use client";
 
-// Veterinary work queue (#175) — one action list for the rotating vet
-// and volunteers: open rechecks, vaccinations due/overdue, and active
-// important/critical alerts. Items arrive pre-sorted by urgency from
-// listVetQueue (overdue → due today → upcoming → alerts); this page
-// only filters the canonical list — it never re-derives due state.
+// Veterinary work queue (#175, +#194) — one action list for the
+// rotating vet and volunteers: open rechecks, expected clinic animals,
+// vaccinations due/overdue, and active important/critical alerts.
+// Items arrive pre-sorted by urgency from listVetQueue (overdue → due
+// today → upcoming → alerts); this page only filters the canonical
+// list — it never re-derives due state.
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -22,6 +23,10 @@ import {
   FollowUpResolveButtons,
   FollowUpStateBadge,
 } from "@/components/admin/medical/follow-up-controls";
+import {
+  ClinicExpectationResolveButtons,
+  ClinicExpectationStateBadge,
+} from "@/components/admin/medical/clinic-expectation-controls";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,6 +56,7 @@ type WindowFilter = "all" | "overdue" | "today" | "week";
 const KIND_FILTERS: { value: KindFilter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "follow-up", label: "Rechecks" },
+  { value: "clinic", label: "Expected" },
   { value: "vaccination", label: "Vaccinations" },
   { value: "alert", label: "Alerts" },
 ];
@@ -68,6 +74,8 @@ function itemDate(item: VetQueueItem): string {
       return item.dueOn;
     case "vaccination":
       return item.effectiveDate;
+    case "clinic":
+      return item.expectedOn;
     case "alert":
       return item.recordedOn;
   }
@@ -98,7 +106,9 @@ function TypeBadge({ item }: { item: VetQueueItem }) {
       ? "Recheck"
       : item.kind === "vaccination"
         ? "Vaccination"
-        : "Alert";
+        : item.kind === "clinic"
+          ? "Expected"
+          : "Alert";
   return <Badge variant="outline">{label}</Badge>;
 }
 
@@ -106,6 +116,8 @@ function StateBadge({ item }: { item: VetQueueItem }) {
   if (item.kind === "follow-up") return <FollowUpStateBadge state={item.state} />;
   if (item.kind === "vaccination")
     return <VaccinationStatusBadge state={item.state} />;
+  if (item.kind === "clinic")
+    return <ClinicExpectationStateBadge state={item.state} />;
   return (
     <Badge variant={item.severity === "critical" ? "destructive" : "secondary"}>
       {ALERT_SEVERITY_LABELS[item.severity as AlertSeverity] ?? item.severity}
@@ -131,6 +143,21 @@ function ItemDetails({ item }: { item: VetQueueItem }) {
       );
     case "vaccination":
       return <div className="font-medium">{item.vaccineName}</div>;
+    case "clinic":
+      return (
+        <div>
+          <div className="font-medium">{item.reason}</div>
+          <div className="text-xs text-muted-foreground space-x-2">
+            {item.sessionLabel && <span>{item.sessionLabel}</span>}
+            {item.state === "overdue" && (
+              <span>Expected date passed — mark seen or no-show</span>
+            )}
+          </div>
+          {item.notes && (
+            <div className="text-xs text-muted-foreground">{item.notes}</div>
+          )}
+        </div>
+      );
     case "alert":
       return (
         <div>
@@ -193,9 +220,9 @@ export default function VetQueuePage() {
       <div className="mb-6">
         <h1 className="text-3xl font-bold">Veterinary work queue</h1>
         <p className="text-muted-foreground mt-1">
-          What needs attention: overdue and upcoming rechecks, vaccinations
-          due, and active medical alerts. Sorted by urgency — work the list
-          top to bottom.
+          What needs attention: overdue and upcoming rechecks, animals
+          expected at clinic, vaccinations due, and active medical alerts.
+          Sorted by urgency — work the list top to bottom.
         </p>
       </div>
 
@@ -317,6 +344,14 @@ export default function VetQueuePage() {
                           followUpId={item.id}
                           updatedAt={item.updatedAt}
                           label={`${item.reason ?? "recheck"} — ${item.animal.name}`}
+                          onResolved={loadQueue}
+                        />
+                      )}
+                      {item.kind === "clinic" && (
+                        <ClinicExpectationResolveButtons
+                          expectationId={item.id}
+                          updatedAt={item.updatedAt}
+                          label={`${item.reason} — ${item.animal.name}`}
                           onResolved={loadQueue}
                         />
                       )}

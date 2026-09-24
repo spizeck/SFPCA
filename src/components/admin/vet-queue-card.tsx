@@ -29,6 +29,10 @@ function summaryLine(s: VetQueueSummary): string {
     parts.push(`${s.overdueFollowUps} overdue recheck${s.overdueFollowUps === 1 ? "" : "s"}`);
   if (s.dueTodayFollowUps > 0)
     parts.push(`${s.dueTodayFollowUps} due today`);
+  if (s.expectedToday > 0)
+    parts.push(`${s.expectedToday} expected at clinic today`);
+  if (s.overdueExpectations > 0)
+    parts.push(`${s.overdueExpectations} missed clinic visit${s.overdueExpectations === 1 ? "" : "s"}`);
   if (s.overdueVaccinations > 0)
     parts.push(`${s.overdueVaccinations} overdue vaccination${s.overdueVaccinations === 1 ? "" : "s"}`);
   if (s.dueSoonVaccinations > 0)
@@ -57,7 +61,8 @@ export async function VetQueueCard() {
           <CardTitle>Vet Queue</CardTitle>
         </div>
         <CardDescription>
-          Rechecks, vaccinations due, and medical alerts needing attention
+          Rechecks, expected clinic animals, vaccinations due, and medical
+          alerts needing attention
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">

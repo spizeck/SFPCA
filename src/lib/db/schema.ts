@@ -738,6 +738,68 @@ export const followUps = pgTable(
   ],
 );
 
+// Expected clinic animals (#194) — "this animal is expected at the
+// clinic on this date, for this reason." Scheduling intent for
+// periodic/part-time vet coverage, NOT a medical recheck (follow_ups)
+// and NOT a visit that already happened (vet_encounters). The
+// encounter_id link is optional and set only when marking the animal
+// seen: it records which real visit fulfilled the expectation without
+// manufacturing clinical facts — an animal can be seen with no
+// encounter logged yet.
+//
+// State model mirrors follow_ups: 'expected' is the only live status;
+// 'seen'/'no_show'/'cancelled' are terminal and stamp resolved_at
+// (enforced by the consistency CHECK). Past-today/future urgency is
+// DERIVED from expected_on by clinicExpectationState() — never stored.
+// There is no delete path; expectations are history and survive
+// resolution and ownership changes.
+export const clinicExpectations = pgTable(
+  "clinic_expectations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    animalId: uuid("animal_id")
+      .notNull()
+      .references(() => animals.id), // restrictive — clinic history
+    personId: uuid("person_id").references(() => persons.id, {
+      onDelete: "set null",
+    }),
+    // The visit that fulfilled the expectation — set at mark-seen only.
+    // set null so removing a visit record never erases the expectation.
+    encounterId: uuid("encounter_id").references(() => vetEncounters.id, {
+      onDelete: "set null",
+    }),
+    expectedOn: date("expected_on", { mode: "string" }).notNull(),
+    // Optional free-text session hint ("Saturday AM clinic") — a label,
+    // not a slot. No appointment times live here.
+    sessionLabel: text("session_label"),
+    // Why the animal is coming ("vaccination visit") — the queue
+    // headline, required so a row never reads as a bare date.
+    reason: text("reason").notNull(),
+    status: text("status").notNull().default("expected"),
+    notes: text("notes"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true, mode: "date" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("clinic_expectations_animal_idx").on(t.animalId),
+    // The queue hot read: unresolved expectations ordered by date.
+    index("clinic_expectations_expected_idx")
+      .on(t.expectedOn)
+      .where(sql`${t.status} = 'expected'`),
+    check(
+      "clinic_expectations_status_check",
+      sql`${t.status} IN ('expected','seen','no_show','cancelled')`,
+    ),
+    // resolved_at is set exactly when the row leaves 'expected' —
+    // same consistency rule as follow_ups.
+    check(
+      "clinic_expectations_resolved_consistency_check",
+      sql`(${t.status} = 'expected') = (${t.resolvedAt} IS NULL)`,
+    ),
+  ],
+);
+
 // Outbound communication / reminder send log (#172). idempotencyKey makes
 // reminder sends safe to retry without double-sending.
 export const communications = pgTable(

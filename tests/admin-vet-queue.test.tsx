@@ -12,12 +12,18 @@ const {
   mockCompleteFollowUp,
   mockCancelFollowUp,
   mockSaveFollowUp,
+  mockMarkSeen,
+  mockMarkNoShow,
+  mockCancelExpectation,
   mockToast,
 } = vi.hoisted(() => ({
   mockGetVetQueue: vi.fn(),
   mockCompleteFollowUp: vi.fn(),
   mockCancelFollowUp: vi.fn(),
   mockSaveFollowUp: vi.fn(),
+  mockMarkSeen: vi.fn(),
+  mockMarkNoShow: vi.fn(),
+  mockCancelExpectation: vi.fn(),
   mockToast: vi.fn(),
 }));
 
@@ -26,6 +32,9 @@ vi.mock("@/app/admin/vet/actions", () => ({
   completeFollowUpAction: mockCompleteFollowUp,
   cancelFollowUpAction: mockCancelFollowUp,
   saveFollowUpAction: mockSaveFollowUp,
+  markClinicSeenAction: mockMarkSeen,
+  markClinicNoShowAction: mockMarkNoShow,
+  cancelClinicExpectationAction: mockCancelExpectation,
 }));
 
 vi.mock("@/hooks/use-toast", () => ({
@@ -86,6 +95,30 @@ const queue = () => [
     updatedAt: "2026-10-01T00:00:00.000Z",
   },
   {
+    kind: "clinic" as const,
+    id: "ex-1",
+    expectedOn: TODAY,
+    state: "due" as const,
+    reason: "Vaccination visit",
+    sessionLabel: "AM clinic",
+    notes: null,
+    animal: animal("a-6", "Milo"),
+    currentOwnerName: "Sam Rivera",
+    updatedAt: "2026-10-02T00:00:00.000Z",
+  },
+  {
+    kind: "clinic" as const,
+    id: "ex-2",
+    expectedOn: YESTERDAY,
+    state: "overdue" as const,
+    reason: "Post-op check",
+    sessionLabel: null,
+    notes: "didn't show yesterday",
+    animal: animal("a-7", "Duke"),
+    currentOwnerName: null,
+    updatedAt: "2026-10-02T00:00:00.000Z",
+  },
+  {
     kind: "vaccination" as const,
     id: "vax-1",
     effectiveDate: IN_A_WEEK,
@@ -110,6 +143,9 @@ beforeEach(() => {
   mockGetVetQueue.mockResolvedValue(queue());
   mockCompleteFollowUp.mockResolvedValue({ ok: true });
   mockCancelFollowUp.mockResolvedValue({ ok: true });
+  mockMarkSeen.mockResolvedValue({ ok: true });
+  mockMarkNoShow.mockResolvedValue({ ok: true });
+  mockCancelExpectation.mockResolvedValue({ ok: true });
 });
 
 describe("veterinary work queue page", () => {
@@ -137,8 +173,30 @@ describe("veterinary work queue page", () => {
     expect(screen.getByText("Jane Doe")).toBeInTheDocument();
     // Source-encounter context is surfaced.
     expect(screen.getByText(/From visit on 2026-10-01/)).toBeInTheDocument();
-    // The overdue counter headlines the workload.
-    expect(screen.getByText(/1 overdue/)).toBeInTheDocument();
+    // The overdue counter headlines the workload (recheck + missed
+    // clinic expectation both count).
+    expect(screen.getByText(/2 overdue/)).toBeInTheDocument();
+  });
+
+  test("clinic expectations render with session context and resolve controls", async () => {
+    render(<VetQueuePage />);
+    const today = await screen.findByText("Vaccination visit");
+    const todayRow = today.closest("tr")!;
+    expect(within(todayRow).getByText("Expected today")).toBeInTheDocument();
+    expect(within(todayRow).getByText("Expected")).toBeInTheDocument(); // type badge
+    expect(within(todayRow).getByText("AM clinic")).toBeInTheDocument();
+    expect(within(todayRow).getByText("Sam Rivera")).toBeInTheDocument();
+    expect(
+      within(todayRow).getByRole("button", {
+        name: "Mark Vaccination visit — Milo seen",
+      }),
+    ).toBeInTheDocument();
+
+    const missedRow = screen.getByText("Post-op check").closest("tr")!;
+    expect(within(missedRow).getByText("Past due")).toBeInTheDocument();
+    expect(
+      within(missedRow).getByText(/Expected date passed/),
+    ).toBeInTheDocument();
   });
 
   test("animals link to their medical record", async () => {
@@ -163,6 +221,11 @@ describe("veterinary work queue page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Rechecks" }));
     expect(screen.getByText("Suture removal")).toBeInTheDocument();
     expect(screen.queryByText("Rabies")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Expected" }));
+    expect(screen.getByText("Vaccination visit")).toBeInTheDocument();
+    expect(screen.getByText("Post-op check")).toBeInTheDocument();
+    expect(screen.queryByText("Suture removal")).not.toBeInTheDocument();
   });
 
   test("the overdue window keeps overdue + shows nothing future; alerts always stay", async () => {
@@ -203,6 +266,49 @@ describe("veterinary work queue page", () => {
       ),
     );
     await waitFor(() => expect(mockGetVetQueue).toHaveBeenCalledTimes(2));
+  });
+
+  test("marking an expectation seen from the queue calls the action and reloads", async () => {
+    render(<VetQueuePage />);
+    const row = (await screen.findByText("Vaccination visit")).closest("tr")!;
+
+    fireEvent.click(
+      within(row).getByRole("button", {
+        name: "Mark Vaccination visit — Milo seen",
+      }),
+    );
+    await waitFor(() =>
+      expect(mockMarkSeen).toHaveBeenCalledWith(
+        "ex-1",
+        "2026-10-02T00:00:00.000Z",
+      ),
+    );
+    await waitFor(() => expect(mockGetVetQueue).toHaveBeenCalledTimes(2));
+  });
+
+  test("no-show asks for confirmation before resolving", async () => {
+    render(<VetQueuePage />);
+    const row = (await screen.findByText("Post-op check")).closest("tr")!;
+
+    fireEvent.click(
+      within(row).getByRole("button", {
+        name: "Mark Post-op check — Duke no-show",
+      }),
+    );
+    // The confirm dialog names the item — nothing fired yet.
+    expect(mockMarkNoShow).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/Post-op check — Duke/)).toBeInTheDocument();
+
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Mark no-show" }),
+    );
+    await waitFor(() =>
+      expect(mockMarkNoShow).toHaveBeenCalledWith(
+        "ex-2",
+        "2026-10-02T00:00:00.000Z",
+      ),
+    );
   });
 
   test("vaccination and alert rows have no complete/cancel controls", async () => {

@@ -5,6 +5,7 @@
 
 import { describe, test, expect } from "vitest";
 import {
+  clinicExpectationState,
   compareTimelineItems,
   followUpState,
   formatWeightGrams,
@@ -117,5 +118,38 @@ describe("followUpState", () => {
     // Defensive: an unknown status behaves like 'open' — the date is
     // the only trustworthy signal.
     expect(followUpState("2026-10-14", "legacy-done", TODAY)).toBe("overdue");
+  });
+});
+
+// #194: same derived-never-stored contract for clinic expectations.
+// A still-'expected' row whose date passed means "failed to appear —
+// resolve it", which the queue renders as overdue.
+describe("clinicExpectationState", () => {
+  const TODAY = "2026-10-15";
+
+  test("terminal stored states win over any date", () => {
+    expect(clinicExpectationState("2020-01-01", "seen", TODAY)).toBe("seen");
+    expect(clinicExpectationState(TODAY, "no_show", TODAY)).toBe("no_show");
+    expect(clinicExpectationState("2099-01-01", "cancelled", TODAY)).toBe(
+      "cancelled",
+    );
+  });
+
+  test("expected items derive overdue / due / upcoming from expected_on vs today", () => {
+    // Past-due + still expected → overdue (needs seen/no-show resolution).
+    expect(clinicExpectationState("2026-10-14", "expected", TODAY)).toBe(
+      "overdue",
+    );
+    // Expected today is 'due', not overdue — same boundary as follow-ups.
+    expect(clinicExpectationState(TODAY, "expected", TODAY)).toBe("due");
+    expect(clinicExpectationState("2026-10-16", "expected", TODAY)).toBe(
+      "upcoming",
+    );
+  });
+
+  test("an unexpected stored status still derives a date-relative state", () => {
+    expect(clinicExpectationState("2026-10-14", "bogus", TODAY)).toBe(
+      "overdue",
+    );
   });
 });
