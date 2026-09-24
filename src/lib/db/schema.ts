@@ -20,6 +20,7 @@ import {
   uuid,
   text,
   integer,
+  boolean,
   date,
   timestamp,
   jsonb,
@@ -800,15 +801,51 @@ export const clinicExpectations = pgTable(
   ],
 );
 
-// Outbound communication / reminder send log (#172). idempotencyKey makes
-// reminder sends safe to retry without double-sending.
+// Outbound communication / reminder ledger + send log (#172). This is
+// the ONE communications table — eligibility evaluators register intent
+// here, the delivery drain owns provider interaction, and webhooks
+// refine delivery state. The database row, not provider logs, is
+// authoritative for whether a message was queued/sent/failed.
+//
+// State machine:
+//   queued    — intent recorded, awaiting a delivery attempt
+//   sending   — claimed by a drain pass; transient between claim and
+//               provider outcome (a crash leaves a stale row the next
+//               pass reclaims as 'failed'/'interrupted' — an uncertain
+//               send is never blindly retried)
+//   sent      — provider accepted the message
+//   delivered — provider confirmed delivery (webhook; terminal success)
+//   failed    — terminal for automation: definite rejection, provider
+//               failure past the retry bound, bounce/complaint, or an
+//               interrupted send whose delivery is uncertain. Staff
+//               may requeue after checking the provider console.
+//   skipped   — evaluated but deliberately not sent (no resolvable
+//               recipient, opt-out, ...); `detail` carries the reason
+//
+// idempotency_key is the deterministic identity of a logical send —
+// <prefix>:<relatedId>:<cycleKey>:<touch> — so retries, duplicate cron
+// runs, and manual re-evaluation can never create a second row for the
+// same reminder. cycle_key scopes a reminder "cycle" (a vaccination's
+// current due date, a registration year, ...) so a changed due date
+// starts fresh touches while history stays attributable.
+//
+// Snapshots: recipient/subject/body_text capture what was actually
+// addressed and said, so history can be reconstructed even after the
+// person or ownership records change. person_id is nullable because an
+// evaluated reminder may have no resolvable person — that fact is
+// itself an exception worth recording.
 export const communications = pgTable(
   "communications",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    personId: uuid("person_id")
-      .notNull()
-      .references(() => persons.id),
+    personId: uuid("person_id").references(() => persons.id),
+    // The animal this message concerns — a denormalized shortcut so
+    // staff surfaces and per-animal history don't re-derive it from
+    // the loose related_type/related_id reference. Nullable: not every
+    // communication is about an animal.
+    animalId: uuid("animal_id").references(() => animals.id, {
+      onDelete: "set null",
+    }),
     channel: text("channel").notNull(),
     kind: text("kind").notNull(),
     status: text("status").notNull().default("queued"),
@@ -817,19 +854,118 @@ export const communications = pgTable(
     // domain entity may drive a message without a rigid FK web.
     relatedType: text("related_type"),
     relatedId: text("related_id"),
+    // The logical event this send belongs to (e.g. a vaccination's
+    // effective due date) and which numbered notice it is within the
+    // cycle ('reminder-1', 'reminder-2', ...). Exception/skip rows use
+    // 'skip:<reason>' so they never consume a send touch.
+    cycleKey: text("cycle_key"),
+    touch: text("touch"),
+    // Send-time snapshots — the record of what was actually sent even
+    // after contact details change.
+    recipient: text("recipient"),
+    subject: text("subject"),
+    bodyText: text("body_text"),
+    bodyHtml: text("body_html"),
+    // Provider bookkeeping: which sender, its message id (webhook
+    // correlation), attempt count/timing, and the delivery timestamp
+    // a webhook stamped. sent_at stays "provider accepted".
+    provider: text("provider"),
+    providerMessageId: text("provider_message_id"),
+    attempts: integer("attempts").notNull().default(0),
+    lastAttemptAt: timestamp("last_attempt_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    deliveredAt: timestamp("delivered_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    // Bounded machine-readable reason for skipped/failed outcomes
+    // ('no-owner', 'opted-out', 'bounced', 'interrupted', ...) — never
+    // free-text PII.
+    detail: text("detail"),
     sentAt: timestamp("sent_at", { withTimezone: true, mode: "date" }),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex("communications_idempotency_key").on(t.idempotencyKey),
     index("communications_person_idx").on(t.personId),
+    index("communications_animal_idx").on(t.animalId),
+    index("communications_related_idx").on(t.relatedType, t.relatedId),
+    // The delivery drain's hot read: pending work, oldest first.
+    index("communications_queued_idx")
+      .on(t.createdAt)
+      .where(sql`${t.status} = 'queued'`),
+    // Reclaim of abandoned in-flight sends.
+    index("communications_sending_idx")
+      .on(t.lastAttemptAt)
+      .where(sql`${t.status} = 'sending'`),
+    // The staff exception read: terminal non-success outcomes.
+    index("communications_exceptions_idx")
+      .on(t.createdAt)
+      .where(sql`${t.status} IN ('failed','skipped')`),
     check(
       "communications_channel_check",
       sql`${t.channel} IN ('email','sms','whatsapp','phone')`,
     ),
     check(
       "communications_status_check",
-      sql`${t.status} IN ('queued','sent','failed','skipped')`,
+      sql`${t.status} IN ('queued','sending','sent','delivered','failed','skipped')`,
+    ),
+    // sent_at is stamped exactly when the provider accepts the message
+    // and stays set forever after — a sent-then-bounced row keeps it.
+    // Only one direction holds: sent/delivered REQUIRE sent_at, but a
+    // 'failed' row may retain it as honest history.
+    check(
+      "communications_sent_consistency_check",
+      sql`${t.sentAt} IS NOT NULL OR ${t.status} NOT IN ('sent','delivered')`,
+    ),
+    // delivered_at survives a late bounce — the delivery genuinely
+    // happened, then failed; 'failed' is the honest terminal state.
+    check(
+      "communications_delivered_consistency_check",
+      sql`${t.deliveredAt} IS NULL OR ${t.status} IN ('delivered','failed')`,
+    ),
+    check("communications_attempts_check", sql`${t.attempts} >= 0`),
+  ],
+);
+
+// Per-person communication preferences (#172). A row records whether
+// the person opts out of a given reminder kind on a channel; absence
+// of a row means the default (opted in). Opt-outs only suppress kinds
+// the reminder policy marks optional — operational registry notices
+// (registration due, balance owed, annual confirmation) are never
+// silenced by a preference row; see src/lib/reminders/policy.ts.
+export const communicationPreferences = pgTable(
+  "communication_preferences",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => persons.id, { onDelete: "cascade" }),
+    channel: text("channel").notNull(),
+    kind: text("kind").notNull(),
+    optedOut: boolean("opted_out").notNull().default(false),
+    // Who recorded the preference — a staff label or the person
+    // themselves once #166's owner portal exists.
+    actorLabel: text("actor_label"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("communication_preferences_person_kind_key").on(
+      t.personId,
+      t.channel,
+      t.kind,
+    ),
+    check(
+      "communication_preferences_channel_check",
+      sql`${t.channel} IN ('email','sms','whatsapp','phone')`,
+    ),
+    check(
+      "communication_preferences_kind_check",
+      sql`${t.kind} IN ('vaccination-reminder')`,
     ),
   ],
 );

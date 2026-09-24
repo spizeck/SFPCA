@@ -1,0 +1,86 @@
+// Reminder email templates (#172). Pure renderers — no DB, no env reads
+// beyond the injected siteUrl — so output is fully testable and the same
+// subject/body is what gets snapshotted onto the communications row
+// before delivery.
+//
+// Template rules:
+// - identify SFPCA by name (recipients may not recognize "reminder" mail)
+// - name the animal and the concrete action needed
+// - link only to plain public pages — no tokens, no PII in URLs
+// - plain text is the canonical body; HTML is a minimal wrapped version
+//   with every interpolated value escaped
+
+import { absoluteUrl } from "@/lib/seo";
+
+export interface RenderedEmail {
+  subject: string;
+  text: string;
+  html: string;
+}
+
+const ORG_NAME = "Saba Foundation for the Prevention of Cruelty to Animals (SFPCA)";
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function htmlShell(bodyParagraphs: string[]): string {
+  const inner = bodyParagraphs
+    .map((p) => `<p style="margin:0 0 12px">${p}</p>`)
+    .join("\n");
+  return [
+    '<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.5;color:#1f2937;max-width:36rem">',
+    inner,
+    `<p style="margin:24px 0 0;font-size:13px;color:#6b7280">— ${escapeHtml(ORG_NAME)}</p>`,
+    "</div>",
+  ].join("\n");
+}
+
+export interface VaccinationReminderContext {
+  ownerName: string;
+  animalName: string;
+  vaccineName: string;
+  // The dose's effective next-relevant date (ISO), and whether that
+  // date has already passed at send time.
+  effectiveDate: string;
+  overdue: boolean;
+  siteUrl: string;
+}
+
+export function renderVaccinationReminder(
+  ctx: VaccinationReminderContext,
+): RenderedEmail {
+  const contactUrl = absoluteUrl("/contact", {
+    NEXT_PUBLIC_SITE_URL: ctx.siteUrl,
+  });
+  const timing = ctx.overdue
+    ? `was due on ${ctx.effectiveDate} and is now overdue`
+    : `is due on ${ctx.effectiveDate}`;
+
+  const subject = `Vaccination reminder for ${ctx.animalName}`;
+  const text = [
+    `Hello ${ctx.ownerName},`,
+    ``,
+    `This is a reminder from the ${ORG_NAME}: ${ctx.animalName}'s ${ctx.vaccineName} vaccination ${timing}.`,
+    ``,
+    `Please contact us to arrange a visit: ${contactUrl}`,
+    ``,
+    `If ${ctx.animalName} has already had this vaccination, or is no longer in your care, please let us know so we can update our records.`,
+    ``,
+    `— ${ORG_NAME}`,
+  ].join("\n");
+
+  const html = htmlShell([
+    `Hello ${escapeHtml(ctx.ownerName)},`,
+    `This is a reminder from the ${escapeHtml(ORG_NAME)}: <strong>${escapeHtml(ctx.animalName)}</strong>&rsquo;s ${escapeHtml(ctx.vaccineName)} vaccination ${ctx.overdue ? `was due on <strong>${escapeHtml(ctx.effectiveDate)}</strong> and is now overdue` : `is due on <strong>${escapeHtml(ctx.effectiveDate)}</strong>`}.`,
+    `Please <a href="${escapeHtml(contactUrl)}">contact us</a> to arrange a visit.`,
+    `If ${escapeHtml(ctx.animalName)} has already had this vaccination, or is no longer in your care, please let us know so we can update our records.`,
+  ]);
+
+  return { subject, text, html };
+}

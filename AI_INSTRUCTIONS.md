@@ -71,6 +71,13 @@ when the token is unset.
   staged cutover (Phases C–G) Firestore `animals`/`animalRegistrations`/
   `admins` remain authoritative until their explicit cutover issues land.
   `scripts/seed-data.json` is the fixture for local/test seeding.
+- **Owner reminders are a real pipeline (#172).** `communications` is
+  the authoritative ledger: evaluators (`src/lib/registry/reminders.ts`)
+  queue rows under deterministic idempotency keys, the cron route drains
+  them through Resend, and webhooks refine outcomes. Only reminder kinds
+  with an authoritative eligibility source may register an evaluator —
+  never fabricate eligibility from intake snapshots or `updated_at`.
+  Tests must never send real email: inject a fake `EmailSender`.
 - **Tests never touch production.** Vitest mocks boundaries; rules tests
   and Playwright E2E run against Firebase emulators only. Client
   emulator connection is gated by `NEXT_PUBLIC_USE_FIREBASE_EMULATOR`

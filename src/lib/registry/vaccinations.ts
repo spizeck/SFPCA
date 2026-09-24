@@ -21,7 +21,18 @@
 
 import "server-only";
 
-import { and, asc, desc, eq, gt, isNull, lte, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import {
   animals,
   auditEvents,
@@ -40,6 +51,7 @@ import {
   vaccinationDueState,
   type VaccinationDueState,
 } from "../vaccinations";
+import { insertCommunication } from "./communications";
 import type { RegistryDb } from "./public-animals";
 
 const UUID_RE =
@@ -445,7 +457,9 @@ export async function listDueVaccinations(
       and(
         eq(communications.relatedType, "vaccination"),
         eq(communications.kind, "vaccination-reminder"),
-        eq(communications.status, "sent"),
+        // 'sent' = provider accepted; 'delivered' = webhook-confirmed —
+        // both are genuine deliveries for cadence purposes.
+        inArray(communications.status, ["sent", "delivered"]),
       ),
     )
     .groupBy(communications.relatedId)
@@ -600,7 +614,11 @@ export async function queueVaccinationReminder(
   }
 
   const [vax] = await db
-    .select({ dueOn: vaccinations.dueOn, validUntil: vaccinations.validUntil })
+    .select({
+      animalId: vaccinations.animalId,
+      dueOn: vaccinations.dueOn,
+      validUntil: vaccinations.validUntil,
+    })
     .from(vaccinations)
     .where(eq(vaccinations.id, input.vaccinationId));
   if (!vax) return { ok: false, reason: "not-found" };
@@ -608,34 +626,28 @@ export async function queueVaccinationReminder(
   const effective = effectiveVaccinationDate(vax.dueOn, vax.validUntil);
   if (!effective) return { ok: false, reason: "invalid" };
 
-  try {
-    const inserted = await db
-      .insert(communications)
-      .values({
-        personId: input.personId,
-        channel: input.channel,
-        kind: VACCINATION_REMINDER_KIND,
-        status: input.status ?? "queued",
-        idempotencyKey: vaccinationReminderKey(
-          input.vaccinationId,
-          effective,
-          touch,
-        ),
-        relatedType: "vaccination",
-        relatedId: input.vaccinationId,
-        // No sent_at: registration is not delivery. #172 stamps it
-        // when a provider confirms the message actually went out.
-        sentAt: null,
-      })
-      .onConflictDoNothing({ target: communications.idempotencyKey })
-      .returning();
-    return { ok: true, duplicate: inserted.length === 0 };
-  } catch (error) {
-    // FK violation on person_id → the recipient is gone.
-    const code =
-      (error as { code?: unknown })?.code ??
-      (error as { cause?: { code?: unknown } })?.cause?.code;
-    if (code === "23503") return { ok: false, reason: "not-found" };
-    throw error;
-  }
+  // Shared ledger insert (#172) — same idempotency-key conflict mapping
+  // as every other writer. cycle_key/touch are recorded so the
+  // evaluator's per-cycle touch history stays complete.
+  const outcome = await insertCommunication(
+    {
+      personId: input.personId,
+      animalId: vax.animalId,
+      channel: input.channel,
+      kind: VACCINATION_REMINDER_KIND,
+      status: input.status ?? "queued",
+      idempotencyKey: vaccinationReminderKey(
+        input.vaccinationId,
+        effective,
+        touch,
+      ),
+      relatedType: "vaccination",
+      relatedId: input.vaccinationId,
+      cycleKey: effective,
+      touch,
+    },
+    db,
+  );
+  if (outcome === "invalid-person") return { ok: false, reason: "not-found" };
+  return { ok: true, duplicate: outcome === "duplicate" };
 }

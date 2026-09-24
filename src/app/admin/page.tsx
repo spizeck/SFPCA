@@ -2,8 +2,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { Suspense } from "react";
-import { FileText, PawPrint, Settings, ClipboardList, CircleQuestionMark, CalendarClock } from "lucide-react";
+import { FileText, PawPrint, Settings, ClipboardList, CircleQuestionMark, CalendarClock, Mail } from "lucide-react";
 import { VetQueueCard } from "@/components/admin/vet-queue-card";
+import { CommunicationsCard } from "@/components/admin/communications-card";
 
 // The vet card hits Postgres — stream it so a slow registry never
 // blocks the rest of the dashboard.
@@ -23,6 +24,27 @@ function VetQueueCardFallback() {
       <CardContent>
         <Button asChild className="w-full">
           <Link href="/admin/vet">Open vet queue</Link>
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function CommunicationsCardFallback() {
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-3 mb-2">
+          <Mail className="h-8 w-8 text-primary" />
+          <CardTitle>Communications</CardTitle>
+        </div>
+        <CardDescription>
+          Automated owner reminders — delivery exceptions and send history
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button asChild className="w-full">
+          <Link href="/admin/communications">Open communications</Link>
         </Button>
       </CardContent>
     </Card>
@@ -88,6 +110,10 @@ export default function AdminDashboard() {
 
         <Suspense fallback={<VetQueueCardFallback />}>
           <VetQueueCard />
+        </Suspense>
+
+        <Suspense fallback={<CommunicationsCardFallback />}>
+          <CommunicationsCard />
         </Suspense>
 
         <Card>

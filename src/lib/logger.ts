@@ -19,6 +19,7 @@ export type LogSubsystem =
   | "animals"
   | "vaccinations"
   | "medical"
+  | "communications"
   | "content"
   | "ui";
 

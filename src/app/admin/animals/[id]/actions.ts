@@ -35,6 +35,10 @@ import {
   type ProcedureWriteInput,
   type WeightWriteInput,
 } from "@/lib/registry/medical";
+import {
+  listCommunicationsForAnimal,
+  type AdminCommunication,
+} from "@/lib/registry/communications";
 import { logError, type LogSubsystem } from "@/lib/logger";
 
 export interface AnimalMedicalRecord {
@@ -49,6 +53,9 @@ export interface AnimalMedicalRecord {
   // Expected clinic attendances — live items first, then resolved
   // history (#194). Same partition rule as follow-ups.
   clinicExpectations: AdminClinicExpectation[];
+  // Communication history about this animal (#172) — reminder sends,
+  // skips, and failures, newest first.
+  communications: AdminCommunication[];
 }
 
 // One round-trip for the detail page: animal header + timeline +
@@ -61,12 +68,14 @@ export async function getAnimalMedicalAction(
   if (!authorized) throw new Error("Unauthorized");
   const animal = await getAdminAnimal(registryId);
   if (!animal) return null;
-  const [timeline, followUps, clinicExpectations] = await Promise.all([
-    listMedicalTimeline(animal.id),
-    listFollowUpsForAnimal(animal.id),
-    listClinicExpectationsForAnimal(animal.id),
-  ]);
-  return { animal, timeline, followUps, clinicExpectations };
+  const [timeline, followUps, clinicExpectations, communications] =
+    await Promise.all([
+      listMedicalTimeline(animal.id),
+      listFollowUpsForAnimal(animal.id),
+      listClinicExpectationsForAnimal(animal.id),
+      listCommunicationsForAnimal(animal.id),
+    ]);
+  return { animal, timeline, followUps, clinicExpectations, communications };
 }
 
 export interface SaveResult {
