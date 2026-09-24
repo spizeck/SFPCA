@@ -127,4 +127,79 @@ test.describe("veterinary work queue", () => {
     // them means opening the record (recording the next dose).
     await expect(row.getByRole("button")).toHaveCount(0);
   });
+
+  test("an expected clinic animal lands on the queue; marking no-show preserves history", async ({
+    page,
+  }) => {
+    await signInAsAdmin(page);
+    await createAnimal(page, "E2E Clinic Dog");
+
+    // Record that the animal is expected at clinic — dated in the
+    // past so it lands as past-due regardless of when the suite runs.
+    await page
+      .getByRole("button", { name: "Expect at clinic" })
+      .first()
+      .click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Expected date").fill("2020-01-01");
+    await dialog.getByLabel(/Why they.re coming/).fill("Vaccination visit");
+    await dialog.getByLabel(/Session/).fill("AM clinic");
+    await dialog
+      .getByRole("button", { name: "Expect at clinic" })
+      .click();
+    await expect(
+      page.getByText("E2E Clinic Dog expected at clinic", { exact: true }),
+    ).toBeVisible();
+
+    // The animal page shows it as an unresolved past-due expectation.
+    await expect(page.getByText("Vaccination visit")).toBeVisible();
+    await expect(page.getByText("Past due")).toBeVisible();
+    const medicalUrl = page.url();
+
+    // The shared queue surfaces it cross-animal.
+    await page.goto("/admin/vet");
+    await dismissConsentNotice(page);
+    const row = page.getByRole("row", { name: /Vaccination visit/ });
+    await expect(row).toBeVisible();
+    await expect(row.getByText("Past due")).toBeVisible();
+    await expect(row.getByText("E2E Clinic Dog")).toBeVisible();
+    await expect(row.getByText("AM clinic")).toBeVisible();
+
+    // Mark no-show from the queue — confirmed first, then it leaves
+    // the active list (the record is preserved).
+    await row
+      .getByRole("button", {
+        name: "Mark Vaccination visit — E2E Clinic Dog no-show",
+      })
+      .click();
+    const confirm = page.getByRole("dialog");
+    await expect(
+      confirm.getByText(/Vaccination visit — E2E Clinic Dog/),
+    ).toBeVisible();
+    await confirm.getByRole("button", { name: "Mark no-show" }).click();
+    await expect(
+      page.getByText("Expectation marked no-show.", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("row", { name: /Vaccination visit/ }),
+    ).toHaveCount(0);
+
+    // Back on the animal record: nothing live, and the no-show sits in
+    // collapsed history — never deleted.
+    await page.goto(medicalUrl);
+    await dismissConsentNotice(page);
+    await expect(
+      page.getByText("No upcoming clinic expectations for this animal."),
+    ).toBeVisible();
+    await page.getByText(/Resolved history/).last().click();
+    const history = page
+      .locator("details")
+      .filter({ hasText: "Vaccination visit" });
+    await expect(
+      history.getByText("Vaccination visit", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      history.getByText("No-show", { exact: true }),
+    ).toBeVisible();
+  });
 });

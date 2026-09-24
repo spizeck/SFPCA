@@ -16,7 +16,8 @@ function VetQueueCardFallback() {
           <CardTitle>Vet Queue</CardTitle>
         </div>
         <CardDescription>
-          Rechecks, vaccinations due, and medical alerts needing attention
+          Rechecks, expected clinic animals, vaccinations due, and medical
+          alerts needing attention
         </CardDescription>
       </CardHeader>
       <CardContent>

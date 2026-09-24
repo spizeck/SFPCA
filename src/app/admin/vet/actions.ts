@@ -7,10 +7,16 @@
 
 import { requireAdmin } from "@/lib/auth";
 import {
+  cancelClinicExpectation,
   cancelFollowUp,
   completeFollowUp,
+  createClinicExpectation,
   createFollowUp,
+  markClinicExpectationNoShow,
+  markClinicExpectationSeen,
+  updateClinicExpectation,
   updateFollowUp,
+  type ClinicExpectationWriteInput,
   type FollowUpWriteInput,
 } from "@/lib/registry/medical";
 import {
@@ -110,5 +116,58 @@ export async function cancelFollowUpAction(
 ): Promise<SaveResult> {
   return save("medical", (actor) =>
     cancelFollowUp(followUpId, expectedUpdatedAt, actor),
+  );
+}
+
+// Clinic expectations (#194) — same authorized + audited boundary.
+export async function saveClinicExpectationAction(
+  input: ClinicExpectationWriteInput,
+  expectationId: string | null,
+  expectedUpdatedAt?: string,
+): Promise<SaveResult> {
+  return save("medical", (actor) =>
+    expectationId
+      ? updateClinicExpectation(
+          expectationId,
+          input,
+          expectedUpdatedAt ?? "",
+          actor,
+        )
+      : createClinicExpectation(input, actor),
+  );
+}
+
+// Terminal transitions — no delete exists. 'seen' optionally links the
+// real encounter that fulfilled the expectation; it never creates one.
+export async function markClinicSeenAction(
+  expectationId: string,
+  expectedUpdatedAt: string,
+  encounterId: string | null = null,
+): Promise<SaveResult> {
+  return save("medical", (actor) =>
+    markClinicExpectationSeen(
+      expectationId,
+      expectedUpdatedAt,
+      actor,
+      encounterId,
+    ),
+  );
+}
+
+export async function markClinicNoShowAction(
+  expectationId: string,
+  expectedUpdatedAt: string,
+): Promise<SaveResult> {
+  return save("medical", (actor) =>
+    markClinicExpectationNoShow(expectationId, expectedUpdatedAt, actor),
+  );
+}
+
+export async function cancelClinicExpectationAction(
+  expectationId: string,
+  expectedUpdatedAt: string,
+): Promise<SaveResult> {
+  return save("medical", (actor) =>
+    cancelClinicExpectation(expectationId, expectedUpdatedAt, actor),
   );
 }

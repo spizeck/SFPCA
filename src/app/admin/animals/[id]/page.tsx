@@ -15,6 +15,7 @@ import {
   type AnimalMedicalRecord,
 } from "./actions";
 import type {
+  AdminClinicExpectation,
   AdminFollowUp,
   AdminMedicalAlert,
   AdminVetEncounter,
@@ -36,6 +37,9 @@ import { MedicationDialog } from "@/components/admin/medical/medication-dialog";
 import { WeightDialog } from "@/components/admin/medical/weight-dialog";
 import { FollowUpDialog } from "@/components/admin/medical/follow-up-dialog";
 import { FollowUpPanel } from "@/components/admin/medical/follow-up-panel";
+import { ClinicExpectationDialog } from "@/components/admin/medical/clinic-expectation-dialog";
+import { ClinicExpectationPanel } from "@/components/admin/medical/clinic-expectation-panel";
+import { MarkSeenDialog } from "@/components/admin/medical/mark-seen-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -55,7 +59,9 @@ type DialogType =
   | "medication"
   | "weight"
   | "alert"
-  | "follow-up";
+  | "follow-up"
+  | "clinic-expectation"
+  | "mark-seen";
 
 export default function AnimalMedicalPage() {
   const params = useParams<{ id: string }>();
@@ -67,10 +73,12 @@ export default function AnimalMedicalPage() {
   const [notFound, setNotFound] = useState(false);
   const [dialog, setDialog] = useState<{
     type: DialogType;
-    // Timeline records edit via `editing`; follow-ups are not timeline
-    // items so they travel on their own field.
+    // Timeline records edit via `editing`; follow-ups and clinic
+    // expectations are not timeline items so they travel on their own
+    // fields.
     editing: MedicalTimelineItem | null;
     followUp?: AdminFollowUp | null;
+    expectation?: AdminClinicExpectation | null;
   } | null>(null);
   // Derived states are date-relative; fix "today" when the page loads
   // so rows don't shift mid-session.
@@ -129,7 +137,7 @@ export default function AnimalMedicalPage() {
     );
   }
 
-  const { animal, timeline, followUps } = record;
+  const { animal, timeline, followUps, clinicExpectations } = record;
   const encounters = timeline
     .filter((i) => i.kind === "encounter")
     .map((i) => i.record as AdminVetEncounter);
@@ -166,6 +174,20 @@ export default function AnimalMedicalPage() {
         onChanged={loadRecord}
         onAdd={() => openDialog("follow-up", null)}
         onEdit={(fu) => setDialog({ type: "follow-up", editing: null, followUp: fu })}
+      />
+
+      <ClinicExpectationPanel
+        expectations={clinicExpectations}
+        encounters={encounters}
+        today={today}
+        onChanged={loadRecord}
+        onAdd={() => openDialog("clinic-expectation", null)}
+        onEdit={(ex) =>
+          setDialog({ type: "clinic-expectation", editing: null, expectation: ex })
+        }
+        onMarkSeen={(ex) =>
+          setDialog({ type: "mark-seen", editing: null, expectation: ex })
+        }
       />
 
       <Card>
@@ -318,6 +340,28 @@ export default function AnimalMedicalPage() {
         onOpenChange={(o) => !o && closeDialog()}
         onSaved={loadRecord}
         today={today}
+      />
+      <ClinicExpectationDialog
+        animalId={animal.id}
+        animalName={animal.name}
+        editing={
+          dialog?.type === "clinic-expectation"
+            ? (dialog.expectation ?? null)
+            : null
+        }
+        open={dialog?.type === "clinic-expectation"}
+        onOpenChange={(o) => !o && closeDialog()}
+        onSaved={loadRecord}
+      />
+      <MarkSeenDialog
+        expectation={
+          dialog?.type === "mark-seen" ? (dialog.expectation ?? null) : null
+        }
+        animalName={animal.name}
+        encounters={encounters}
+        open={dialog?.type === "mark-seen"}
+        onOpenChange={(o) => !o && closeDialog()}
+        onResolved={loadRecord}
       />
     </div>
   );

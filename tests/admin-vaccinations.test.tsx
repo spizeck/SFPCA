@@ -17,6 +17,10 @@ const {
   mockSaveFollowUp,
   mockCompleteFollowUp,
   mockCancelFollowUp,
+  mockSaveExpectation,
+  mockMarkSeen,
+  mockMarkNoShow,
+  mockCancelExpectation,
   mockToast,
 } = vi.hoisted(() => ({
   mockGetAnimalMedical: vi.fn(),
@@ -29,6 +33,10 @@ const {
   mockSaveFollowUp: vi.fn(),
   mockCompleteFollowUp: vi.fn(),
   mockCancelFollowUp: vi.fn(),
+  mockSaveExpectation: vi.fn(),
+  mockMarkSeen: vi.fn(),
+  mockMarkNoShow: vi.fn(),
+  mockCancelExpectation: vi.fn(),
   mockToast: vi.fn(),
 }));
 
@@ -42,11 +50,16 @@ vi.mock("@/app/admin/animals/[id]/actions", () => ({
   saveWeightAction: mockSaveWeight,
 }));
 
-// The follow-up panel/dialog call the shared work-queue actions (#175).
+// The follow-up and clinic-expectation panels/dialogs call the shared
+// work-queue actions (#175/#194).
 vi.mock("@/app/admin/vet/actions", () => ({
   saveFollowUpAction: mockSaveFollowUp,
   completeFollowUpAction: mockCompleteFollowUp,
   cancelFollowUpAction: mockCancelFollowUp,
+  saveClinicExpectationAction: mockSaveExpectation,
+  markClinicSeenAction: mockMarkSeen,
+  markClinicNoShowAction: mockMarkNoShow,
+  cancelClinicExpectationAction: mockCancelExpectation,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -107,8 +120,30 @@ function vaxItem(data: Record<string, unknown>) {
   };
 }
 
-function record(timeline: unknown[] = [], followUps: unknown[] = []) {
-  return { animal: ANIMAL, timeline, followUps };
+function record(
+  timeline: unknown[] = [],
+  followUps: unknown[] = [],
+  clinicExpectations: unknown[] = [],
+) {
+  return { animal: ANIMAL, timeline, followUps, clinicExpectations };
+}
+
+function expectationRow(data: Record<string, unknown> = {}) {
+  return {
+    id: "ex-1",
+    animalId: "animal-uuid-1",
+    personId: null,
+    encounterId: null,
+    expectedOn: "2026-12-01",
+    sessionLabel: null,
+    reason: "Vaccination visit",
+    status: "expected",
+    notes: null,
+    resolvedAt: null,
+    createdAt: "2026-10-01T00:00:00.000Z",
+    updatedAt: "2026-10-01T00:00:00.000Z",
+    ...data,
+  };
 }
 
 beforeEach(() => {
@@ -123,6 +158,10 @@ beforeEach(() => {
   mockSaveFollowUp.mockResolvedValue({ ok: true });
   mockCompleteFollowUp.mockResolvedValue({ ok: true });
   mockCancelFollowUp.mockResolvedValue({ ok: true });
+  mockSaveExpectation.mockResolvedValue({ ok: true });
+  mockMarkSeen.mockResolvedValue({ ok: true });
+  mockMarkNoShow.mockResolvedValue({ ok: true });
+  mockCancelExpectation.mockResolvedValue({ ok: true });
 });
 
 describe("admin animal medical record", () => {
@@ -573,5 +612,113 @@ describe("admin animal medical record", () => {
       expect(within(dialog).getByRole("alert")).toBeInTheDocument(),
     );
     expect(mockSaveEncounter).not.toHaveBeenCalled();
+  });
+
+  test("clinic expectations surface as actionable items, resolved ones as history", async () => {
+    mockGetAnimalMedical.mockResolvedValue(
+      record([], [], [
+        expectationRow({ id: "ex-live", expectedOn: "2020-01-01" }),
+        expectationRow({
+          id: "ex-done",
+          reason: "Old checkup",
+          status: "seen",
+          resolvedAt: "2020-02-01T10:00:00.000Z",
+          updatedAt: "2020-02-01T10:00:00.000Z",
+        }),
+      ]),
+    );
+    render(<AnimalMedicalPage />);
+
+    expect(await screen.findByText("Vaccination visit")).toBeInTheDocument();
+    expect(screen.getByText("Past due")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Mark Vaccination visit seen" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Mark Vaccination visit no-show",
+      }),
+    ).toBeInTheDocument();
+
+    const summary = screen.getByText(/Resolved history/);
+    const details = summary.closest("details") as HTMLElement;
+    expect(details).not.toHaveAttribute("open");
+    expect(within(details).getByText("Old checkup")).toBeInTheDocument();
+    expect(within(details).getByText("Seen")).toBeInTheDocument();
+    expect(
+      within(details).queryByRole("button", { name: /Mark Old checkup/ }),
+    ).toBeNull();
+  });
+
+  test("mark seen opens the encounter-link dialog and resolves with the token", async () => {
+    mockGetAnimalMedical.mockResolvedValue(
+      record([], [], [expectationRow({ id: "ex-9" })]),
+    );
+    render(<AnimalMedicalPage />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Mark Vaccination visit seen",
+      }),
+    );
+    // The dialog offers the optional encounter link — nothing fires yet.
+    expect(mockMarkSeen).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/linked to a visit/i)).toBeInTheDocument();
+
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Mark seen" }),
+    );
+    await waitFor(() =>
+      expect(mockMarkSeen).toHaveBeenCalledWith(
+        "ex-9",
+        "2026-10-01T00:00:00.000Z",
+        null,
+      ),
+    );
+    await waitFor(() =>
+      expect(mockGetAnimalMedical).toHaveBeenCalledTimes(2),
+    );
+  });
+
+  test("the expectation dialog posts a new clinic expectation", async () => {
+    render(<AnimalMedicalPage />);
+    await waitFor(() =>
+      expect(
+        screen.getByText(/No medical history recorded/),
+      ).toBeInTheDocument(),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expect at clinic" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Expected date"), {
+      target: { value: "2027-02-01" },
+    });
+    fireEvent.change(
+      within(dialog).getByLabelText(/Why they.re coming/),
+      { target: { value: "Rabies booster" } },
+    );
+    fireEvent.change(within(dialog).getByLabelText(/Session/), {
+      target: { value: "AM clinic" },
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Expect at clinic" }),
+    );
+
+    await waitFor(() =>
+      expect(mockSaveExpectation).toHaveBeenCalledWith(
+        {
+          animalId: "animal-uuid-1",
+          expectedOn: "2027-02-01",
+          sessionLabel: "AM clinic",
+          reason: "Rabies booster",
+          notes: null,
+        },
+        null,
+        undefined,
+      ),
+    );
   });
 });

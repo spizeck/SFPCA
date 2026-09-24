@@ -106,6 +106,60 @@ export const FOLLOW_UP_STATE_LABELS: Record<FollowUpState, string> = {
   cancelled: "Cancelled",
 };
 
+// --- Clinic expectations (#194) ----------------------------------------------
+//
+// "This animal is expected at the clinic on this date" — scheduling
+// intent for periodic vet coverage, distinct from a follow-up (medical
+// work that needs doing) and from an encounter (a visit that happened).
+// Stored status: 'expected' is the only live state; 'seen' / 'no_show'
+// / 'cancelled' are terminal. Urgency is derived from expected_on vs
+// today, never stored:
+//   expected_on <  today → overdue   (came-and-went unresolved —
+//                                     mark seen or no-show)
+//   expected_on == today → due       (expected today — top of mind)
+//   expected_on >  today → upcoming
+export const CLINIC_EXPECTATION_STATUSES = [
+  "expected",
+  "seen",
+  "no_show",
+  "cancelled",
+] as const;
+export type ClinicExpectationStatus =
+  (typeof CLINIC_EXPECTATION_STATUSES)[number];
+
+export type ClinicExpectationState =
+  | "overdue"
+  | "due"
+  | "upcoming"
+  | "seen"
+  | "no_show"
+  | "cancelled";
+
+export function clinicExpectationState(
+  expectedOn: string,
+  status: string,
+  today: string,
+): ClinicExpectationState {
+  if (status === "seen") return "seen";
+  if (status === "no_show") return "no_show";
+  if (status === "cancelled") return "cancelled";
+  if (expectedOn < today) return "overdue";
+  if (expectedOn === today) return "due";
+  return "upcoming";
+}
+
+export const CLINIC_EXPECTATION_STATE_LABELS: Record<
+  ClinicExpectationState,
+  string
+> = {
+  overdue: "Past due",
+  due: "Expected today",
+  upcoming: "Expected",
+  seen: "Seen",
+  no_show: "No-show",
+  cancelled: "Cancelled",
+};
+
 // --- Weight (authoritative unit is integer grams) ---------------------------
 
 const GRAMS_PER_LB = 453.59237;

@@ -166,6 +166,7 @@ plain SQL.
 | `vet_documents` | Clinical document references (lab reports, certificates) | `storage_path ~ '^vet-docs/'` CHECK; uploader + Storage rules deferred — relational shape only |
 | `vaccinations` | Structured vaccination history (#173) | restrictive FK to `animals`; `due_on`/`valid_until` ≥ `administered_on`; `series_key` generated from `vaccine_name` — only the latest dose per (animal, series) drives the due/reminder projection; due-state derived, never stored; optional `encounter_id` links a dose to the visit it was given at |
 | `follow_ups` | Veterinary follow-up/recheck queue (#175) | status CHECK `open\|completed\|cancelled`; `resolved_at` set exactly when status leaves `open`; time-relative state (upcoming/due/overdue) derived by `followUpState()` — never stored; `reason` is the queue headline; `encounter_id` links a recheck to the visit that recommended it; `person_id` snapshots the owner at creation (history), the queue resolves the CURRENT owner separately; registration-linked rows are #177 operational work, not clinical |
+| `clinic_expectations` | Expected clinic animals (#194) | status CHECK `expected\|seen\|no_show\|cancelled`; `resolved_at` consistency CHECK mirrors follow_ups; urgency derived by `clinicExpectationState()` — never stored; restrictive animal FK — expectations are history; `encounter_id` (set null) records the real visit that fulfilled a `seen` expectation — never manufactured; `person_id` snapshots the owner at creation; `session_label` is a free-text hint, not a slot |
 | `communications` | Reminder ledger + send log | `unique(idempotency_key)` — safe retries; `vax-reminder:<vax>:<date>:<touch>` keys (#173 writes only `queued`/`skipped`; #172 owns the `sent`/`failed` delivery transition + `sent_at`) |
 | `audit_events` | Append-only mutation history | entity type/id + before/after jsonb |
 
@@ -195,9 +196,10 @@ billing, prescribing, or diagnosis coding.
 **Veterinary work queue (#175):** `/admin/vet` is the staff action
 list — "what needs attention" across all animals, read through
 `src/lib/registry/vet-queue.ts` (`listVetQueue`/`vetQueueSummary`). It
-composes three sources into one urgency-sorted list: open `follow_ups`
+composes four sources into one urgency-sorted list: open `follow_ups`
 (rechecks — created inline by encounters or standalone from the animal
-record), vaccinations due/overdue **delegated to `listDueVaccinations`**
+record), unresolved `clinic_expectations` (#194 — see below),
+vaccinations due/overdue **delegated to `listDueVaccinations`**
 (#173's canonical query — the queue never re-derives vaccine state, and
 the reminder foundation can never disagree with the queue), and active
 `medical_alerts` at `critical`/`important` severity (`info` alerts stay
@@ -211,6 +213,27 @@ job — the queue exposes the canonical data set; scheduling,
 preferences, retries, and send history live there. The broader
 exception dashboard is **#177's** — it should compose
 `vetQueueSummary()` rather than re-query these tables.
+
+**Expected clinic animals (#194):** `clinic_expectations` answers "who
+is coming to the next clinic session" — scheduling intent for periodic
+vet coverage, deliberately NOT appointment software (no slots, times,
+calendars, or confirmations). It is its own table rather than a
+`follow_ups` kind because the concept differs: a follow-up is medical
+work that needs doing; an expectation is attendance intent. Lifecycle:
+`expected` (only live state) → `seen` | `no_show` | `cancelled`, all
+terminal, all audited guarded transitions, `resolved_at` stamped — no
+delete path. `clinicExpectationState()` derives urgency from
+`expected_on` vs today: past-due-still-expected renders overdue
+("failed to appear — resolve it"), today is due, future is upcoming.
+Marking `seen` optionally links the `vet_encounters` row that fulfilled
+it — validated against the same animal; if no visit was logged yet the
+expectation is simply `seen` with a null link and no clinical facts are
+manufactured. Encounters never auto-create or auto-resolve
+expectations: a recheck and an expectation are different intents, and
+auto-linking would fabricate attendance. Queue ordering is unchanged —
+expectations participate in the dated-work ranking (overdue → due →
+upcoming), ahead of alerts. #172 may later consume this list for
+clinic reminders; the model stores no delivery state.
 
 ## 6. ID strategy
 
