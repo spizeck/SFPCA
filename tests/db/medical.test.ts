@@ -23,6 +23,7 @@ import {
   updateAlert,
   updateEncounter,
   updateMedication,
+  updateProcedure,
 } from "@/lib/registry/medical";
 
 let pglite: PGlite;
@@ -550,6 +551,43 @@ describe("timeline and historical integrity", () => {
         administeredOn: "2026-06-01",
         encounterId: enc.record.id, // belongs to a different animal
       },
+      "vet@test.dev",
+      db,
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "invalid",
+      field: "encounterId",
+    });
+  });
+
+  test("an update cannot sneak a cross-animal encounter link via a stale animalId", async () => {
+    const mine = await seedAnimal("Mine2");
+    const theirs = await seedAnimal("Theirs2");
+    const enc = await createEncounter(
+      { animalId: theirs.id, ...VISIT },
+      "vet@test.dev",
+      db,
+    );
+    const proc = await createProcedure(
+      { animalId: mine.id, kind: "dental", description: "Cleaning" },
+      "vet@test.dev",
+      db,
+    );
+    if (!enc.ok || !proc.ok) throw new Error("setup failed");
+
+    // animalId is write-once — a caller passing the WRONG animalId must
+    // not be able to link the row to that animal's encounter. The check
+    // runs against the locked row's animalId.
+    const result = await updateProcedure(
+      proc.record.id,
+      {
+        animalId: theirs.id, // stale/forged — the row belongs to `mine`
+        encounterId: enc.record.id,
+        kind: "dental",
+        description: "Cleaning",
+      },
+      proc.record.updatedAt,
       "vet@test.dev",
       db,
     );

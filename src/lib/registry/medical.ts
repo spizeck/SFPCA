@@ -20,7 +20,17 @@
 // this module never builds a parallel reminder system.
 import "server-only";
 
-import { and, asc, desc, eq, isNull, or, gt, lte } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  isNotNull,
+  isNull,
+  lte,
+  or,
+} from "drizzle-orm";
 import {
   animals,
   auditEvents,
@@ -431,12 +441,16 @@ async function currentOwnerPersonId(
   animalId: string,
   today: string,
 ): Promise<string | null> {
+  // Person rows only — a household ownership has no personId to
+  // snapshot; preferring it would silently lose the owner contact
+  // (mirrors the person-first ordering in listDueVaccinations).
   const [row] = await tx
     .select({ personId: ownerships.personId })
     .from(ownerships)
     .where(
       and(
         eq(ownerships.animalId, animalId),
+        isNotNull(ownerships.personId),
         lte(ownerships.validFrom, today),
         or(isNull(ownerships.validTo), gt(ownerships.validTo, today)),
       ),
@@ -447,13 +461,20 @@ async function currentOwnerPersonId(
 }
 
 // Generic guarded update: row lock + expected updated_at + audit row,
-// identical semantics to updateVaccination.
-async function guardedUpdate<T extends { id: string } & AnyRow, R>(
+// identical semantics to updateVaccination. `check` runs after the row
+// lock — use it for validations that need the authoritative row (e.g.
+// an encounter link must belong to the ROW's animal, not whatever
+// animalId the caller sent, since animalId is write-once).
+async function guardedUpdate<
+  T extends { id: string; animalId: string } & AnyRow,
+  R,
+>(
   tx: Tx,
   opts: {
     id: string;
     expectedUpdatedAt: string;
     selectFrom: () => Promise<T | undefined>;
+    check?: (before: T) => Promise<MedicalMutationResult<R> | null>;
     applyUpdate: () => Promise<T | undefined>;
     entityType: string;
     toDto: (row: T) => R;
@@ -468,6 +489,8 @@ async function guardedUpdate<T extends { id: string } & AnyRow, R>(
   if (before.updatedAt.getTime() !== expectedMs) {
     return { ok: false, reason: "conflict" };
   }
+  const checkFailure = await opts.check?.(before);
+  if (checkFailure) return checkFailure;
   const after = await opts.applyUpdate();
   if (!after) return { ok: false, reason: "not-found" };
   await tx.insert(auditEvents).values({
@@ -479,6 +502,29 @@ async function guardedUpdate<T extends { id: string } & AnyRow, R>(
     after: opts.toDto(after),
   });
   return { ok: true, record: opts.toDto(after) };
+}
+
+// Reusable `check` for updates: an encounter link is only valid if the
+// encounter exists AND belongs to the locked row's animal — never the
+// caller-supplied animalId, which is write-once and may be stale/wrong.
+function encounterLinkCheck(
+  tx: Queryable,
+  encounterId: string | null | undefined,
+) {
+  return async (before: { animalId: string }) => {
+    const cleaned = clean(encounterId);
+    if (
+      cleaned !== null &&
+      !(await encounterBelongsTo(tx, cleaned, before.animalId))
+    ) {
+      return {
+        ok: false as const,
+        reason: "invalid" as const,
+        field: "encounterId",
+      };
+    }
+    return null;
+  };
 }
 
 // --- Encounters ---------------------------------------------------------------
@@ -701,19 +747,8 @@ export async function updateProcedure(
   if (invalidField) return { ok: false, reason: "invalid", field: invalidField };
   if (!UUID_RE.test(id)) return { ok: false, reason: "not-found" };
 
-  return db.transaction(async (tx) => {
-    const encounterId = clean(input.encounterId);
-    if (
-      encounterId !== null &&
-      !(await encounterBelongsTo(tx, encounterId, input.animalId))
-    ) {
-      return {
-        ok: false as const,
-        reason: "invalid" as const,
-        field: "encounterId",
-      };
-    }
-    return guardedUpdate(tx, {
+  return db.transaction(async (tx) =>
+    guardedUpdate(tx, {
       id,
       expectedUpdatedAt,
       actorLabel,
@@ -727,12 +762,13 @@ export async function updateProcedure(
             .where(eq(vetProcedures.id, id))
             .for("update")
         )[0],
+      check: encounterLinkCheck(tx, input.encounterId),
       applyUpdate: async () =>
         (
           await tx
             .update(vetProcedures)
             .set({
-              encounterId,
+              encounterId: clean(input.encounterId),
               kind: input.kind,
               performedOn: clean(input.performedOn),
               provider: clean(input.provider),
@@ -743,8 +779,8 @@ export async function updateProcedure(
             .where(eq(vetProcedures.id, id))
             .returning()
         )[0],
-    });
-  });
+    }),
+  );
 }
 
 // --- Medications ----------------------------------------------------------------
@@ -810,19 +846,8 @@ export async function updateMedication(
   if (invalidField) return { ok: false, reason: "invalid", field: invalidField };
   if (!UUID_RE.test(id)) return { ok: false, reason: "not-found" };
 
-  return db.transaction(async (tx) => {
-    const encounterId = clean(input.encounterId);
-    if (
-      encounterId !== null &&
-      !(await encounterBelongsTo(tx, encounterId, input.animalId))
-    ) {
-      return {
-        ok: false as const,
-        reason: "invalid" as const,
-        field: "encounterId",
-      };
-    }
-    return guardedUpdate(tx, {
+  return db.transaction(async (tx) =>
+    guardedUpdate(tx, {
       id,
       expectedUpdatedAt,
       actorLabel,
@@ -836,12 +861,13 @@ export async function updateMedication(
             .where(eq(vetMedications.id, id))
             .for("update")
         )[0],
+      check: encounterLinkCheck(tx, input.encounterId),
       applyUpdate: async () =>
         (
           await tx
             .update(vetMedications)
             .set({
-              encounterId,
+              encounterId: clean(input.encounterId),
               medication: clean(input.medication)!,
               dose: clean(input.dose),
               route: clean(input.route),
@@ -856,8 +882,8 @@ export async function updateMedication(
             .where(eq(vetMedications.id, id))
             .returning()
         )[0],
-    });
-  });
+    }),
+  );
 }
 
 // --- Medical alerts ---------------------------------------------------------------
@@ -921,19 +947,8 @@ export async function updateAlert(
   if (invalidField) return { ok: false, reason: "invalid", field: invalidField };
   if (!UUID_RE.test(id)) return { ok: false, reason: "not-found" };
 
-  return db.transaction(async (tx) => {
-    const encounterId = clean(input.encounterId);
-    if (
-      encounterId !== null &&
-      !(await encounterBelongsTo(tx, encounterId, input.animalId))
-    ) {
-      return {
-        ok: false as const,
-        reason: "invalid" as const,
-        field: "encounterId",
-      };
-    }
-    return guardedUpdate(tx, {
+  return db.transaction(async (tx) =>
+    guardedUpdate(tx, {
       id,
       expectedUpdatedAt,
       actorLabel,
@@ -947,12 +962,13 @@ export async function updateAlert(
             .where(eq(medicalAlerts.id, id))
             .for("update")
         )[0],
+      check: encounterLinkCheck(tx, input.encounterId),
       applyUpdate: async () =>
         (
           await tx
             .update(medicalAlerts)
             .set({
-              encounterId,
+              encounterId: clean(input.encounterId),
               kind: input.kind,
               severity: input.severity,
               summary: clean(input.summary)!,
@@ -966,8 +982,8 @@ export async function updateAlert(
             .where(eq(medicalAlerts.id, id))
             .returning()
         )[0],
-    });
-  });
+    }),
+  );
 }
 
 // --- Weight records ---------------------------------------------------------------
@@ -1042,11 +1058,13 @@ export async function updateWeightRecord(
             .where(eq(weightRecords.id, id))
             .for("update")
         )[0],
+      check: encounterLinkCheck(tx, input.encounterId),
       applyUpdate: async () =>
         (
           await tx
             .update(weightRecords)
             .set({
+              encounterId: clean(input.encounterId),
               measuredOn: input.measuredOn,
               weightGrams: input.weightGrams,
               notes: clean(input.notes),
