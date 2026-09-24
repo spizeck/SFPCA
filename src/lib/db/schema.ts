@@ -149,10 +149,41 @@ export const householdMembers = pgTable(
 );
 
 // --- Animals --------------------------------------------------------------
-// Permanent durable identity. lifecycleStatus mirrors the canonical
-// lifecycle in src/lib/animal-lifecycle.ts and firestore.rules — extend
-// the CHECK list via migration as registry statuses are added. Annual
-// registration and payment state are deliberately NOT columns here.
+// Permanent durable identity (#167). The animal row is the registry's
+// source of truth for an animal known to SFPCA — it exists independently
+// of any owner, registration, payment, vet visit, vaccination, or portal
+// account, and is never deleted just because no current registration
+// exists. Annual registration and payment state are deliberately NOT
+// columns here.
+//
+// Two deliberately separate status concepts live on the row:
+//   - lifecycleStatus — the REGISTRY reality (src/lib/animal-lifecycle.ts):
+//     'active' (living on Saba / in registry care), 'deceased',
+//     'moved-off-saba', 'unknown' (on-island/living status unconfirmed).
+//     Mutated only through transitionAnimalLifecycle — every change is a
+//     row in animal_lifecycle_events, never a silent overwrite.
+//   - adoptionStatus — the public adoption-catalog state
+//     ('not-listed','available','pending','adopted'): whether the animal
+//     appears on the public site. Publication requires BOTH
+//     adoption_status='available' AND lifecycle_status='active'.
+//
+// Birth data avoids false precision: birth_date is null when unknown;
+// birth_date_estimated=true marks an approximate date ("about 2 years"
+// entered as an estimated birth date). Neither is ever required.
+//
+// Sterilization: sterilization_status is the current registry fact
+// ('unknown'|'sterilized'|'intact'); vet_procedures spay/neuter rows are
+// the authoritative EVIDENCE — recording one marks the animal sterilized
+// and backfills date/provider when empty (see registry/medical.ts).
+// The animal columns exist so historical knowledge ("was already spayed,
+// no record of where") never requires a fabricated procedure.
+//
+// registry_ref is the permanent human-readable reference (SFPCA-000001),
+// assigned by sequence at insert and never reused or rewritten — staff
+// search and owner conversations use it; the uuid stays the identity key.
+// photo_urls are public listing photo URLs only (admin-entered; rendered
+// publicly only while the animal is published); private media and
+// clinical documents live under vet-docs/ via vet_documents, never here.
 
 export const animals = pgTable(
   "animals",
@@ -161,19 +192,43 @@ export const animals = pgTable(
     // Firestore document ID — keeps /animal-adoptions/[id] URLs stable
     // across migration. Null for Postgres-native records.
     legacyId: text("legacy_id"),
+    registryRef: text("registry_ref")
+      .notNull()
+      .default(
+        sql`'SFPCA-' || lpad(nextval('animal_registry_ref_seq'::regclass)::text, 6, '0')`,
+      ),
     name: text("name").notNull(),
     species: text("species").notNull(),
     sex: text("sex").notNull(),
-    approxAge: text("approx_age"),
+    birthDate: date("birth_date", { mode: "string" }),
+    birthDateEstimated: boolean("birth_date_estimated")
+      .notNull()
+      .default(false),
+    // Public-safe listing copy — rendered on the public site when the
+    // animal is published.
     description: text("description"),
-    lifecycleStatus: text("lifecycle_status").notNull(),
+    // Staff-only identifying detail (markings, scars, distinguishing
+    // features) — never part of public DTOs.
+    identifyingNotes: text("identifying_notes"),
+    lifecycleStatus: text("lifecycle_status").notNull().default("active"),
+    // The date the current lifecycle state became effective — null when
+    // unknown (e.g. pre-registry history).
+    lifecycleEffectiveOn: date("lifecycle_effective_on", { mode: "string" }),
+    adoptionStatus: text("adoption_status").notNull().default("not-listed"),
+    sterilizationStatus: text("sterilization_status")
+      .notNull()
+      .default("unknown"),
+    sterilizedOn: date("sterilized_on", { mode: "string" }),
+    sterilizedBy: text("sterilized_by"),
     photoUrls: text("photo_urls").array(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex("animals_legacy_id_key").on(t.legacyId),
+    uniqueIndex("animals_registry_ref_key").on(t.registryRef),
     index("animals_lifecycle_status_idx").on(t.lifecycleStatus),
+    index("animals_adoption_status_idx").on(t.adoptionStatus),
     check(
       "animals_species_check",
       sql`${t.species} IN ('dog','cat','other')`,
@@ -181,7 +236,69 @@ export const animals = pgTable(
     check("animals_sex_check", sql`${t.sex} IN ('male','female','unknown')`),
     check(
       "animals_lifecycle_status_check",
-      sql`${t.lifecycleStatus} IN ('available','pending','adopted')`,
+      sql`${t.lifecycleStatus} IN ('active','deceased','moved-off-saba','unknown')`,
+    ),
+    check(
+      "animals_adoption_status_check",
+      sql`${t.adoptionStatus} IN ('not-listed','available','pending','adopted')`,
+    ),
+    check(
+      "animals_sterilization_status_check",
+      sql`${t.sterilizationStatus} IN ('unknown','sterilized','intact')`,
+    ),
+    check(
+      "animals_birth_estimate_consistency_check",
+      sql`${t.birthDateEstimated} = false OR ${t.birthDate} IS NOT NULL`,
+    ),
+  ],
+);
+
+// Lifecycle transition history (#167) — the durable record of every
+// registry-state change an animal has gone through. A row is written by
+// transitionAnimalLifecycle in the same transaction as the status flip;
+// animals.lifecycle_status stays the efficiently-queryable current state
+// while this table preserves WHY and WHEN it changed. from_status is
+// null only on the initial "entered the registry" event recorded at
+// animal creation. This is DOMAIN history — audit_events remains the
+// actor/change audit; the two are not interchangeable.
+export const animalLifecycleEvents = pgTable(
+  "animal_lifecycle_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    animalId: uuid("animal_id")
+      .notNull()
+      .references(() => animals.id), // restrictive — registry history
+    fromStatus: text("from_status"),
+    toStatus: text("to_status").notNull(),
+    // The date the new state became effective in the real world — may
+    // be earlier than created_at when a report is confirmed late.
+    effectiveOn: date("effective_on", { mode: "string" }).notNull(),
+    // Bounded provenance: what kind of action produced the transition.
+    source: text("source").notNull(),
+    // Loose reference for the source — the owner_requests id for
+    // 'owner-request' transitions; null otherwise.
+    sourceRef: text("source_ref"),
+    reason: text("reason"),
+    actorIdentityId: uuid("actor_identity_id").references(
+      () => authIdentities.id,
+      { onDelete: "set null" },
+    ),
+    actorLabel: text("actor_label"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("animal_lifecycle_events_animal_idx").on(t.animalId, t.effectiveOn),
+    check(
+      "animal_lifecycle_events_from_status_check",
+      sql`${t.fromStatus} IS NULL OR ${t.fromStatus} IN ('active','deceased','moved-off-saba','unknown')`,
+    ),
+    check(
+      "animal_lifecycle_events_to_status_check",
+      sql`${t.toStatus} IN ('active','deceased','moved-off-saba','unknown')`,
+    ),
+    check(
+      "animal_lifecycle_events_source_check",
+      sql`${t.source} IN ('staff','owner-request','import')`,
     ),
   ],
 );
@@ -575,11 +692,15 @@ export const vetEncounters = pgTable(
 );
 
 // Significant treatments/procedures (#174). `kind` carries the
-// structured vocabulary — 'spay'/'neuter' are the authoritative
-// sterilization record (reporting reads these; there is intentionally
-// NO animals.sterilized column duplicating this truth). performed_on is
-// nullable because historical procedures often have no known date
-// ("was already spayed at intake"); the approximation lives in notes.
+// structured vocabulary — 'spay'/'neuter' rows are the authoritative
+// EVIDENCE for sterilization: writing one marks
+// animals.sterilization_status='sterilized' and backfills empty
+// date/provider fields (registry/medical.ts). The animal columns exist
+// separately because historical knowledge ("already spayed, no record
+// of where") must not require a fabricated procedure row.
+// performed_on is nullable because historical procedures often have no
+// known date ("was already spayed at intake"); the approximation lives
+// in notes.
 export const vetProcedures = pgTable(
   "vet_procedures",
   {

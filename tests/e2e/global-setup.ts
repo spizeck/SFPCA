@@ -114,9 +114,11 @@ export default async function globalSetup() {
       name: rest.name,
       species: rest.species,
       sex: rest.sex,
-      approxAge: rest.approxAge ?? null,
       description: rest.description ?? null,
-      lifecycleStatus: status,
+      // The seed's status is the adoption-catalog value; every seeded
+      // animal is lifecycle 'active' (known on-island).
+      lifecycleStatus: "active",
+      adoptionStatus: status,
       photoUrls: photos ?? [],
     });
   }
@@ -159,7 +161,7 @@ export default async function globalSetup() {
       name: "Rexley",
       species: "dog",
       sex: "male",
-      lifecycleStatus: "adopted",
+      lifecycleStatus: "active",
       photoUrls: [],
     })
     .returning();
@@ -169,7 +171,7 @@ export default async function globalSetup() {
       name: "Whiskers",
       species: "cat",
       sex: "female",
-      lifecycleStatus: "adopted",
+      lifecycleStatus: "active",
       photoUrls: [],
     })
     .returning();
@@ -198,7 +200,7 @@ export default async function globalSetup() {
       name: "Claimdog",
       species: "dog",
       sex: "female",
-      lifecycleStatus: "adopted",
+      lifecycleStatus: "active",
       photoUrls: [],
     })
     .returning();

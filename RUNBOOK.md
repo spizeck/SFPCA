@@ -1295,8 +1295,12 @@ linkage is deliberately deferred to #178.
 
 Transform rules live in `scripts/lib/migrate-transform.ts`; every
 normalization produces a classified exception (kind/field/shape only —
-never values). Unrecognized lifecycle statuses import as private
-`pending` (fail-closed) and are always flagged.
+never values). The Firestore `status` maps to `adoption_status`
+(#167: it was always the public-catalog state); unrecognized values
+import as private `pending` (fail-closed) and are always flagged.
+Imported animals enter the registry as `lifecycle_status='active'`; the
+legacy free-text `approxAge` is preserved verbatim in the staff-only
+`identifying_notes` — it is never fabricated into a birth date.
 
 ### 20b. Tooling
 
@@ -1522,8 +1526,11 @@ rows; webhook misses are visible as `sent`-not-`delivered` rows.
 `/portal` (session-gated, `noindex`) is the owner-facing surface: contact
 details, household membership, currently-owned animals, annual
 confirmation ("still living on Saba and associated with me"), and
-change reports. Owners cannot apply ownership, identity, or lifecycle
-changes themselves — reports land as `pending` `owner_requests` rows.
+change reports. "Previously with you" lists closed associations —
+animals that died, left Saba, or were transferred stay visible as
+history with their lifecycle label instead of silently disappearing.
+Owners cannot apply ownership, identity, or lifecycle changes
+themselves — reports land as `pending` `owner_requests` rows.
 
 ### 23b. Staff review workflow
 
@@ -1540,10 +1547,15 @@ changes themselves — reports land as `pending` `owner_requests` rows.
 - **Transfer to new owner** — the owner's typed target is free text,
   never a link. Approving requires staff to pick the real person or
   household; the old interval closes and the new one opens atomically.
-- **Report deceased / Moved off Saba** — approving ends the reporter's
-  ownership. The animal's `lifecycle_status` is NOT changed (that's
-  #167's job — record the real status from the animal record once it
-  exists). The audit row is the handoff.
+- **Report deceased / Moved off Saba** — approving runs the
+  authoritative lifecycle transition (#167): `animals.lifecycle_status`
+  becomes `deceased`/`moved-off-saba` effective the chosen date, EVERY
+  open ownership interval closes (the reporter's and any co-owners' —
+  the animal has no on-island owner of record), open follow-ups and
+  clinic expectations cancel, and an `animal_lifecycle_events` row
+  records the transition with `source='owner-request'`. All intervals
+  are preserved as history; owners see the animal under "Previously
+  with you". If the transition fails the request stays pending.
 
 Owners see outcomes on their next portal visit; there is no owner
 notification on resolution (a deliberate gap, not a bug).

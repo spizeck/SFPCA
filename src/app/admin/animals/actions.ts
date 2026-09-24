@@ -1,54 +1,45 @@
 "use server";
 
-// Server actions for the admin animal manager (#183). Every action
-// self-authorizes via requireAdmin — Postgres is the only datastore
-// these touch; Firestore is no longer involved in animal records.
+// Server actions for the admin animal registry (#183, #167). Every
+// action self-authorizes via requireAdmin — Postgres is the only
+// datastore these touch; Firestore is no longer involved in animal
+// records.
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import {
   createAnimal,
   deleteAnimal,
-  listAdminAnimals,
+  searchAnimals,
   updateAnimal,
   type AdminAnimal,
+  type AnimalSearchFilters,
   type AnimalWriteInput,
 } from "@/lib/registry/animals";
-import type { Animal } from "@/lib/types";
-import type { AnimalStatus } from "@/lib/animal-lifecycle";
 import { logError } from "@/lib/logger";
 
-function toAnimal(dto: AdminAnimal): Animal {
-  return {
-    id: dto.legacyId ?? dto.id,
-    name: dto.name,
-    species: dto.species as Animal["species"],
-    sex: dto.sex as Animal["sex"],
-    approxAge: dto.approxAge ?? "",
-    description: dto.description ?? "",
-    status: dto.lifecycleStatus as AnimalStatus,
-    photos: dto.photoUrls,
-    createdAt: dto.createdAt,
-    updatedAt: dto.updatedAt,
-  };
+// One row of the staff registry list: the admin animal DTO plus the
+// search-hit context (current owners, active chips) the list renders.
+export interface AdminAnimalRow {
+  animal: AdminAnimal;
+  owners: string[];
+  microchips: string[];
 }
 
-// The admin table keys edits by the registry uuid, not the public-facing
-// id — a legacy-id row must still be updatable by its Postgres identity.
-// We keep both on a private mapping type so the mutation inputs carry
-// the uuid while the UI keeps displaying the Animal shape.
-export interface AdminAnimalRow extends Animal {
-  registryId: string;
-}
-
-function toAdminAnimal(dto: AdminAnimal): AdminAnimalRow {
-  return { ...toAnimal(dto), registryId: dto.id };
-}
-
-export async function listAnimalsAction(): Promise<AdminAnimalRow[]> {
+// Staff search — one text box matching name, registry ref, uuid, legacy
+// id, identifying notes, owner/household name, and microchip number;
+// lifecycle and adoption filters narrow it. Bounded server-side.
+export async function searchAnimalsAction(
+  query: string,
+  filters: AnimalSearchFilters,
+): Promise<AdminAnimalRow[]> {
   const { authorized } = await requireAdmin();
   if (!authorized) throw new Error("Unauthorized");
-  return (await listAdminAnimals()).map(toAdminAnimal);
+  return (await searchAnimals(query, filters)).map((hit) => ({
+    animal: hit.animal,
+    owners: hit.owners,
+    microchips: hit.microchips,
+  }));
 }
 
 export interface SaveAnimalResult {
@@ -56,8 +47,15 @@ export interface SaveAnimalResult {
   reason?: "invalid" | "not-found" | "conflict";
 }
 
+export interface SaveAnimalInput extends AnimalWriteInput {
+  // Create-only: the animal's initial registry lifecycle. Defaults to
+  // 'active'; ignored on update (lifecycle changes only through
+  // transitionAnimalLifecycleAction so history is always preserved).
+  lifecycleStatus?: string;
+}
+
 export async function saveAnimalAction(
-  input: AnimalWriteInput,
+  input: SaveAnimalInput,
   editingRegistryId: string | null,
   expectedUpdatedAt?: string,
 ): Promise<SaveAnimalResult> {
@@ -76,7 +74,7 @@ export async function saveAnimalAction(
       : await createAnimal(input, actor);
     if (result.ok) {
       // The homepage preview is statically rendered — bust it so a
-      // status change shows up without waiting for a redeploy. The
+      // listing change shows up without waiting for a redeploy. The
       // listing/detail pages are force-dynamic already.
       revalidatePath("/");
       return { ok: true };

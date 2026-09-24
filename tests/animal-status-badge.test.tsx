@@ -1,33 +1,67 @@
-// Component tests for the admin animal status badge. Admins must be able
-// to tell public from non-public states without relying on color alone —
-// every badge spells out its visibility, and unrecognized stored values
-// are surfaced as unknown rather than mislabeled.
+// Component tests for the admin animal badges (#167). Two separate
+// badges — registry lifecycle and adoption listing — each spell out
+// their meaning so admins never rely on color alone; unrecognized
+// stored values are surfaced as unknown rather than mislabeled.
 import { render, screen } from "@testing-library/react";
 import { describe, expect, test } from "vitest";
-import { AnimalStatusBadge } from "@/components/admin/animal-status-badge";
+import {
+  AnimalAdoptionBadge,
+  AnimalLifecycleBadge,
+} from "@/components/admin/animal-status-badge";
 
-describe("AnimalStatusBadge", () => {
-  test("available animals are labeled and marked public", () => {
-    render(<AnimalStatusBadge status="available" />);
+describe("AnimalLifecycleBadge", () => {
+  test.each([
+    ["active", "Active on Saba"],
+    ["deceased", "Deceased"],
+    ["moved-off-saba", "Moved off Saba"],
+    ["unknown", "Status unconfirmed"],
+  ])("lifecycle %s renders %s", (status, label) => {
+    render(<AnimalLifecycleBadge status={status} />);
+    expect(screen.getByText(label)).toBeInTheDocument();
+  });
+
+  test.each(["available", "adopted", "", "AVAILABLE"])(
+    "unrecognized lifecycle %j is labeled Unknown",
+    (status) => {
+      render(<AnimalLifecycleBadge status={status} />);
+      expect(screen.getByText("Unknown")).toBeInTheDocument();
+    },
+  );
+});
+
+describe("AnimalAdoptionBadge", () => {
+  test("available on an active animal is labeled and marked public", () => {
+    render(
+      <AnimalAdoptionBadge status="available" lifecycleStatus="active" />,
+    );
     expect(screen.getByText("Available")).toBeInTheDocument();
     expect(screen.getByText("Public")).toBeInTheDocument();
   });
 
-  test.each(["pending", "adopted"])(
-    "%s animals are labeled and marked not public",
+  test.each(["pending", "adopted", "not-listed"])(
+    "%s is labeled and marked not public",
     (status) => {
-      render(<AnimalStatusBadge status={status} />);
-      expect(
-        screen.getByText(status === "pending" ? "Pending" : "Adopted"),
-      ).toBeInTheDocument();
+      render(
+        <AnimalAdoptionBadge status={status} lifecycleStatus="active" />,
+      );
       expect(screen.getByText("Not public")).toBeInTheDocument();
     },
   );
 
+  test("a listed but deceased animal is not public", () => {
+    render(
+      <AnimalAdoptionBadge status="available" lifecycleStatus="deceased" />,
+    );
+    expect(screen.getByText("Available")).toBeInTheDocument();
+    expect(screen.getByText("Not public")).toBeInTheDocument();
+  });
+
   test.each(["quarantined", "", "AVAILABLE"])(
-    "unrecognized status %j is labeled Unknown and marked not public",
+    "unrecognized listing state %j is labeled Unknown and marked not public",
     (status) => {
-      render(<AnimalStatusBadge status={status} />);
+      render(
+        <AnimalAdoptionBadge status={status} lifecycleStatus="active" />,
+      );
       expect(screen.getByText("Unknown")).toBeInTheDocument();
       expect(screen.getByText("Not public")).toBeInTheDocument();
     },

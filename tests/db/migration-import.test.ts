@@ -39,7 +39,13 @@ describe("transformAnimal", () => {
     });
     expect(exceptions).toEqual([]);
     expect(row.legacyId).toBe("fs-abc");
-    expect(row.lifecycleStatus).toBe("available");
+    // The Firestore status was the adoption-catalog state; imported
+    // animals enter the registry lifecycle as 'active'.
+    expect(row.lifecycleStatus).toBe("active");
+    expect(row.adoptionStatus).toBe("available");
+    // Free-text approxAge is preserved as staff-only identifying
+    // context — never fabricated into a birth date.
+    expect(row.identifyingNotes).toBe("Approx. age at import: 3 years");
     expect(row.photoUrls).toEqual(["https://x/1.jpg", "https://x/2.jpg"]);
     expect(row.createdAt).toEqual(T0);
     expect(row.updatedAt).toEqual(T1);
@@ -49,7 +55,8 @@ describe("transformAnimal", () => {
     const { row, exceptions } = transformAnimal("a1", {
       name: "X", species: "cat", sex: "female", status: "weird",
     });
-    expect(row.lifecycleStatus).toBe("pending");
+    expect(row.adoptionStatus).toBe("pending");
+    expect(row.lifecycleStatus).toBe("active");
     expect(exceptions.some((e) => e.kind === "unsupported-status")).toBe(true);
   });
 
@@ -205,7 +212,7 @@ describe("import upserts (PGlite)", () => {
         target: animals.legacyId,
         set: {
           name: sql`excluded.name`,
-          lifecycleStatus: sql`excluded.lifecycle_status`,
+          adoptionStatus: sql`excluded.adoption_status`,
           updatedAt: sql`excluded.updated_at`,
         },
       });
@@ -235,12 +242,12 @@ describe("import upserts (PGlite)", () => {
       name: "Rex II", species: "dog", sex: "male", status: "adopted",
     }).row;
     await upsertAnimal(v2);
-    const r = await db.execute<{ n: number; name: string; lifecycle_status: string }>(sql`
-      SELECT count(*)::int AS n, max(name) AS name, max(lifecycle_status) AS lifecycle_status
+    const r = await db.execute<{ n: number; name: string; adoption_status: string }>(sql`
+      SELECT count(*)::int AS n, max(name) AS name, max(adoption_status) AS adoption_status
       FROM animals WHERE legacy_id = 'upd-1'`);
     expect(r.rows[0].n).toBe(1);
     expect(r.rows[0].name).toBe("Rex II");
-    expect(r.rows[0].lifecycle_status).toBe("adopted");
+    expect(r.rows[0].adoption_status).toBe("adopted");
   });
 
   test("submission upsert is idempotent on legacy_id", async () => {

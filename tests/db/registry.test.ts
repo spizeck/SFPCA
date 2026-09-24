@@ -37,6 +37,7 @@ describe("migration replay from empty database", () => {
     const tables = result.rows.map((r) => r.table_name);
     for (const expected of [
       "admin_users",
+      "animal_lifecycle_events",
       "animals",
       "audit_events",
       "auth_identities",
@@ -76,7 +77,7 @@ describe("schema constraints", () => {
       name: "Rex",
       species: "dog",
       sex: "male",
-      lifecycleStatus: "available",
+      lifecycleStatus: "active",
     };
     await db.insert(schema.animals).values(row);
     await expect(db.insert(schema.animals).values(row)).rejects.toThrow();
@@ -96,7 +97,7 @@ describe("schema constraints", () => {
   test("ownership requires exactly one of person or household", async () => {
     const [animal] = await db
       .insert(schema.animals)
-      .values({ name: "Solo", species: "cat", sex: "female", lifecycleStatus: "pending" })
+      .values({ name: "Solo", species: "cat", sex: "female", lifecycleStatus: "active" })
       .returning();
     await expect(
       db.insert(schema.ownerships).values({
@@ -113,7 +114,7 @@ describe("schema constraints", () => {
       .returning();
     const [animal] = await db
       .insert(schema.animals)
-      .values({ name: "Dates", species: "dog", sex: "male", lifecycleStatus: "pending" })
+      .values({ name: "Dates", species: "dog", sex: "male", lifecycleStatus: "active" })
       .returning();
     await expect(
       db.insert(schema.ownerships).values({
@@ -128,7 +129,7 @@ describe("schema constraints", () => {
   test("one registration per animal per year", async () => {
     const [animal] = await db
       .insert(schema.animals)
-      .values({ name: "Annual", species: "dog", sex: "male", lifecycleStatus: "pending" })
+      .values({ name: "Annual", species: "dog", sex: "male", lifecycleStatus: "active" })
       .returning();
     const reg = { animalId: animal.id, year: 2026, status: "approved" };
     await db.insert(schema.registrations).values(reg);
@@ -140,11 +141,11 @@ describe("schema constraints", () => {
   test("one active microchip assignment per chip number", async () => {
     const [a1] = await db
       .insert(schema.animals)
-      .values({ name: "Chip1", species: "dog", sex: "male", lifecycleStatus: "pending" })
+      .values({ name: "Chip1", species: "dog", sex: "male", lifecycleStatus: "active" })
       .returning();
     const [a2] = await db
       .insert(schema.animals)
-      .values({ name: "Chip2", species: "dog", sex: "female", lifecycleStatus: "pending" })
+      .values({ name: "Chip2", species: "dog", sex: "female", lifecycleStatus: "active" })
       .returning();
     await db.insert(schema.microchipRecords).values({
       chipNumber: "ABC123",
@@ -175,9 +176,10 @@ describe("schema constraints", () => {
 describe("public animal boundary", () => {
   test("only 'available' animals are returned, as redacted DTOs", async () => {
     await db.insert(schema.animals).values([
-      { legacyId: "pub-1", name: "Max", species: "dog", sex: "male", lifecycleStatus: "available", photoUrls: ["https://img/1.jpg"] },
-      { legacyId: "priv-1", name: "Hidden", species: "cat", sex: "female", lifecycleStatus: "pending" },
-      { legacyId: "priv-2", name: "Gone", species: "cat", sex: "female", lifecycleStatus: "adopted" },
+      { legacyId: "pub-1", name: "Max", species: "dog", sex: "male", lifecycleStatus: "active", adoptionStatus: "available", photoUrls: ["https://img/1.jpg"] },
+      { legacyId: "priv-1", name: "Hidden", species: "cat", sex: "female", lifecycleStatus: "active", adoptionStatus: "pending" },
+      // Listed for adoption but deceased — lifecycle gates publication.
+      { legacyId: "priv-2", name: "Gone", species: "cat", sex: "female", lifecycleStatus: "deceased", adoptionStatus: "available" },
     ]);
 
     const list = await listPublicAnimals(db);
@@ -235,7 +237,8 @@ describe("public animal boundary", () => {
         name: "Newer",
         species: "cat",
         sex: "female",
-        lifecycleStatus: "available",
+        lifecycleStatus: "active",
+        adoptionStatus: "available",
         createdAt: new Date("2025-06-02T00:00:00Z"),
       },
       {
@@ -243,7 +246,8 @@ describe("public animal boundary", () => {
         name: "Older",
         species: "cat",
         sex: "male",
-        lifecycleStatus: "available",
+        lifecycleStatus: "active",
+        adoptionStatus: "available",
         createdAt: new Date("2025-06-01T00:00:00Z"),
       },
     ]);

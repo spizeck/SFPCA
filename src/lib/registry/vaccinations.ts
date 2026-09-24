@@ -489,7 +489,15 @@ export async function listDueVaccinations(
     // communications.related_id is text (a loose cross-entity ref) —
     // cast the uuid for the comparison.
     .leftJoin(sent, sql`${sent.relatedId} = ${latestDoses.id}::text`)
-    .where(sql`${effective} <= ${horizonIso}`)
+    .where(
+      and(
+        sql`${effective} <= ${horizonIso}`,
+        // #167: only animals 'active' in the registry are due anything.
+        // Deceased/off-island/unconfirmed animals keep their records but
+        // never generate reminder or queue work.
+        eq(animals.lifecycleStatus, "active"),
+      ),
+    )
     .orderBy(effective, latestDoses.id);
 
   return rows.map((row) => {

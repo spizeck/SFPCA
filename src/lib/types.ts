@@ -1,5 +1,8 @@
-import { AnimalStatus } from "./animal-lifecycle";
+import type { AnimalAdoptionStatus } from "./animal-lifecycle";
 
+// The PUBLIC animal shape — what a visitor may see. status is the
+// adoption-catalog state (always 'available' for rows that reach the
+// public surface); the registry lifecycle is never part of this shape.
 export interface Animal {
   id: string;
   name: string;
@@ -7,7 +10,7 @@ export interface Animal {
   sex: "male" | "female" | "unknown";
   approxAge: string;
   description: string;
-  status: AnimalStatus;
+  status: AnimalAdoptionStatus;
   photos: string[];
   createdAt: string;
   updatedAt: string;

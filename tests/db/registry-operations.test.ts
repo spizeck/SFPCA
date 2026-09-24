@@ -32,9 +32,10 @@ const VALID_ANIMAL = {
   name: "Rex",
   species: "dog",
   sex: "male",
-  approxAge: "2 years",
+  birthDate: "2024-01-15",
+  birthDateEstimated: false,
   description: "friendly",
-  lifecycleStatus: "available",
+  adoptionStatus: "available",
   photoUrls: [],
 };
 
@@ -69,9 +70,12 @@ describe("animal domain service", () => {
     expect(row).toMatchObject({
       name: "Rex",
       species: "dog",
-      lifecycleStatus: "available",
+      lifecycleStatus: "active",
+      adoptionStatus: "available",
       legacyId: null,
     });
+    // Every animal gets a permanent registry reference.
+    expect(row?.registryRef).toMatch(/^SFPCA-\d{6}$/);
 
     const audit = await db
       .select()
@@ -102,14 +106,17 @@ describe("animal domain service", () => {
 
     const updated = await updateAnimal(
       before.id,
-      { ...VALID_ANIMAL, lifecycleStatus: "adopted" },
+      { ...VALID_ANIMAL, adoptionStatus: "adopted" },
       before.updatedAt,
       "admin@test.dev",
       db,
     );
     expect(updated.ok).toBe(true);
     if (updated.ok) {
-      expect(updated.animal.lifecycleStatus).toBe("adopted");
+      expect(updated.animal.adoptionStatus).toBe("adopted");
+      // Core edits never touch the registry lifecycle — that only moves
+      // through transitionAnimalLifecycle.
+      expect(updated.animal.lifecycleStatus).toBe("active");
     }
 
     const audit = await db
@@ -156,8 +163,8 @@ describe("animal domain service", () => {
       validateAnimalInput({ ...VALID_ANIMAL, species: "fish" }),
     ).toBe("species");
     expect(
-      validateAnimalInput({ ...VALID_ANIMAL, lifecycleStatus: "gone" }),
-    ).toBe("lifecycleStatus");
+      validateAnimalInput({ ...VALID_ANIMAL, adoptionStatus: "gone" }),
+    ).toBe("adoptionStatus");
     const result = await createAnimal(
       { ...VALID_ANIMAL, species: "fish" },
       "admin@test.dev",

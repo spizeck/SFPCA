@@ -53,6 +53,7 @@ import {
   isIsoDateString,
   todayIsoDate,
 } from "../vaccinations";
+import { formatAnimalAge } from "../animal-lifecycle";
 import type { RegistryDb } from "./public-animals";
 
 const UUID_RE =
@@ -376,6 +377,8 @@ export interface PortalAnimal {
   name: string;
   species: string;
   sex: string;
+  // Derived display age from birth_date (formatAnimalAge) — '~' prefix
+  // marks an estimate; null means unknown. Never a stored column.
   approxAge: string | null;
   photoUrl: string | null;
   // How the signed-in person holds this animal — directly, or through
@@ -441,7 +444,8 @@ export async function listPortalAnimals(
       name: animals.name,
       species: animals.species,
       sex: animals.sex,
-      approxAge: animals.approxAge,
+      birthDate: animals.birthDate,
+      birthDateEstimated: animals.birthDateEstimated,
       photoUrls: animals.photoUrls,
       validFrom: ownerships.validFrom,
       personId: ownerships.personId,
@@ -486,7 +490,7 @@ export async function listPortalAnimals(
       name: row.name,
       species: row.species,
       sex: row.sex,
-      approxAge: row.approxAge,
+      approxAge: formatAnimalAge(row.birthDate, row.birthDateEstimated),
       photoUrl: row.photoUrls?.[0] ?? null,
       basis: row.personId === personId ? "person" : "household",
       householdName: row.personId === personId ? null : row.householdName,
@@ -497,6 +501,96 @@ export async function listPortalAnimals(
     });
   }
   return animals_;
+}
+
+// A CLOSED ownership interval the person was part of — the portal's
+// "past animals" view (#167). When an animal dies or leaves Saba its
+// ownerships close, but the association is real history the owner should
+// still see — not a disappearance. Carries the registry lifecycle label
+// so a deceased animal reads as deceased; no medical/internal data.
+export interface PortalPastAnimal {
+  animalId: string;
+  name: string;
+  species: string;
+  sex: string;
+  approxAge: string | null;
+  photoUrl: string | null;
+  lifecycleStatus: string;
+  basis: "person" | "household";
+  householdName: string | null;
+  validFrom: string;
+  validTo: string;
+}
+
+export async function listPortalPastAnimals(
+  personId: string,
+  asOf: string = todayIsoDate(),
+  db: RegistryDb = getRegistryDb(),
+): Promise<PortalPastAnimal[]> {
+  if (!UUID_RE.test(personId)) return [];
+  const householdIds = await householdIdsForPerson(personId, db);
+  const ownerPredicate =
+    householdIds.length > 0
+      ? or(
+          eq(ownerships.personId, personId),
+          inArray(ownerships.householdId, householdIds),
+        )
+      : eq(ownerships.personId, personId);
+
+  const rows = await db
+    .select({
+      animalId: animals.id,
+      name: animals.name,
+      species: animals.species,
+      sex: animals.sex,
+      birthDate: animals.birthDate,
+      birthDateEstimated: animals.birthDateEstimated,
+      lifecycleStatus: animals.lifecycleStatus,
+      photoUrls: animals.photoUrls,
+      validFrom: ownerships.validFrom,
+      validTo: ownerships.validTo,
+      personId: ownerships.personId,
+      householdName: households.name,
+    })
+    .from(ownerships)
+    .innerJoin(animals, eq(ownerships.animalId, animals.id))
+    .leftJoin(households, eq(ownerships.householdId, households.id))
+    .where(
+      and(
+        ownerPredicate,
+        lte(ownerships.validFrom, asOf),
+        // Closed = valid_to set and already reached. An interval that
+        // merely HAS an end date but ends tomorrow is still current.
+        sql`${ownerships.validTo} IS NOT NULL AND ${ownerships.validTo} <= ${asOf}`,
+      ),
+    )
+    .orderBy(desc(ownerships.validTo), asc(animals.name), asc(ownerships.id));
+
+  // One card per animal — same dedup rule as listPortalAnimals.
+  const seen = new Set<string>();
+  const past: PortalPastAnimal[] = [];
+  const sorted = [...rows].sort((a, b) => {
+    if (a.animalId !== b.animalId) return b.validTo!.localeCompare(a.validTo!);
+    return a.personId === personId ? -1 : 1;
+  });
+  for (const row of sorted) {
+    if (seen.has(row.animalId) || !row.validTo) continue;
+    seen.add(row.animalId);
+    past.push({
+      animalId: row.animalId,
+      name: row.name,
+      species: row.species,
+      sex: row.sex,
+      approxAge: formatAnimalAge(row.birthDate, row.birthDateEstimated),
+      photoUrl: row.photoUrls?.[0] ?? null,
+      lifecycleStatus: row.lifecycleStatus,
+      basis: row.personId === personId ? "person" : "household",
+      householdName: row.personId === personId ? null : row.householdName,
+      validFrom: row.validFrom,
+      validTo: row.validTo,
+    });
+  }
+  return past;
 }
 
 // --- Portal authorization --------------------------------------------------------

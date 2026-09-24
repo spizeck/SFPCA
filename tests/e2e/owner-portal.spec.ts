@@ -131,11 +131,21 @@ test.describe("owner portal", () => {
     await signOut(page);
     await signIn(page, E2E_OWNER_EMAIL, E2E_OWNER_PASSWORD);
     await expect(page).toHaveURL("/portal");
-    // Approval closed the ownership interval — Whiskers is gone, the
-    // request shows its resolution, and Rexley is unaffected.
+    // Approval closed the ownership interval — Whiskers leaves "Your
+    // animals" but remains as a past association (#167: closing an
+    // interval never erases the registry record or the relationship
+    // history), the request shows its resolution, and Rexley is
+    // unaffected.
     await expect(
       page.getByRole("heading", { name: "Whiskers" }),
     ).toBeHidden();
+    await expect(
+      page.getByRole("heading", { name: "Previously with you" }),
+    ).toBeVisible();
+    const pastSection = page
+      .locator("section")
+      .filter({ has: page.getByRole("heading", { name: "Previously with you" }) });
+    await expect(pastSection.getByText("Whiskers")).toBeVisible();
     await expect(page.getByText(/No longer mine — Whiskers/)).toBeVisible();
     await expect(
       page.getByText("approved", { exact: true }),
@@ -143,6 +153,66 @@ test.describe("owner portal", () => {
     await expect(
       page.getByRole("heading", { name: "Rexley" }),
     ).toBeVisible();
+  });
+
+  test("an approved deceased report transitions the animal's registry lifecycle", async ({
+    page,
+  }) => {
+    // --- Owner reports Rexley deceased ------------------------------
+    await signIn(page, E2E_OWNER_EMAIL, E2E_OWNER_PASSWORD);
+    await expect(page).toHaveURL("/portal");
+
+    const rexleyCard = page
+      .locator("div.rounded-lg.border")
+      .filter({ has: page.getByRole("heading", { name: "Rexley" }) });
+    await rexleyCard.getByLabel("Report a change").click();
+    await page.getByRole("option", { name: "Report deceased" }).click();
+    await rexleyCard.getByRole("button", { name: "Submit request" }).click();
+    await expect(
+      page.getByText("Staff will review your report and follow up if needed.", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    // Nothing has changed yet — staff approval is the authority.
+    await expect(
+      page.getByRole("heading", { name: "Rexley" }),
+    ).toBeVisible();
+
+    // --- Staff approves --------------------------------------------
+    await signOut(page);
+    await signIn(page, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);
+    await expect(page).toHaveURL("/admin");
+    await page.goto("/admin/requests");
+    const pendingRow = page
+      .locator("li")
+      .filter({ hasText: "Report deceased" })
+      .filter({ hasText: "Rexley" });
+    await pendingRow.getByRole("button", { name: "Approve" }).click();
+    await page.getByRole("button", { name: "Confirm approval" }).click();
+    await expect(
+      page.getByText("Request approved", { exact: true }),
+    ).toBeVisible();
+
+    // The animal's registry profile shows the transition and its
+    // provenance — the record is preserved, not deleted.
+    await page.goto("/admin/animals");
+    const row = page.getByRole("row", { name: /Rexley/ });
+    await expect(row).toContainText("Deceased");
+    await row.getByRole("link", { name: "Rexley" }).click();
+    await expect(page.getByText(/owner report/)).toBeVisible();
+
+    // --- Owner sees Rexley as a past association --------------------
+    await signOut(page);
+    await signIn(page, E2E_OWNER_EMAIL, E2E_OWNER_PASSWORD);
+    await expect(page).toHaveURL("/portal");
+    await expect(
+      page.getByRole("heading", { name: "Rexley" }),
+    ).toBeHidden();
+    const pastSection = page
+      .locator("section")
+      .filter({ has: page.getByRole("heading", { name: "Previously with you" }) });
+    await expect(pastSection.getByText("Rexley")).toBeVisible();
+    await expect(pastSection.getByText(/Deceased/)).toBeVisible();
   });
 
   test("an email-matched sign-in files a claim; only staff approval links it", async ({

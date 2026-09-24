@@ -59,7 +59,7 @@ async function seedPerson(email: string | null = "owner@example.com") {
 async function seedAnimal(name = "Rex") {
   const [animal] = await db
     .insert(schema.animals)
-    .values({ name, species: "dog", sex: "male", lifecycleStatus: "adopted" })
+    .values({ name, species: "dog", sex: "male", lifecycleStatus: "active" })
     .returning();
   return animal;
 }

@@ -6,7 +6,17 @@
 // public surfaces.
 
 import { requireAdmin } from "@/lib/auth";
-import { getAdminAnimal, type AdminAnimal } from "@/lib/registry/animals";
+import {
+  getAdminAnimal,
+  getAnimalRegistryContext,
+  getAnimalSterilization,
+  listLifecycleHistory,
+  transitionAnimalLifecycle,
+  type AdminAnimal,
+  type AnimalLifecycleEventDto,
+  type AnimalRegistryContext,
+  type AnimalSterilization,
+} from "@/lib/registry/animals";
 import {
   createVaccination,
   updateVaccination,
@@ -79,6 +89,15 @@ export interface AnimalMedicalRecord {
   ownerships: OwnershipRecord[];
   // Deliberate annual-confirmation events for this animal (#166).
   confirmations: OwnershipConfirmation[];
+  // Lifecycle transition history (#167) — immutable domain history,
+  // newest first (from_status NULL = "entered the registry").
+  lifecycleHistory: AnimalLifecycleEventDto[];
+  // Sterilization fact + the spay/neuter procedure evidence behind it.
+  sterilization: AnimalSterilization;
+  // Cross-domain registry context (#167): microchips, registrations,
+  // payments, documents, audit trail — read-only projections owned by
+  // other domains.
+  registry: AnimalRegistryContext;
   // Picker data for the ownership panel.
   persons: PersonRecord[];
   households: HouseholdRecord[];
@@ -101,6 +120,9 @@ export async function getAnimalMedicalAction(
     communications,
     ownerships,
     confirmations,
+    lifecycleHistory,
+    sterilization,
+    registry,
     persons,
     households,
   ] = await Promise.all([
@@ -110,6 +132,9 @@ export async function getAnimalMedicalAction(
     listCommunicationsForAnimal(animal.id),
     listOwnershipHistory(animal.id),
     listConfirmationsForAnimal(animal.id),
+    listLifecycleHistory(animal.id),
+    getAnimalSterilization(animal.id),
+    getAnimalRegistryContext(animal.id),
     listPersons(),
     listHouseholds(),
   ]);
@@ -121,9 +146,43 @@ export async function getAnimalMedicalAction(
     communications,
     ownerships,
     confirmations,
+    lifecycleHistory,
+    sterilization: sterilization ?? {
+      status: animal.sterilizationStatus,
+      sterilizedOn: animal.sterilizedOn,
+      sterilizedBy: animal.sterilizedBy,
+      evidence: [],
+    },
+    registry: registry ?? {
+      microchips: [],
+      registrations: [],
+      payments: [],
+      documents: [],
+      auditTrail: [],
+    },
     persons,
     households,
   };
+}
+
+// The staff-side lifecycle transition (#167). Goes through the canonical
+// service so the status flip, the lifecycle-history row, ownership
+// closures, and the audit row commit together.
+export async function transitionLifecycleAction(
+  animalId: string,
+  toStatus: string,
+  effectiveOn?: string | null,
+  reason?: string | null,
+): Promise<SaveResult> {
+  return save("animals", (actor) =>
+    transitionAnimalLifecycle(animalId, {
+      toStatus,
+      effectiveOn: effectiveOn ?? undefined,
+      reason,
+      source: "staff",
+      actorLabel: actor,
+    }),
+  );
 }
 
 export interface SaveResult {

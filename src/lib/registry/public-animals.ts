@@ -1,5 +1,5 @@
 // Registry data-access seam for public animal reads (#165 Phase E / #182,
-// made Postgres-only in #183).
+// made Postgres-only in #183; publication boundary split for #167).
 //
 // Postgres is the single read authority for public animal pages — the
 // transitional PUBLIC_ANIMALS_SOURCE switch and its Firestore branch were
@@ -10,19 +10,22 @@
 // Boundary rules for anything added under src/lib/registry/:
 // - server-side only (src/lib/db/client.ts imports "server-only")
 // - return DTOs, never raw rows: public payloads carry only fields a
-//   visitor may see — no owner, registration, payment, or vet data
-// - enforce the same visibility boundary as firestore.rules: only
-//   lifecycleStatus 'available' is public
+//   visitor may see — no owner, registration, payment, vet, microchip,
+//   lifecycle, or audit data
+// - public visibility is exactly isPubliclyListed(): adoption_status
+//   'available' AND lifecycle_status 'active'. The registry lifecycle
+//   itself is never exposed — a non-published animal is
+//   indistinguishable from a nonexistent one.
 
 import "server-only";
 
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import { animals } from "../db/schema";
 import * as schema from "../db/schema";
 import { getRegistryDb } from "../db/client";
-import { PUBLIC_ANIMAL_STATUS, isPublicAnimalStatus } from "../animal-lifecycle";
+import { formatAnimalAge, isPubliclyListed } from "../animal-lifecycle";
 import { logError } from "../logger";
 import type { Animal } from "../types";
 
@@ -36,6 +39,9 @@ export type RegistryDb =
 // document id is what public URLs use, so legacyId is the public id.
 // Timestamps are public-safe (they describe the listing, not a person)
 // and are included so the app-facing Animal shape stays complete.
+// approxAge is DERIVED from birth_date at read time (formatAnimalAge) —
+// it can never go stale, and estimated dates render with '~' so public
+// copy never presents a guess as an exact DOB.
 export interface PublicRegistryAnimal {
   id: string; // legacyId when present, else the Postgres uuid
   name: string;
@@ -56,9 +62,11 @@ const PUBLIC_COLUMNS = {
   name: animals.name,
   species: animals.species,
   sex: animals.sex,
-  approxAge: animals.approxAge,
+  birthDate: animals.birthDate,
+  birthDateEstimated: animals.birthDateEstimated,
   description: animals.description,
   lifecycleStatus: animals.lifecycleStatus,
+  adoptionStatus: animals.adoptionStatus,
   photoUrls: animals.photoUrls,
   createdAt: animals.createdAt,
   updatedAt: animals.updatedAt,
@@ -75,7 +83,7 @@ function toPublicDto(row: PublicRow): PublicRegistryAnimal {
     name: row.name,
     species: row.species,
     sex: row.sex,
-    approxAge: row.approxAge,
+    approxAge: formatAnimalAge(row.birthDate, row.birthDateEstimated),
     description: row.description,
     photoUrls: row.photoUrls ?? [],
     createdAt: row.createdAt.toISOString(),
@@ -89,7 +97,12 @@ export async function listPublicAnimals(
   const rows = await db
     .select(PUBLIC_COLUMNS)
     .from(animals)
-    .where(eq(animals.lifecycleStatus, PUBLIC_ANIMAL_STATUS))
+    .where(
+      and(
+        eq(animals.adoptionStatus, "available"),
+        eq(animals.lifecycleStatus, "active"),
+      ),
+    )
     // Deterministic order: arrival order (created_at), uuid as stable
     // tiebreak. The Firestore path had no defined order; this replaces
     // undefined behavior rather than changing a real contract.
@@ -98,7 +111,7 @@ export async function listPublicAnimals(
   // Second defensive layer, same as the Firestore path: even if the query
   // ever drifted, a non-public row never reaches a public payload.
   return rows
-    .filter((row) => isPublicAnimalStatus(row.lifecycleStatus))
+    .filter((row) => isPubliclyListed(row.lifecycleStatus, row.adoptionStatus))
     .map(toPublicDto);
 }
 
@@ -120,12 +133,14 @@ export async function getPublicAnimalById(
       : rows;
 
   const row = (rows.length ? rows : byUuid)[0];
-  if (!row || !isPublicAnimalStatus(row.lifecycleStatus)) return null;
+  if (!row || !isPubliclyListed(row.lifecycleStatus, row.adoptionStatus)) {
+    return null;
+  }
   return toPublicDto(row);
 }
 
 // Maps the registry DTO onto the app's public Animal shape so existing
-// components keep working unchanged. status is always the public status —
+// components keep working unchanged. status is always 'available' —
 // non-public rows never reach this mapper. Exported for tests.
 export function toAnimal(dto: PublicRegistryAnimal): Animal {
   return {
@@ -135,7 +150,7 @@ export function toAnimal(dto: PublicRegistryAnimal): Animal {
     sex: dto.sex as Animal["sex"],
     approxAge: dto.approxAge ?? "",
     description: dto.description ?? "",
-    status: PUBLIC_ANIMAL_STATUS,
+    status: "available",
     photos: dto.photoUrls,
     createdAt: dto.createdAt,
     updatedAt: dto.updatedAt,

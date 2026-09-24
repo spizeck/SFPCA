@@ -52,7 +52,7 @@ test.describe("admin journeys", () => {
 
     await expect(page).toHaveURL("/admin/animals");
     await expect(
-      page.getByRole("heading", { name: "Manage Animals" }),
+      page.getByRole("heading", { name: "Animal Registry" }),
     ).toBeVisible();
   });
 
