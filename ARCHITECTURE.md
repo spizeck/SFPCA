@@ -159,7 +159,8 @@ plain SQL.
 | `owner_requests` | Owner-originated requests + staff resolution (#166) | status CHECK `pending\|approved\|rejected\|cancelled`; `resolved_at`/`resolved_by` set exactly when leaving `pending`; kind CHECK `account-claim\|no-longer-mine\|transfer\|lifecycle-*`; `payload` holds free-text hints (never link keys) |
 | `registration_submissions` | Intake events (today's `animalRegistrations`) | `unique(legacy_id)`; owner contact snapshot; receipt **path** only |
 | `registrations` | Authoritative per-animal-per-year record (#169) | `unique(animal_id, year)` (cancelled rows keep the slot); status CHECK `active\|cancelled` — payment is derived, never a status; owner snapshot (`ownership_id`/`person_id`/`household_id` + `owner_label`); `submitted_at`/`registered_at` distinct; `amount_due_cents` non-negative integer + currency; `resolution` CHECK `waived\|complimentary`; cancellation reason/note consistency CHECK; restrictive animal + submission FKs |
-| `payments` | Provider-neutral ledger | integer cents + currency; kind/status CHECKs; no cascade deletes |
+| `payments` | Provider-neutral ledger (#170) | integer cents + currency; `kind` CHECK `payment\|refund\|adjustment`; `status` CHECK `pending\|confirmed\|failed\|void`; `method` CHECK `cash\|bank-transfer\|other\|online`; `source` CHECK `staff\|provider`; amount CHECK (payment/refund > 0, adjustment ≠ 0); provider-consistency CHECK (`method='online'` ⟺ provider set; provider_ref requires provider); partial `unique(provider, provider_ref)` — one authoritative external transaction applied at most once; partial `unique(idempotency_key)` — retries resolve to the existing row; `related_payment_id` links refunds/adjustments to their payment; no cascade deletes |
+| `payment_events` | Append-only reconciliation history (#170) | one row per ledger event (`recorded`/`confirmed`/`failed`/`voided`/`refunded`/`adjusted`) with actor label, source, and bounded `detail` JSON — who/what changed each transaction and when; restrictive payment FK |
 | `microchip_records` | Chip assignments w/ history (#168) | `chip_number` stored normalized; `chip_display` keeps as-entered formatting; optional implantation metadata (manufacturer/implanted_on/implanted_by/notes); partial `unique(chip_number)` AND `unique(animal_id)` `WHERE assigned_to IS NULL` — one active assignment per chip AND one current chip per animal; `closed_reason` CHECK `replaced\|removed\|corrected` + closure-consistency CHECK; `replaced_by_id` links a replaced row to its successor; restrictive animal FK |
 | `microchip_conflicts` | Rejected duplicate chip claims (#168) | evidence rows, one open per (chip, claimant) via partial unique; `source` CHECK `staff\|import`; resolution is human — never auto-moves a chip |
 | `found_reports` | Found-animal scan/resolution log (#168) | `status` CHECK `open\|resolved` with `resolved_on` consistency + range CHECKs; `outcome` CHECK `reunited\|in-care\|other`; open dedupe per (chip, animal); `animal_id` nullable (unidentified chip) |
@@ -330,15 +331,90 @@ silently register an animal.
   balance, and completed — all set-based reads, every row linking to
   the canonical animal profile (RegistrationPanel: register, record
   payment, waive/complimentary, correct amount, notes, cancel).
-- **Payment boundary.** `src/lib/registry/payments.ts` is the seam:
-  `confirmedPaidByRegistration` nets CONFIRMED `payments` rows
-  (refunds subtract, void/pending/failed never count).
-  `recordRegistrationPayment` is the only #169 write — money that
-  actually arrived (provider `manual:*`). Refunds, adjustments,
-  reconciliation, and provider flows (Sentoo, #171) are #170 scope.
 - **Owner portal.** `listPortalAnimals` projects current-period state
-  (`paymentState`, amount due) plus the list of registered years —
-  owner-scoped only, no staff notes or provider internals.
+  (`paymentState`, amount due, paid/outstanding cents) plus the list
+  of registered years — owner-scoped only, no staff notes, references,
+  or provider internals.
+
+**Registration payment ledger (#170):** `payments` is the authoritative
+provider-neutral transaction table and `src/lib/registry/payments.ts`
+is the ONLY write path — every money mutation is transactional, locks
+the rows it acts on, and records both an append-only `payment_events`
+reconciliation row and (for staff actions) an `audit_events` row.
+
+- **Payment initiation is not payment truth.** Only `confirmed` rows
+  move a balance. `pending` is declared intent (a claimed bank
+  transfer, a provider checkout) and never settles; `failed`/`void`
+  are terminal non-events. A browser return, checkout creation, or
+  "payment started" event can never mark a registration paid — the
+  only paths to `confirmed` are the staff `confirmPayment` action and
+  the provider `reconcileProviderOutcome` seam.
+- **Kinds and methods.** `payment` (money in), `refund` (money out,
+  positive amount subtracting in the projection, linked to the
+  original via `related_payment_id`), and `adjustment` (signed
+  bookkeeping correction of confirmed money where no money moved —
+  reason mandatory). Methods: `cash`/`bank-transfer`/`other` are the
+  staff vocabulary; `online` is reserved for provider-mediated money
+  and requires `provider` + provider identity by CHECK.
+- **Append-oriented.** A confirmed row is never edited. Refunds and
+  adjustments are new rows; pending transitions are one-way
+  (pending → confirmed|failed|void) and land in `payment_events`.
+  Void requires a reason; refund requires a reason and validates the
+  per-payment refundable cap under a row lock.
+- **Canonical balance formula** (`deriveRegistrationBalance` in
+  `src/lib/payments.ts`, the client-safe vocabulary module):
+  `settled = received − refunded + adjustments` over confirmed rows;
+  `outstanding = max(assessed − settled, 0)` (zero for waived/
+  complimentary); `overpaid = max(settled − assessed, 0)` surfaced
+  explicitly; `pending` exposed separately and never subtracts.
+  `paymentState` derives as before (`no-fee`/`unpaid`/`partial`/
+  `paid`/`waived`/`complimentary`). Queues, portal, the reminder
+  evaluator, and every DTO consume this one formula — nothing
+  re-implements the arithmetic.
+- **External identity & idempotency.** Scoped `(provider,
+  provider_ref)` uniqueness means one authoritative external
+  transaction applies at most once; `idempotency_key` dedupes
+  caller-side retries (staff form tokens). Repeated authoritative
+  events resolve to the existing row (`applied:'existing'`); a
+  terminal row whose stored outcome disagrees is a `conflict`, never
+  a silent overwrite.
+- **Correction boundaries.** `correctRegistrationAmount` changes the
+  ASSESSED obligation (audited before/after) — never the ledger.
+  `recordAdjustment` corrects confirmed MONEY where nothing moved.
+  `voidPayment` cancels an unsettled pending record. `refundPayment`
+  returns real money. Waived/complimentary stay explicit
+  registration resolutions — no fake $0 payments exist.
+- **Manual workflow.** `recordManualPayment` records cash/bank/other
+  as confirmed money (with optional reference + note + staff actor);
+  a claimed-but-unconfirmed bank transfer may record `pending` and
+  is confirmed later by `confirmPayment` — the honest two-step the
+  ledger demands before money counts.
+- **Provider seam (#171).** `initiateProviderPayment` persists a
+  `pending`/`online`/`source='provider'` row keyed on
+  `(provider, providerRef)`; `reconcileProviderOutcome` applies an
+  authoritative confirmed/failed result idempotently under row
+  locks. A future Sentoo webhook/checkout lands here without
+  rewriting balance logic; browser return pages carry no authority
+  and have no seam at all.
+- **Reconciliation history.** `payment_events` preserves who/what
+  performed each transition and when (recorded/confirmed/failed/
+  voided/refunded/adjusted) with bounded `detail` — the domain record
+  staff audit a balance from, alongside the `audit_events`
+  privileged-mutation trail.
+- **Receipts.** Unchanged by #170: `registration_submissions.
+  payment_receipt_path` stays the applicant's intake evidence —
+  private Firebase Storage object, path-only in Postgres, staff view
+  via short-lived signed URLs, orphan sweep intact. Ledger rows carry
+  a `reference` (bank confirmation, receipt-book number) instead of
+  uploaded binaries; owner DTOs never expose storage paths.
+- **Unpaid-balance reminder (#172 activation).**
+  `registration-payment-reminder` is now active through the existing
+  pipeline: eligibility is `listUnpaidRegistrations` — the canonical
+  balance projection, so only confirmed money settles, pending
+  transactions neither suppress nor satisfy, and settlement stops the
+  reminder automatically. Policy: operational (not opt-out-able),
+  30-day cooldown, 2 touches per period, 14-day grace after
+  registration.
 
 **Veterinary continuity model (#174):** the admin animal page is a
 single chronological timeline (`listMedicalTimeline`) combining
@@ -491,9 +567,14 @@ activated `registration-due-reminder`: its eligibility is the canonical
 `listUnregisteredAnimals` restricted to lifecycle 'active' (the staff
 queue still lists 'unknown', but an unconfirmed animal is never
 emailed), cycle-keyed on the period year, asking owners to register —
-it never mentions money because balance truth is #170's. The
-unpaid-balance kind remains deliberately absent from `REMINDER_KINDS`
-and activates once #170 provides authoritative balance state.
+it never mentions money. #170 activated
+`registration-payment-reminder`: its eligibility is the canonical
+`listUnpaidRegistrations` — active registrations whose ledger balance
+is positive — cycle-keyed on the period year, operational (not
+suppressible by preference), 30-day cooldown / 2 touches / 14-day
+registration-age grace. Because eligibility reads the balance
+projection, a pending transaction never satisfies it and settlement
+stops it automatically.
 
 ## 6. ID strategy
 

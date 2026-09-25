@@ -174,3 +174,53 @@ export function renderRegistrationDueReminder(
 
   return { subject, text, html };
 }
+
+export interface RegistrationPaymentReminderContext {
+  ownerName: string;
+  animalName: string;
+  year: number;
+  // The authoritative outstanding balance (#170 ledger) — already
+  // formatted for display by the caller (e.g. "$10.00"), never a raw
+  // integer the template might misread.
+  outstandingFormatted: string;
+  siteUrl: string;
+}
+
+// "Your registration still has an unpaid balance" nudge (#170, via the
+// #172 pipeline). Eligibility is the canonical listUnpaidRegistrations
+// — an active registration whose ledger projection shows a positive
+// outstanding amount. Pending/failed/void transactions never trigger
+// it; once the balance settles, it stops on its own.
+export function renderRegistrationPaymentReminder(
+  ctx: RegistrationPaymentReminderContext,
+): RenderedEmail {
+  const portalUrl = absoluteUrl("/portal", {
+    NEXT_PUBLIC_SITE_URL: ctx.siteUrl,
+  });
+  const contactUrl = absoluteUrl("/contact", {
+    NEXT_PUBLIC_SITE_URL: ctx.siteUrl,
+  });
+
+  const subject = `${ctx.year} registration payment due for ${ctx.animalName}`;
+  const text = [
+    `Hello ${ctx.ownerName},`,
+    ``,
+    `Our records show that ${ctx.animalName}'s ${ctx.year} registration with the ${ORG_NAME} still has an outstanding balance of ${ctx.outstandingFormatted}.`,
+    ``,
+    `If you have already sent your payment, thank you — it may not have been recorded yet. Otherwise, please pay the remaining balance by cash or bank transfer; you can contact us and we will help:`,
+    `${contactUrl}`,
+    ``,
+    `You can see the current balance in the owner portal: ${portalUrl}`,
+    ``,
+    `— ${ORG_NAME}`,
+  ].join("\n");
+
+  const html = htmlShell([
+    `Hello ${escapeHtml(ctx.ownerName)},`,
+    `Our records show that <strong>${escapeHtml(ctx.animalName)}</strong>&rsquo;s ${ctx.year} registration with the ${escapeHtml(ORG_NAME)} still has an outstanding balance of <strong>${escapeHtml(ctx.outstandingFormatted)}</strong>.`,
+    `If you have already sent your payment, thank you &mdash; it may not have been recorded yet. Otherwise, please pay the remaining balance by cash or bank transfer; <a href="${escapeHtml(contactUrl)}">contact us</a> and we will help.`,
+    `You can see the current balance in the <a href="${escapeHtml(portalUrl)}">owner portal</a>.`,
+  ]);
+
+  return { subject, text, html };
+}

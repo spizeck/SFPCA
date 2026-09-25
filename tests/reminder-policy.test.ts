@@ -15,19 +15,19 @@ import {
 
 describe("reminder kinds and policies", () => {
   test("only implemented kinds are registered — deferred classes are not", () => {
-    // #169 landed the canonical registration source, so
-    // registration-due is now active; payment reminders remain deferred
-    // until #170 provides authoritative balance state. A kind appearing
-    // here means an evaluator may send for it — keep this list honest.
+    // #170 landed the authoritative ledger, so the unpaid-balance
+    // reminder is now active. A kind appearing here means an evaluator
+    // may send for it — keep this list honest.
     expect(REMINDER_KINDS).toEqual([
       "vaccination-reminder",
       "annual-confirmation-reminder",
       "registration-due-reminder",
+      "registration-payment-reminder",
     ]);
     expect(isReminderKind("vaccination-reminder")).toBe(true);
     expect(isReminderKind("annual-confirmation-reminder")).toBe(true);
     expect(isReminderKind("registration-due-reminder")).toBe(true);
-    expect(isReminderKind("registration-payment-reminder")).toBe(false);
+    expect(isReminderKind("registration-payment-reminder")).toBe(true);
     expect(isReminderKind("")).toBe(false);
   });
 

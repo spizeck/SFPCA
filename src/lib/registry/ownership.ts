@@ -52,11 +52,14 @@ import {
 import { getRegistryDb } from "../db/client";
 import {
   currentRegistrationYear,
-  derivePaymentState,
   isRegistrationResolution,
   type RegistrationPaymentState,
 } from "../registrations";
-import { confirmedPaidByRegistration } from "./payments";
+import {
+  deriveRegistrationBalance,
+  emptyLedgerAggregate,
+} from "../payments";
+import { moneyByRegistration } from "./payments";
 import {
   addDaysToIsoDate,
   isIsoDateString,
@@ -399,13 +402,18 @@ export interface PortalAnimal {
   // read-only for owners; chip changes stay staff-controlled. Only the
   // owner's own animals ever reach this projection.
   chipNumber: string | null;
-  // Current-period registration state (#169): null means "not
-  // registered for the current year". paymentState is derived from the
-  // payments ledger — 'unpaid'/'partial' means money is still owed.
+  // Current-period registration state (#169, money projection #170):
+  // null means "not registered for the current year". paymentState is
+  // derived from the payments ledger — 'unpaid'/'partial' means money
+  // is still owed. paidCents/outstandingCents are the same canonical
+  // balance staff see — never staff notes, references, or provider
+  // internals.
   registration: {
     year: number;
     paymentState: RegistrationPaymentState;
     amountDueCents: number;
+    paidCents: number;
+    outstandingCents: number;
     currency: string;
   } | null;
   // Every year with an active registration — the owner's own
@@ -536,7 +544,7 @@ export async function listPortalAnimals(
             ),
           )
       : [];
-  const paidByReg = await confirmedPaidByRegistration(
+  const moneyByReg = await moneyByRegistration(
     db,
     regRows.map((r) => r.id),
   );
@@ -551,14 +559,21 @@ export async function listPortalAnimals(
     years.push(r.year);
     regYearsByAnimal.set(r.animalId, years);
     if (r.year === periodYear) {
+      const balance = deriveRegistrationBalance(
+        {
+          amountDueCents: r.amountDueCents,
+          resolution: isRegistrationResolution(r.resolution)
+            ? r.resolution
+            : null,
+        },
+        moneyByReg.get(r.id) ?? emptyLedgerAggregate(),
+      );
       currentRegByAnimal.set(r.animalId, {
         year: r.year,
-        paymentState: derivePaymentState(
-          r.amountDueCents,
-          paidByReg.get(r.id) ?? 0,
-          isRegistrationResolution(r.resolution) ? r.resolution : null,
-        ),
+        paymentState: balance.paymentState,
         amountDueCents: r.amountDueCents,
+        paidCents: balance.settledCents,
+        outstandingCents: balance.outstandingCents,
         currency: r.currency,
       });
     }

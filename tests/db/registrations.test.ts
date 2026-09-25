@@ -336,7 +336,9 @@ describe("payment derivation — the ledger decides, never a flag", () => {
     const history = await listRegistrationsForAnimal(animal.id, db);
     expect(history[0].status).toBe("active");
     expect(history[0].paymentState).toBe("paid");
-    expect(await auditActions("registration")).toContain("record-payment");
+    // #170: money mutations audit under the 'payment' entity — the
+    // ledger owns its own privileged-action trail.
+    expect(await auditActions("payment")).toContain("record-payment");
   });
 
   test("refunds subtract; void rows never count", async () => {

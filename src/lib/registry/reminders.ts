@@ -4,14 +4,13 @@
 // Evaluators are the seam. Each reminder kind owns one evaluator that
 // reads AUTHORITATIVE domain state and returns decisions; this module
 // owns persistence, idempotency-key derivation, counting, and delivery.
-// A kind registers only when its eligibility source is implemented —
-// today that is vaccination reminders (#173's listDueVaccinations),
+// A kind registers only when its eligibility source is implemented:
+// vaccination reminders (#173's listDueVaccinations),
 // annual-confirmation reminders (#166's listOwnershipsRequiring-
-// Confirmation), and registration-due reminders (#169's
-// listUnregisteredAnimals). Unpaid-balance (#170) reminders remain
-// deliberately absent: there is no authoritative outstanding-balance
-// workflow yet — the derived payment state exists, but chasing money
-// needs #170's ledger semantics, not a guess.
+// Confirmation), registration-due reminders (#169's
+// listUnregisteredAnimals), and unpaid-balance reminders (#170's
+// listUnpaidRegistrations — the canonical ledger projection, so only
+// confirmed money settles and pending transactions never count).
 //
 // Dry-run runs the same evaluation but writes nothing and never sends —
 // it cannot send: the delivery drain is not invoked and no provider
@@ -23,7 +22,10 @@ import { and, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { communications, ownerships, persons } from "../db/schema";
 import { getRegistryDb } from "../db/client";
 import { getSiteUrl } from "../seo";
-import { VACCINATION_DUE_SOON_DAYS } from "../vaccinations";
+import {
+  addDaysToIsoDate,
+  VACCINATION_DUE_SOON_DAYS,
+} from "../vaccinations";
 import { listDueVaccinations } from "./vaccinations";
 import {
   householdContactFor,
@@ -41,9 +43,13 @@ import {
 import {
   renderAnnualConfirmationReminder,
   renderRegistrationDueReminder,
+  renderRegistrationPaymentReminder,
   renderVaccinationReminder,
 } from "../reminders/templates";
-import { listUnregisteredAnimals } from "./registrations";
+import {
+  listUnpaidRegistrations,
+  listUnregisteredAnimals,
+} from "./registrations";
 import { resolveAnimalOwner } from "./ownership";
 import {
   deliverQueuedCommunications,
@@ -533,12 +539,147 @@ export const evaluateRegistrationDueReminders: ReminderEvaluator = async (
   return items;
 };
 
+// --- Registration unpaid-balance reminders ---------------------------------------
+//
+// The #170 evaluator — the kind policy.ts carried as dormant until the
+// authoritative ledger existed. Eligibility is the canonical
+// listUnpaidRegistrations: active registrations on 'active' animals
+// whose ledger projection shows a positive outstanding balance, older
+// than the policy's grace window. Crucially, only CONFIRMED money
+// settles a balance — a pending provider checkout or claimed bank
+// transfer never suppresses eligibility and never satisfies it either:
+// the reminder keeps the truth in sync until the ledger says settled.
+// Waived/complimentary/no-fee never appear; settlement (or a refund
+// pushing a registration back into debt) changes eligibility on the
+// next cycle automatically. Cycle key is the period year — one
+// reminder thread per registration per period, capped by policy.
+export const evaluateRegistrationPaymentReminders: ReminderEvaluator =
+  async (ctx, db) => {
+    const policy = REMINDER_POLICIES["registration-payment-reminder"];
+    const year = Number(ctx.asOf.slice(0, 4));
+    const due = await listUnpaidRegistrations(
+      {
+        year,
+        asOf: ctx.asOf,
+        registeredBefore: policy.graceDays
+          ? addDaysToIsoDate(ctx.asOf, -policy.graceDays)
+          : null,
+        lifecycleStatuses: ["active"],
+      },
+      db,
+    );
+    if (due.length === 0) return [];
+
+    const registrationIds = due.map((d) => d.registrationId);
+    const existingRows = await db
+      .select({
+        relatedId: communications.relatedId,
+        cycleKey: communications.cycleKey,
+        touch: communications.touch,
+        createdAt: communications.createdAt,
+      })
+      .from(communications)
+      .where(
+        and(
+          eq(communications.kind, "registration-payment-reminder"),
+          eq(communications.relatedType, "registration"),
+          inArray(communications.relatedId, registrationIds),
+        ),
+      );
+
+    const items: EvaluatedReminder[] = [];
+    for (const row of due) {
+      const cycleKey = String(year);
+      const cycleRows = existingRows.filter(
+        (r) =>
+          r.relatedId === row.registrationId && r.cycleKey === cycleKey,
+      );
+      const sendTouches = cycleRows.filter((r) => isSendTouch(r.touch));
+
+      const base = {
+        kind: "registration-payment-reminder" as const,
+        relatedType: "registration",
+        relatedId: row.registrationId,
+        cycleKey,
+        animalId: row.animalId,
+      };
+
+      if (sendTouches.length >= policy.maxTouches) {
+        items.push({
+          ...base,
+          touch: sendTouch(sendTouches.length + 1),
+          decision: { type: "suppress", detail: "exhausted" },
+        });
+        continue;
+      }
+      const lastTouchAt = sendTouches
+        .map((r) => r.createdAt.getTime())
+        .reduce((a, b) => Math.max(a, b), 0);
+      if (
+        lastTouchAt > 0 &&
+        daysSince(new Date(lastTouchAt), ctx.asOf) < policy.cooldownDays
+      ) {
+        items.push({
+          ...base,
+          touch: sendTouch(sendTouches.length + 1),
+          decision: { type: "suppress", detail: "cooldown" },
+        });
+        continue;
+      }
+
+      const touch = sendTouch(sendTouches.length + 1);
+      const skip = (detail: string, personId: string | null = null) =>
+        items.push({
+          ...base,
+          touch: skipTouch(detail),
+          decision: { type: "skip", personId, detail },
+        });
+
+      // Strict recipient resolution — never guess an owner.
+      const owner = await resolveAnimalOwner(row.animalId, ctx.asOf, db);
+      if (owner.status === "skip") {
+        skip(owner.detail, owner.personId);
+        continue;
+      }
+      if (!owner.email) {
+        skip("missing-email", owner.personId);
+        continue;
+      }
+      if (!EMAIL_RE.test(owner.email)) {
+        skip("invalid-email", owner.personId);
+        continue;
+      }
+
+      const rendered = renderRegistrationPaymentReminder({
+        ownerName: owner.name,
+        animalName: row.name,
+        year,
+        outstandingFormatted: `${(row.outstandingCents / 100).toFixed(2)} ${row.currency}`,
+        siteUrl: ctx.siteUrl,
+      });
+      items.push({
+        ...base,
+        touch,
+        decision: {
+          type: "send",
+          personId: owner.personId,
+          recipient: owner.email,
+          subject: rendered.subject,
+          bodyText: rendered.text,
+          bodyHtml: rendered.html,
+        },
+      });
+    }
+    return items;
+  };
+
 // Registered evaluators — one per implemented reminder kind. Deferred
 // classes are documented in policy.ts and intentionally absent here.
 const EVALUATORS: Record<ReminderKind, ReminderEvaluator> = {
   "vaccination-reminder": evaluateVaccinationReminders,
   "annual-confirmation-reminder": evaluateAnnualConfirmationReminders,
   "registration-due-reminder": evaluateRegistrationDueReminders,
+  "registration-payment-reminder": evaluateRegistrationPaymentReminders,
 };
 
 const REGISTERED_KINDS = Object.keys(EVALUATORS) as ReminderKind[];

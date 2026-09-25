@@ -395,13 +395,14 @@ export default function RegistrationsPage() {
                       <TableHead>Registered to</TableHead>
                       <TableHead>Due</TableHead>
                       <TableHead>Paid</TableHead>
+                      <TableHead>Outstanding</TableHead>
                       <TableHead>State</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {section.items.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center text-muted-foreground">
+                        <TableCell colSpan={6} className="text-center text-muted-foreground">
                           {section.empty}
                         </TableCell>
                       </TableRow>
@@ -422,6 +423,7 @@ export default function RegistrationsPage() {
                         <TableCell>{r.ownerLabel ?? "—"}</TableCell>
                         <TableCell>{cents(r.amountDueCents, r.currency)}</TableCell>
                         <TableCell>{cents(r.paidCents, r.currency)}</TableCell>
+                        <TableCell>{cents(r.outstandingCents, r.currency)}</TableCell>
                         <TableCell>
                           <Badge
                             variant={

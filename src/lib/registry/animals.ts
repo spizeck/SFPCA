@@ -38,7 +38,6 @@ import {
   households,
   microchipRecords,
   ownerships,
-  payments,
   persons,
   registrations,
   vetDocuments,
@@ -68,6 +67,12 @@ import {
   listRegistrationsForAnimal,
   type RegistrationRecord,
 } from "./registrations";
+import {
+  listPaymentsForAnimal,
+  listPaymentEvents,
+  type PaymentEventRecord,
+  type PaymentRecord,
+} from "./payments";
 import type { RegistryDb } from "./public-animals";
 
 // Admin DTO — all animals columns are staff-safe (no owner data lives on
@@ -755,14 +760,14 @@ export interface AnimalRegistryContext {
   // record with owner snapshot, assessed amount, derived payment state,
   // and resolution/cancellation lineage.
   registrations: RegistrationRecord[];
-  payments: {
-    id: string;
-    amountCents: number;
-    currency: string;
-    kind: string;
-    status: string;
-    occurredAt: string;
-  }[];
+  // Full ledger rows for this animal's registrations (#170) — every
+  // payment/refund/adjustment with method, status, source, reference,
+  // and linkage. Pending/failed/void rows stay visible: they are part
+  // of the truth staff reconcile.
+  payments: PaymentRecord[];
+  // Append-only reconciliation history for those rows (#170) — who/
+  // what transitioned each transaction and when.
+  paymentEvents: PaymentEventRecord[];
   documents: {
     id: string;
     label: string;
@@ -801,22 +806,7 @@ export async function getAnimalRegistryContext(
     listRegistrationsForAnimal(animalId, db),
       // Payments reach the animal only through a registration — there is
       // deliberately no payments.animal_id.
-      db
-        .select({
-          id: payments.id,
-          amountCents: payments.amountCents,
-          currency: payments.currency,
-          kind: payments.kind,
-          status: payments.status,
-          occurredAt: payments.occurredAt,
-        })
-        .from(payments)
-        .innerJoin(
-          registrations,
-          eq(payments.registrationId, registrations.id),
-        )
-        .where(eq(registrations.animalId, animalId))
-        .orderBy(desc(payments.occurredAt)),
+      listPaymentsForAnimal(animalId, db),
       db
         .select({
           id: vetDocuments.id,
@@ -845,15 +835,18 @@ export async function getAnimalRegistryContext(
         .limit(25),
     ]);
 
+  const paymentEvents = await listPaymentEvents(
+    paymentRows.map((p) => p.id),
+    db,
+  );
+
   return {
     microchips: chipRows,
     chipConflicts: chipConflictRows,
     foundReports: foundReportRows,
     registrations: registrationRows,
-    payments: paymentRows.map((r) => ({
-      ...r,
-      occurredAt: r.occurredAt.toISOString(),
-    })),
+    payments: paymentRows,
+    paymentEvents,
     documents: documentRows.map((r) => ({
       ...r,
       createdAt: r.createdAt.toISOString(),
