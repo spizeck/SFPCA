@@ -11,22 +11,24 @@
 // Deferred kinds — documented here so their intended cadence is
 // reviewable, but intentionally NOT registered because their
 // authoritative eligibility sources do not exist yet:
-//   'registration-due-reminder'      — needs #169 (registrations rows
-//                                      written + canonical current-
-//                                      registration state)
 //   'registration-payment-reminder'  — needs #170 (payment ledger +
 //                                      authoritative outstanding balance)
-//   ('annual-confirmation-reminder' left this list in #166 — its
-//    eligibility source now exists)
+//   ('annual-confirmation-reminder' left this list in #166,
+//    'registration-due-reminder' left it in #169 — their eligibility
+//    sources exist now)
 //
 // The reminder classes that exist today. 'vaccination-reminder' reads
 // #173's listDueVaccinations; 'annual-confirmation-reminder' (#166)
 // reads the canonical listOwnershipsRequiringConfirmation — an
 // ownership relationship is due when no deliberate confirmation row
-// exists within the period (never derived from updated_at).
+// exists within the period (never derived from updated_at);
+// 'registration-due-reminder' (#169) reads the canonical
+// listUnregisteredAnimals — an 'active' animal with no active
+// registration row for the current period.
 export const REMINDER_KINDS = [
   "vaccination-reminder",
   "annual-confirmation-reminder",
+  "registration-due-reminder",
 ] as const;
 export type ReminderKind = (typeof REMINDER_KINDS)[number];
 
@@ -75,6 +77,18 @@ export const REMINDER_POLICIES: Record<ReminderKind, ReminderPolicy> = {
   "annual-confirmation-reminder": {
     kind: "annual-confirmation-reminder",
     keyPrefix: "confirm-reminder",
+    channel: "email",
+    optional: false,
+    cooldownDays: 30,
+    maxTouches: 2,
+  },
+  // Annual registration is due per calendar year (#169). Operational
+  // like the confirmation reminder — a registry obligation, not a
+  // preference. One reminder a month, twice per period; the staff
+  // exception queue still shows the gap after that.
+  "registration-due-reminder": {
+    kind: "registration-due-reminder",
+    keyPrefix: "reg-due",
     channel: "email",
     optional: false,
     cooldownDays: 30,

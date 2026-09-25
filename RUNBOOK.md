@@ -1433,10 +1433,13 @@ a diagnostic aid only.
 (eligibility is #166's `listOwnershipsRequiringConfirmation` — the
 append-only `ownership_confirmations` table is the authoritative "last
 confirmed" source; household-owned animals resolve to a contactable
-member). Registration-due and unpaid-balance reminders remain **not**
-active: `registrations`/`payments` have no writers. They activate as
-new evaluators after #169/#170 land — see `src/lib/reminders/policy.ts`
-for the intended cadence of each deferred kind.
+member), and `registration-due-reminder` (eligibility is #169's
+`listUnregisteredAnimals` — lifecycle 'active' animals with no active
+current-period registration; cycle key is the period year; 'unknown'
+lifecycle shows in the staff queue but is never emailed). The
+unpaid-balance reminder remains **not** active: it needs #170's
+authoritative balance state — see `src/lib/reminders/policy.ts` for the
+intended cadence.
 
 ### 22b. Enabling delivery (operator checklist)
 

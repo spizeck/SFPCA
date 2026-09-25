@@ -39,6 +39,7 @@ import type {
   PortalPastAnimal,
 } from "@/lib/registry/ownership";
 import { getAnimalLifecycleLabel } from "@/lib/animal-lifecycle";
+import { REGISTRATION_PAYMENT_STATE_LABELS } from "@/lib/registrations";
 import type { HouseholdRecord, PersonRecord } from "@/lib/registry/persons";
 import type { OwnerRequestRecord, OwnerRequestKind } from "@/lib/registry/owner-requests";
 import { CheckCircle2, PawPrint, CircleAlert } from "lucide-react";
@@ -139,6 +140,35 @@ function AnimalCard({ animal }: { animal: PortalAnimal }) {
             {animal.chipNumber && (
               <p className="text-xs text-muted-foreground">
                 Microchip: <span className="font-mono">{animal.chipNumber}</span>
+              </p>
+            )}
+            {/* Current-period registration state (#169) — plain-language
+                status plus any money still owed; history stays a simple
+                year list. No staff notes or payment internals. */}
+            {animal.registration ? (
+              <p className="text-xs text-muted-foreground">
+                {animal.registration.year} registration:{" "}
+                {animal.registration.paymentState === "unpaid" ||
+                animal.registration.paymentState === "partial" ? (
+                  <span className="text-destructive font-medium">
+                    payment outstanding —{" "}
+                    {(animal.registration.amountDueCents / 100).toFixed(2)}{" "}
+                    {animal.registration.currency} due
+                  </span>
+                ) : (
+                  REGISTRATION_PAYMENT_STATE_LABELS[
+                    animal.registration.paymentState
+                  ]
+                )}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Not registered for the current year
+              </p>
+            )}
+            {animal.registrationYears.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Registered: {animal.registrationYears.join(", ")}
               </p>
             )}
           </div>

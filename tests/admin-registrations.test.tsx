@@ -9,11 +9,19 @@ const {
   mockListRegistrations,
   mockSetStatus,
   mockGetReceiptUrl,
+  mockGetQueues,
+  mockCreateFromSubmission,
+  mockSearchAnimals,
+  mockCreateRegistration,
   mockToast,
 } = vi.hoisted(() => ({
   mockListRegistrations: vi.fn(),
   mockSetStatus: vi.fn(),
   mockGetReceiptUrl: vi.fn(),
+  mockGetQueues: vi.fn(),
+  mockCreateFromSubmission: vi.fn(),
+  mockSearchAnimals: vi.fn(),
+  mockCreateRegistration: vi.fn(),
   mockToast: vi.fn(),
 }));
 
@@ -21,6 +29,13 @@ vi.mock("@/app/admin/registrations/actions", () => ({
   listRegistrationsAction: mockListRegistrations,
   setRegistrationStatusAction: mockSetStatus,
   getReceiptUrlAction: mockGetReceiptUrl,
+  getRegistrationQueuesAction: mockGetQueues,
+  createRegistrationFromSubmissionAction: mockCreateFromSubmission,
+  searchAnimalsForLinkAction: mockSearchAnimals,
+}));
+
+vi.mock("@/app/admin/animals/[id]/actions", () => ({
+  createRegistrationAction: mockCreateRegistration,
 }));
 
 vi.mock("@/hooks/use-toast", () => ({
@@ -53,6 +68,16 @@ beforeEach(() => {
     ok: true,
     url: "https://example.com/signed",
   });
+  mockGetQueues.mockResolvedValue({
+    year: 2026,
+    unregistered: [],
+    pendingSubmissions: 0,
+    outstanding: [],
+    completed: [],
+  });
+  mockCreateFromSubmission.mockResolvedValue({ ok: true });
+  mockSearchAnimals.mockResolvedValue([]);
+  mockCreateRegistration.mockResolvedValue({ ok: true });
 });
 
 describe("admin registrations", () => {

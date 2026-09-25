@@ -1,6 +1,20 @@
 "use client";
 
+// Registrations (#169) — the exception-first staff surface. The page is
+// organized as queues around the CURRENT registration period rather
+// than a flat list:
+//   1. animals that should be registered for this period but aren't
+//      (lifecycle 'active'/'unconfirmed' — deceased/moved animals never
+//      appear as ordinary gaps);
+//   2. intake submissions awaiting staff review;
+//   3. current-period registrations with an outstanding balance
+//      (derived from the payments ledger — real payment truth only);
+//   4. completed current-period registrations.
+// Every row links to the canonical animal profile, where full
+// registration history and edits live.
+
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -11,44 +25,75 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@/hooks/use-mutation";
 import { LoadError } from "@/components/admin/load-error";
 import { AnimalRegistration } from "@/lib/types";
-import { Eye, CircleCheckBig, Download, CircleX, RotateCcw } from "lucide-react";
+import { Eye, CircleCheckBig, Download, CircleX, RotateCcw, Link2 } from "lucide-react";
 import {
+  createRegistrationFromSubmissionAction,
   getReceiptUrlAction,
+  getRegistrationQueuesAction,
   listRegistrationsAction,
+  searchAnimalsForLinkAction,
   setRegistrationStatusAction,
 } from "./actions";
+import {
+  createRegistrationAction,
+} from "@/app/admin/animals/[id]/actions";
 import {
   formatRegistrationTimestamp,
   RegistrationStatus,
 } from "@/lib/animal-registration";
+import {
+  REGISTRATION_PAYMENT_STATE_LABELS,
+  registrationPeriodLabel,
+} from "@/lib/registrations";
+import type {
+  RegistrationQueues,
+} from "@/lib/registry/registrations";
+import type { AnimalSearchHit } from "@/lib/registry/animals";
 import { RegistrationStatusBadge } from "@/components/admin/registration-status-badge";
 import { logError } from "@/lib/logger";
 
+function cents(v: number, currency = "USD"): string {
+  return `${(v / 100).toFixed(2)} ${currency}`;
+}
+
 export default function RegistrationsPage() {
   const [registrations, setRegistrations] = useState<AnimalRegistration[]>([]);
+  const [queues, setQueues] = useState<RegistrationQueues | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [selected, setSelected] = useState<AnimalRegistration | null>(null);
+  // Submission → animal linking dialog state.
+  const [linking, setLinking] = useState<AnimalRegistration | null>(null);
+  const [linkQuery, setLinkQuery] = useState("");
+  const [linkResults, setLinkResults] = useState<AnimalSearchHit[]>([]);
+  const [linkSearching, setLinkSearching] = useState(false);
   // One mutation at a time: status changes and receipt lookups are
   // serialized so a double-click can never fire the same write twice.
   const mutation = useMutation();
   const { toast } = useToast();
 
   useEffect(() => {
-    loadRegistrations();
+    loadAll();
   }, []);
 
-  const loadRegistrations = async () => {
+  const loadAll = async () => {
     setLoading(true);
     setLoadError(false);
     try {
       // Postgres returns submissions newest-first (submitted_at DESC);
       // every stored row has a timestamp, so nothing is silently hidden.
-      setRegistrations(await listRegistrationsAction());
+      const [subs, q] = await Promise.all([
+        listRegistrationsAction(),
+        getRegistrationQueuesAction(),
+      ]);
+      setRegistrations(subs);
+      setQueues(q);
     } catch (error) {
       logError("admin", "registrations-load", error);
       setLoadError(true);
@@ -121,6 +166,79 @@ export default function RegistrationsPage() {
     }, `receipt-${registration.id}`);
   };
 
+  const registerAnimal = (animalId: string) => {
+    mutation.run(async () => {
+      try {
+        const result = await createRegistrationAction(animalId, {});
+        if (!result.ok) {
+          toast({
+            title: "Couldn't register",
+            description:
+              result.reason === "conflict"
+                ? "This animal already has a registration for this period."
+                : "Failed to create the registration. Try again.",
+            variant: "destructive",
+          });
+          return;
+        }
+        toast({ title: "Registration created" });
+        await loadAll();
+      } catch (error) {
+        logError("registration", "registration-create", error);
+        toast({
+          title: "Error",
+          description: "Failed to create the registration. Try again.",
+          variant: "destructive",
+        });
+      }
+    }, `register-${animalId}`);
+  };
+
+  const runLinkSearch = async () => {
+    setLinkSearching(true);
+    try {
+      setLinkResults(await searchAnimalsForLinkAction(linkQuery));
+    } catch (error) {
+      logError("registration", "animal-search", error);
+      setLinkResults([]);
+    } finally {
+      setLinkSearching(false);
+    }
+  };
+
+  const linkSubmission = (animalId: string) => {
+    if (!linking) return;
+    mutation.run(async () => {
+      try {
+        const result = await createRegistrationFromSubmissionAction(
+          animalId,
+          linking.id,
+        );
+        if (!result.ok) {
+          toast({
+            title: "Couldn't register",
+            description:
+              result.reason === "conflict"
+                ? "That animal already has a registration for this period."
+                : "Failed to create the registration. Try again.",
+            variant: "destructive",
+          });
+          return;
+        }
+        setLinking(null);
+        toast({ title: "Registration created and linked" });
+        await loadAll();
+      } catch (error) {
+        logError("registration", "registration-link", error);
+        toast({
+          title: "Error",
+          description: "Failed to create the registration. Try again.",
+          variant: "destructive",
+        });
+      }
+    }, `link-${linking.id}`);
+  };
+
   if (loading) {
     return <div className="p-8">Loading...</div>;
   }
@@ -128,10 +246,12 @@ export default function RegistrationsPage() {
   if (loadError) {
     return (
       <div className="p-8">
-        <LoadError label="registrations" onRetry={loadRegistrations} />
+        <LoadError label="registrations" onRetry={loadAll} />
       </div>
     );
   }
+
+  const year = queues?.year ?? new Date().getFullYear();
 
   return (
     <div className="p-8">
@@ -139,41 +259,194 @@ export default function RegistrationsPage() {
         <h1 className="text-3xl font-bold mb-8">Animal Registrations</h1>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium">Total Registrations</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{registrations.length}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium">Pending Verification</CardTitle>
+              <CardTitle className="text-sm font-medium">
+                Not registered ({year})
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {registrations.filter(r => r.status === "pending").length}
+                {queues?.unregistered.length ?? 0}
               </div>
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium">Total Quoted Fees</CardTitle>
+              <CardTitle className="text-sm font-medium">
+                Awaiting review
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                ${registrations.reduce((sum, r) => sum + (r.totalFee || 0), 0)}
+                {queues?.pendingSubmissions ??
+                  registrations.filter((r) => r.status === "pending").length}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium">
+                Outstanding balance
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {queues?.outstanding.length ?? 0}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium">
+                Completed {year}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {queues?.completed.length ?? 0}
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Registrations Table */}
+        {/* Queue: animals missing a current-period registration */}
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle>Needs {year} registration</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Animal</TableHead>
+                  <TableHead>Registry ref</TableHead>
+                  <TableHead>Species</TableHead>
+                  <TableHead>Owner</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(queues?.unregistered.length ?? 0) === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center text-muted-foreground">
+                      Every active animal is registered for {year}.
+                    </TableCell>
+                  </TableRow>
+                )}
+                {queues?.unregistered.map((a) => (
+                  <TableRow key={a.animalId}>
+                    <TableCell className="font-medium">
+                      <Link
+                        href={`/admin/animals/${a.animalId}`}
+                        className="text-primary underline"
+                      >
+                        {a.name}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">
+                      {a.registryRef}
+                    </TableCell>
+                    <TableCell className="capitalize">
+                      {a.species} · {a.sex}
+                    </TableCell>
+                    <TableCell>{a.ownerLabel ?? "—"}</TableCell>
+                    <TableCell>
+                      <Button
+                        size="sm"
+                        disabled={mutation.pending}
+                        onClick={() => registerAnimal(a.animalId)}
+                      >
+                        Register
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+
+        {/* Queues: current-period registrations by derived payment state */}
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle>{registrationPeriodLabel(year)}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {[
+              {
+                title: "Outstanding balance",
+                items: queues?.outstanding ?? [],
+                empty: "Nothing outstanding.",
+              },
+              {
+                title: "Completed",
+                items: queues?.completed ?? [],
+                empty: "No completed registrations yet.",
+              },
+            ].map((section) => (
+              <div key={section.title}>
+                <h3 className="font-medium mb-2">{section.title}</h3>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Animal</TableHead>
+                      <TableHead>Registered to</TableHead>
+                      <TableHead>Due</TableHead>
+                      <TableHead>Paid</TableHead>
+                      <TableHead>State</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {section.items.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center text-muted-foreground">
+                          {section.empty}
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    {section.items.map((r) => (
+                      <TableRow key={r.registrationId}>
+                        <TableCell className="font-medium">
+                          <Link
+                            href={`/admin/animals/${r.animalId}`}
+                            className="text-primary underline"
+                          >
+                            {r.animalName}
+                          </Link>
+                          <div className="font-mono text-xs text-muted-foreground">
+                            {r.registryRef}
+                          </div>
+                        </TableCell>
+                        <TableCell>{r.ownerLabel ?? "—"}</TableCell>
+                        <TableCell>{cents(r.amountDueCents, r.currency)}</TableCell>
+                        <TableCell>{cents(r.paidCents, r.currency)}</TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={
+                              r.paymentState === "unpaid" ||
+                              r.paymentState === "partial"
+                                ? "destructive"
+                                : "secondary"
+                            }
+                          >
+                            {REGISTRATION_PAYMENT_STATE_LABELS[r.paymentState]}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        {/* Intake submissions — public-form claims awaiting staff review */}
         <Card>
           <CardHeader>
-            <CardTitle>All Registrations</CardTitle>
+            <CardTitle>Intake submissions</CardTitle>
           </CardHeader>
           <CardContent>
             <Table>
@@ -191,7 +464,7 @@ export default function RegistrationsPage() {
                 {registrations.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={6} className="text-center text-muted-foreground">
-                      No registrations yet.
+                      No submissions yet.
                     </TableCell>
                   </TableRow>
                 )}
@@ -231,6 +504,19 @@ export default function RegistrationsPage() {
                           onClick={() => setSelected(registration)}
                         >
                           <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          aria-label="Register a claimed animal"
+                          disabled={mutation.pending}
+                          onClick={() => {
+                            setLinking(registration);
+                            setLinkQuery("");
+                            setLinkResults([]);
+                          }}
+                        >
+                          <Link2 className="h-4 w-4" />
                         </Button>
                         {registration.paymentReceipt && (
                           <Button
@@ -284,11 +570,98 @@ export default function RegistrationsPage() {
           </CardContent>
         </Card>
 
+        {/* Submission → animal linking */}
+        <Dialog
+          open={linking !== null}
+          onOpenChange={(open) => !open && setLinking(null)}
+        >
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Register a claimed animal</DialogTitle>
+              <DialogDescription>
+                Pick the registry animal this submission covers. The
+                registration keeps a link to the submission; matching is
+                always your choice — intake text never auto-matches.
+              </DialogDescription>
+            </DialogHeader>
+            {linking && (
+              <div className="space-y-3 text-sm">
+                <div>
+                  <p className="font-medium">Claimed animals</p>
+                  <ul className="list-disc pl-5 text-muted-foreground">
+                    {(linking.animals ?? []).map((a, i) => (
+                      <li key={i}>
+                        {a.name} — {a.type}, {a.sex}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    value={linkQuery}
+                    onChange={(e) => setLinkQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        runLinkSearch();
+                      }
+                    }}
+                    placeholder="Search by name, registry ref, owner, or chip"
+                    aria-label="Search registry animals"
+                  />
+                  <Button
+                    variant="outline"
+                    onClick={runLinkSearch}
+                    disabled={linkSearching}
+                  >
+                    Search
+                  </Button>
+                </div>
+                <ul className="divide-y max-h-64 overflow-y-auto">
+                  {linkResults.map((hit) => (
+                    <li
+                      key={hit.animal.id}
+                      className="py-2 flex items-center justify-between gap-3"
+                    >
+                      <div>
+                        <p className="font-medium">
+                          {hit.animal.name}
+                          <span className="font-mono text-xs text-muted-foreground ml-2">
+                            {hit.animal.registryRef}
+                          </span>
+                        </p>
+                        <p className="text-muted-foreground capitalize">
+                          {hit.animal.species} · {hit.animal.sex}
+                          {hit.owners.length > 0 &&
+                            ` · ${hit.owners.join(", ")}`}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        disabled={mutation.pending}
+                        onClick={() => linkSubmission(hit.animal.id)}
+                      >
+                        Register
+                      </Button>
+                    </li>
+                  ))}
+                  {linkResults.length === 0 && linkQuery && !linkSearching && (
+                    <li className="py-3 text-muted-foreground">
+                      No matching animals — if the animal isn&apos;t in the
+                      registry yet, create it from the animals page first.
+                    </li>
+                  )}
+                </ul>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
         {/* Registration detail */}
         <Dialog open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
           <DialogContent className="max-w-lg">
             <DialogHeader>
-              <DialogTitle>Registration Details</DialogTitle>
+              <DialogTitle>Submission Details</DialogTitle>
               <DialogDescription>
                 Submitted {formatRegistrationTimestamp(selected?.createdAt)}
                 {" · "}Last updated {formatRegistrationTimestamp(selected?.updatedAt)}

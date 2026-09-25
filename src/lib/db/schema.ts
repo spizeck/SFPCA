@@ -542,6 +542,20 @@ export const registrationSubmissions = pgTable(
   ],
 );
 
+// The authoritative registration (#169): ONE row per animal per
+// calendar-year period, preserved forever — a new year inserts a new
+// row, it never rewrites the animal or a prior year. Status is only
+// 'active'|'cancelled': money owed lives in amount_due_cents, money
+// paid is derived from the payments ledger, and a waived/complimentary
+// fee is a resolution on the row — never a fake $0 payment.
+//
+// Owner context is a REGISTRATION-TIME SNAPSHOT: ownership_id links the
+// exact relationship row that was current, person_id/household_id point
+// at the resolved side, and owner_label keeps a display copy so history
+// stays readable even if the person/household is later renamed or the
+// ownership row's interval closes. Current ownership is still resolved
+// through the canonical ownerships intervals — these columns answer
+// "who was it registered to", not "who owns it now".
 export const registrations = pgTable(
   "registrations",
   {
@@ -554,17 +568,83 @@ export const registrations = pgTable(
       { onDelete: "set null" },
     ),
     year: integer("year").notNull(),
-    status: text("status").notNull().default("pending"),
+    status: text("status").notNull().default("active"),
+    // Owner snapshot at registration time (nullable — an animal can be
+    // registered while ownership is unresolved).
+    ownershipId: uuid("ownership_id").references(() => ownerships.id, {
+      onDelete: "set null",
+    }),
+    personId: uuid("person_id").references(() => persons.id, {
+      onDelete: "set null",
+    }),
+    householdId: uuid("household_id").references(() => households.id, {
+      onDelete: "set null",
+    }),
+    ownerLabel: text("owner_label"),
+    submittedAt: timestamp("submitted_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+    // When the row became authoritative (staff completed the
+    // registration). Distinct from submittedAt — intake precedes review.
+    registeredAt: timestamp("registered_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    // The amount assessed FOR THIS period, snapshotted at creation —
+    // later fee-schedule changes never rewrite history.
+    amountDueCents: integer("amount_due_cents").notNull().default(0),
+    currency: text("currency").notNull().default("USD"),
+    // Non-payment resolution — 'waived' | 'complimentary' — with its
+    // audit context. Resolution + payments together determine the
+    // derived payment state.
+    resolution: text("resolution"),
+    resolutionNote: text("resolution_note"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true, mode: "date" }),
+    resolvedBy: text("resolved_by"),
+    notes: text("notes"),
+    // Cancellation lineage — 'correction' (the row was wrong) or
+    // 'withdrawn' (registration ended). The row survives either way.
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true, mode: "date" }),
+    cancellationReason: text("cancellation_reason"),
+    cancellationNote: text("cancellation_note"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex("registrations_animal_year_key").on(t.animalId, t.year),
     index("registrations_submission_idx").on(t.submissionId),
+    // The current-period queues all filter (year, status) — one btree.
+    index("registrations_year_status_idx").on(t.year, t.status),
+    index("registrations_person_idx").on(t.personId),
+    index("registrations_household_idx").on(t.householdId),
     check("registrations_year_check", sql`${t.year} BETWEEN 2000 AND 2200`),
     check(
       "registrations_status_check",
-      sql`${t.status} IN ('pending','approved','rejected')`,
+      sql`${t.status} IN ('active','cancelled')`,
+    ),
+    check("registrations_amount_check", sql`${t.amountDueCents} >= 0`),
+    check(
+      "registrations_owner_side_check",
+      sql`NOT (${t.personId} IS NOT NULL AND ${t.householdId} IS NOT NULL)`,
+    ),
+    check(
+      "registrations_cancellation_consistency_check",
+      sql`(${t.status} = 'cancelled') = (${t.cancelledAt} IS NOT NULL) AND (${t.cancelledAt} IS NULL) = (${t.cancellationReason} IS NULL)`,
+    ),
+    check(
+      "registrations_cancellation_reason_check",
+      sql`${t.cancellationReason} IS NULL OR ${t.cancellationReason} IN ('correction','withdrawn')`,
+    ),
+    check(
+      "registrations_resolution_check",
+      sql`${t.resolution} IS NULL OR ${t.resolution} IN ('waived','complimentary')`,
+    ),
+    check(
+      "registrations_resolution_consistency_check",
+      sql`(${t.resolution} IS NULL) = (${t.resolvedAt} IS NULL)`,
     ),
   ],
 );

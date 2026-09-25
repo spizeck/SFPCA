@@ -8,10 +8,17 @@
 import { requireAdmin } from "@/lib/auth";
 import { adminReceiptBucket } from "@/lib/firebase-admin";
 import {
+  createRegistration,
+  getRegistrationQueues,
   listRegistrationSubmissions,
   updateSubmissionStatus,
   type AdminRegistrationSubmission,
+  type RegistrationQueues,
 } from "@/lib/registry/registrations";
+import {
+  searchAnimals,
+  type AnimalSearchHit,
+} from "@/lib/registry/animals";
 import { isRegistrationStatus } from "@/lib/animal-registration";
 import type { AnimalRegistration } from "@/lib/types";
 import { logError } from "@/lib/logger";
@@ -51,7 +58,7 @@ export async function listRegistrationsAction(): Promise<
 
 export interface StatusActionResult {
   ok: boolean;
-  reason?: "not-found" | "invalid";
+  reason?: "not-found" | "invalid" | "conflict";
 }
 
 export async function setRegistrationStatusAction(
@@ -96,4 +103,46 @@ export async function getReceiptUrlAction(
     logError("admin", "receipt-view", error);
     return { ok: false };
   }
+}
+
+// --- Current-period queues (#169) -------------------------------------------
+// The exception-first registration surface: canonical queue data from
+// the registration service, not page-side recomputation.
+
+export async function getRegistrationQueuesAction(): Promise<RegistrationQueues> {
+  const { authorized } = await requireAdmin();
+  if (!authorized) throw new Error("Unauthorized");
+  return getRegistrationQueues();
+}
+
+// Link a reviewed submission's animal claim to a registry animal and
+// create the authoritative registration. Matching is ALWAYS the
+// staff member's choice via the animal picker — intake data never
+// auto-matches (#178 owns generic duplicate detection).
+export async function createRegistrationFromSubmissionAction(
+  animalId: string,
+  submissionId: string,
+): Promise<StatusActionResult> {
+  const { authorized, user } = await requireAdmin();
+  if (!authorized) throw new Error("Unauthorized");
+  try {
+    const result = await createRegistration(
+      { animalId, submissionId },
+      user?.email ?? "unknown",
+    );
+    return result.ok ? { ok: true } : { ok: false, reason: result.reason };
+  } catch (error) {
+    logError("registration", "registration-create", error);
+    return { ok: false };
+  }
+}
+
+// Lightweight animal search for the link-animal picker — name, registry
+// ref, owner, or chip. Bounded result set from the canonical search.
+export async function searchAnimalsForLinkAction(
+  query: string,
+): Promise<AnimalSearchHit[]> {
+  const { authorized } = await requireAdmin();
+  if (!authorized) throw new Error("Unauthorized");
+  return searchAnimals(query, { lifecycleStatus: "active" });
 }

@@ -5,11 +5,13 @@
 // reads AUTHORITATIVE domain state and returns decisions; this module
 // owns persistence, idempotency-key derivation, counting, and delivery.
 // A kind registers only when its eligibility source is implemented —
-// today that is vaccination reminders (#173's listDueVaccinations) and
+// today that is vaccination reminders (#173's listDueVaccinations),
 // annual-confirmation reminders (#166's listOwnershipsRequiring-
-// Confirmation). Registration-due (#169) and unpaid-balance (#170)
-// reminders are deliberately absent: their source tables have no
-// writers yet, so any "eligibility" would be fabricated.
+// Confirmation), and registration-due reminders (#169's
+// listUnregisteredAnimals). Unpaid-balance (#170) reminders remain
+// deliberately absent: there is no authoritative outstanding-balance
+// workflow yet — the derived payment state exists, but chasing money
+// needs #170's ledger semantics, not a guess.
 //
 // Dry-run runs the same evaluation but writes nothing and never sends —
 // it cannot send: the delivery drain is not invoked and no provider
@@ -38,8 +40,11 @@ import {
 } from "../reminders/policy";
 import {
   renderAnnualConfirmationReminder,
+  renderRegistrationDueReminder,
   renderVaccinationReminder,
 } from "../reminders/templates";
+import { listUnregisteredAnimals } from "./registrations";
+import { resolveAnimalOwner } from "./ownership";
 import {
   deliverQueuedCommunications,
   EMAIL_RE,
@@ -405,11 +410,135 @@ export const evaluateAnnualConfirmationReminders: ReminderEvaluator =
     return items;
   };
 
+// --- Registration-due reminders ---------------------------------------------------
+
+// The #169 evaluator: eligibility is the canonical
+// listUnregisteredAnimals for the CURRENT period — 'active' animals
+// with no active registration row. 'unknown' lifecycle animals are
+// excluded from SENDING (unconfirmed status means we don't know the
+// animal is on-island — the staff queue still lists them for review;
+// deceased/moved animals are never eligible anywhere). The cycle key is
+// the period year, stable for the whole cycle. Recipient resolution is
+// the strict resolveAnimalOwner — ambiguous ownership fails closed.
+export const evaluateRegistrationDueReminders: ReminderEvaluator = async (
+  ctx,
+  db,
+) => {
+  const policy = REMINDER_POLICIES["registration-due-reminder"];
+  const year = Number(ctx.asOf.slice(0, 4));
+  const due = await listUnregisteredAnimals(
+    { year, asOf: ctx.asOf, lifecycleStatuses: ["active"] },
+    db,
+  );
+  if (due.length === 0) return [];
+
+  const animalIds = due.map((d) => d.animalId);
+  const existingRows = await db
+    .select({
+      relatedId: communications.relatedId,
+      cycleKey: communications.cycleKey,
+      touch: communications.touch,
+      createdAt: communications.createdAt,
+    })
+    .from(communications)
+    .where(
+      and(
+        eq(communications.kind, "registration-due-reminder"),
+        eq(communications.relatedType, "animal"),
+        inArray(communications.relatedId, animalIds),
+      ),
+    );
+
+  const items: EvaluatedReminder[] = [];
+  for (const row of due) {
+    const cycleKey = String(year);
+    const cycleRows = existingRows.filter(
+      (r) => r.relatedId === row.animalId && r.cycleKey === cycleKey,
+    );
+    const sendTouches = cycleRows.filter((r) => isSendTouch(r.touch));
+
+    const base = {
+      kind: "registration-due-reminder" as const,
+      relatedType: "animal",
+      relatedId: row.animalId,
+      cycleKey,
+      animalId: row.animalId,
+    };
+
+    if (sendTouches.length >= policy.maxTouches) {
+      items.push({
+        ...base,
+        touch: sendTouch(sendTouches.length + 1),
+        decision: { type: "suppress", detail: "exhausted" },
+      });
+      continue;
+    }
+    const lastTouchAt = sendTouches
+      .map((r) => r.createdAt.getTime())
+      .reduce((a, b) => Math.max(a, b), 0);
+    if (
+      lastTouchAt > 0 &&
+      daysSince(new Date(lastTouchAt), ctx.asOf) < policy.cooldownDays
+    ) {
+      items.push({
+        ...base,
+        touch: sendTouch(sendTouches.length + 1),
+        decision: { type: "suppress", detail: "cooldown" },
+      });
+      continue;
+    }
+
+    const touch = sendTouch(sendTouches.length + 1);
+    const skip = (detail: string, personId: string | null = null) =>
+      items.push({
+        ...base,
+        touch: skipTouch(detail),
+        decision: { type: "skip", personId, detail },
+      });
+
+    // Strict recipient resolution — never guess an owner.
+    const owner = await resolveAnimalOwner(row.animalId, ctx.asOf, db);
+    if (owner.status === "skip") {
+      skip(owner.detail, owner.personId);
+      continue;
+    }
+    if (!owner.email) {
+      skip("missing-email", owner.personId);
+      continue;
+    }
+    if (!EMAIL_RE.test(owner.email)) {
+      skip("invalid-email", owner.personId);
+      continue;
+    }
+
+    const rendered = renderRegistrationDueReminder({
+      ownerName: owner.name,
+      animalName: row.name,
+      year,
+      siteUrl: ctx.siteUrl,
+    });
+    items.push({
+      ...base,
+      touch,
+      decision: {
+        type: "send",
+        personId: owner.personId,
+        recipient: owner.email,
+        subject: rendered.subject,
+        bodyText: rendered.text,
+        bodyHtml: rendered.html,
+      },
+    });
+  }
+  return items;
+};
+
 // Registered evaluators — one per implemented reminder kind. Deferred
 // classes are documented in policy.ts and intentionally absent here.
 const EVALUATORS: Record<ReminderKind, ReminderEvaluator> = {
   "vaccination-reminder": evaluateVaccinationReminders,
   "annual-confirmation-reminder": evaluateAnnualConfirmationReminders,
+  "registration-due-reminder": evaluateRegistrationDueReminders,
 };
 
 const REGISTERED_KINDS = Object.keys(EVALUATORS) as ReminderKind[];

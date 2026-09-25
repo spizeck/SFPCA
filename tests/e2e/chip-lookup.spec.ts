@@ -59,7 +59,11 @@ test.describe("chip lookup", () => {
     await page.getByLabel("Record outcome").click();
     await page.getByRole("option", { name: "Reunited with owner" }).click();
     await page.getByRole("button", { name: "Record" }).click();
-    await expect(page.getByText("Found report recorded")).toBeVisible();
+    // exact: the aria-live toast reads "Notification Found report
+    // recorded" — without it this intermittently resolves to 2 elements.
+    await expect(
+      page.getByText("Found report recorded", { exact: true }),
+    ).toBeVisible();
 
     // Second scan, no mouse: the field is focused and cleared again.
     await expect(chipInput).toBeFocused();

@@ -53,6 +53,22 @@ async function seedAnimal(name: string) {
     .insert(schema.animals)
     .values({ name, species: "dog", sex: "male", lifecycleStatus: "active" })
     .returning();
+  // A current-period registration keeps this fixture out of the #169
+  // registration-due evaluator — these tests exercise other evaluators.
+  await db.insert(schema.registrations).values({
+    animalId: animal.id,
+    year: 2026,
+    status: "active",
+  });
+  return animal;
+}
+
+// An 'active' animal with NO registration — the #169 due set.
+async function seedUnregisteredAnimal(name: string) {
+  const [animal] = await db
+    .insert(schema.animals)
+    .values({ name, species: "dog", sex: "male", lifecycleStatus: "active" })
+    .returning();
   return animal;
 }
 
@@ -602,5 +618,155 @@ describe("delivery + dry-run", () => {
     expect(preview.queued).toBe(0);
     expect(preview.suppressed).toBe(1);
     expect(await commsFor(vaccination.id)).toHaveLength(1);
+  });
+});
+
+describe("registration-due reminders (#169)", () => {
+  // An unregistered 'active' animal with a contactable person owner.
+  async function seedUnregisteredOwned() {
+    const person = await seedOwner("regdue@example.com");
+    const animal = await seedUnregisteredAnimal("RegDue");
+    await db.insert(schema.ownerships).values({
+      animalId: animal.id,
+      personId: person.id,
+      validFrom: "2026-03-01",
+    });
+    return { person, animal };
+  }
+
+  test("an active animal without a current registration queues a reminder", async () => {
+    const { person, animal } = await seedUnregisteredOwned();
+    const result = await runReminderCycle({ asOf: AS_OF }, db);
+    expect(result.queued).toBe(1);
+
+    const [row] = await commsFor(animal.id);
+    expect(row).toMatchObject({
+      personId: person.id,
+      animalId: animal.id,
+      kind: "registration-due-reminder",
+      status: "queued",
+      relatedType: "animal",
+      cycleKey: "2026",
+      touch: "reminder-1",
+      recipient: "regdue@example.com",
+    });
+    expect(row.idempotencyKey).toBe(
+      `reg-due:${animal.id}:2026:reminder-1`,
+    );
+    expect(row.bodyText).toContain("2026");
+    // Balance language waits for #170 — the reminder asks to register,
+    // never to pay.
+    expect(row.bodyText).not.toContain("$");
+  });
+
+  test("a registered animal produces nothing — the eligibility source decides", async () => {
+    const person = await seedOwner("regdone@example.com");
+    const animal = await seedUnregisteredAnimal("RegDone");
+    await db.insert(schema.ownerships).values({
+      animalId: animal.id,
+      personId: person.id,
+      validFrom: "2026-03-01",
+    });
+    await db.insert(schema.registrations).values({
+      animalId: animal.id,
+      year: 2026,
+      status: "active",
+    });
+    const result = await runReminderCycle({ asOf: AS_OF }, db);
+    expect(result.queued).toBe(0);
+    expect(await commsFor(animal.id)).toHaveLength(0);
+  });
+
+  test("deceased and moved animals never become reminders", async () => {
+    const person = await seedOwner("gone@example.com");
+    for (const [name, status] of [
+      ["DeadDog", "deceased"],
+      ["MovedCat", "moved-off-saba"],
+    ] as const) {
+      const [animal] = await db
+        .insert(schema.animals)
+        .values({ name, species: "dog", sex: "male", lifecycleStatus: status })
+        .returning();
+      await db.insert(schema.ownerships).values({
+        animalId: animal.id,
+        personId: person.id,
+        validFrom: "2026-03-01",
+      });
+    }
+    const result = await runReminderCycle({ asOf: AS_OF }, db);
+    expect(result.queued).toBe(0);
+    expect(result.skipped).toBe(0);
+  });
+
+  test("'unknown' lifecycle is queued for staff but not emailed", async () => {
+    const person = await seedOwner("unknown@example.com");
+    const [animal] = await db
+      .insert(schema.animals)
+      .values({
+        name: "Unclear",
+        species: "cat",
+        sex: "female",
+        lifecycleStatus: "unknown",
+      })
+      .returning();
+    await db.insert(schema.ownerships).values({
+      animalId: animal.id,
+      personId: person.id,
+      validFrom: "2026-03-01",
+    });
+    const result = await runReminderCycle({ asOf: AS_OF }, db);
+    // No send, no skip row — 'unknown' is staff-queue only, not
+    // reminder-eligible.
+    expect(result.queued).toBe(0);
+    expect(await commsFor(animal.id)).toHaveLength(0);
+  });
+
+  test("an ownerless unregistered animal skips 'no-owner'", async () => {
+    const animal = await seedUnregisteredAnimal("Stray");
+    const result = await runReminderCycle({ asOf: AS_OF }, db);
+    expect(result.queued).toBe(0);
+    const [row] = await commsFor(animal.id);
+    expect(row).toMatchObject({
+      status: "skipped",
+      detail: "no-owner",
+      kind: "registration-due-reminder",
+    });
+  });
+
+  test("registering mid-cycle stops the next touch; the cycle is idempotent", async () => {
+    const { animal } = await seedUnregisteredOwned();
+    await runReminderCycle({ asOf: AS_OF }, db);
+    const second = await runReminderCycle({ asOf: AS_OF }, db);
+    expect(second.queued).toBe(0);
+    expect(second.suppressed).toBe(1);
+
+    // Staff register the animal — eligibility ends immediately.
+    await db.insert(schema.registrations).values({
+      animalId: animal.id,
+      year: 2026,
+      status: "active",
+    });
+    const after = await runReminderCycle({ asOf: "2026-12-31" }, db);
+    expect(after.queued).toBe(0);
+    expect(await commsFor(animal.id)).toHaveLength(1);
+  });
+
+  test("operational kind is not preference-suppressible", async () => {
+    expect(REMINDER_POLICIES["registration-due-reminder"].optional).toBe(
+      false,
+    );
+    const { person } = await seedUnregisteredOwned();
+    await expect(
+      setCommunicationPreference(
+        {
+          personId: person.id,
+          channel: "email",
+          kind: "registration-due-reminder",
+          optedOut: true,
+        },
+        "staff@test.dev",
+        db,
+      ),
+    ).rejects.toThrow();
   });
 });

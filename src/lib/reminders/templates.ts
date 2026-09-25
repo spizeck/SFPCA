@@ -126,3 +126,51 @@ export function renderAnnualConfirmationReminder(
 
   return { subject, text, html };
 }
+
+export interface RegistrationDueReminderContext {
+  ownerName: string;
+  animalName: string;
+  // The registration period (calendar year) that is missing.
+  year: number;
+  siteUrl: string;
+}
+
+// "Your animal isn't registered for the current period" nudge (#169).
+// Eligibility is the canonical listUnregisteredAnimals — an 'active'
+// animal with no active registration row for the year. Operational,
+// not suppressible: annual registration is a registry obligation.
+// Deliberately says nothing about money — balance reminders wait for
+// #170's authoritative ledger state.
+export function renderRegistrationDueReminder(
+  ctx: RegistrationDueReminderContext,
+): RenderedEmail {
+  const portalUrl = absoluteUrl("/portal", {
+    NEXT_PUBLIC_SITE_URL: ctx.siteUrl,
+  });
+  const contactUrl = absoluteUrl("/contact", {
+    NEXT_PUBLIC_SITE_URL: ctx.siteUrl,
+  });
+
+  const subject = `${ctx.year} registration needed for ${ctx.animalName}`;
+  const text = [
+    `Hello ${ctx.ownerName},`,
+    ``,
+    `Our records show that ${ctx.animalName} does not have a ${ctx.year} registration with the ${ORG_NAME}.`,
+    ``,
+    `Please register ${ctx.animalName} for ${ctx.year} — you can use the animal registration form on our website, or contact us and we will help:`,
+    `${contactUrl}`,
+    ``,
+    `If ${ctx.animalName} is no longer in your care, has died, or has left Saba, please let us know in the owner portal so we can update the registry: ${portalUrl}`,
+    ``,
+    `— ${ORG_NAME}`,
+  ].join("\n");
+
+  const html = htmlShell([
+    `Hello ${escapeHtml(ctx.ownerName)},`,
+    `Our records show that <strong>${escapeHtml(ctx.animalName)}</strong> does not have a ${ctx.year} registration with the ${escapeHtml(ORG_NAME)}.`,
+    `Please register ${escapeHtml(ctx.animalName)} for ${ctx.year} — use the animal registration form on our website, or <a href="${escapeHtml(contactUrl)}">contact us</a> and we will help.`,
+    `If ${escapeHtml(ctx.animalName)} is no longer in your care, has died, or has left Saba, please let us know in the <a href="${escapeHtml(portalUrl)}">owner portal</a> so we can update the registry.`,
+  ]);
+
+  return { subject, text, html };
+}

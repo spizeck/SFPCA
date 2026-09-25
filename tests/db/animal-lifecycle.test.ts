@@ -630,7 +630,7 @@ describe("registry independence", () => {
     await db.insert(schema.registrations).values({
       animalId: created.animal.id,
       year: 2024,
-      status: "approved",
+      status: "active",
     });
     const ctx = await getAnimalRegistryContext(created.animal.id, db);
     expect(ctx?.registrations).toHaveLength(1);

@@ -47,8 +47,16 @@ import {
   ownershipConfirmations,
   ownerships,
   persons,
+  registrations,
 } from "../db/schema";
 import { getRegistryDb } from "../db/client";
+import {
+  currentRegistrationYear,
+  derivePaymentState,
+  isRegistrationResolution,
+  type RegistrationPaymentState,
+} from "../registrations";
+import { confirmedPaidByRegistration } from "./payments";
 import {
   addDaysToIsoDate,
   isIsoDateString,
@@ -391,6 +399,18 @@ export interface PortalAnimal {
   // read-only for owners; chip changes stay staff-controlled. Only the
   // owner's own animals ever reach this projection.
   chipNumber: string | null;
+  // Current-period registration state (#169): null means "not
+  // registered for the current year". paymentState is derived from the
+  // payments ledger — 'unpaid'/'partial' means money is still owed.
+  registration: {
+    year: number;
+    paymentState: RegistrationPaymentState;
+    amountDueCents: number;
+    currency: string;
+  } | null;
+  // Every year with an active registration — the owner's own
+  // registration history, newest first. No staff notes or internals.
+  registrationYears: number[];
   // Annual-confirmation state (#166): the latest deliberate
   // confirmation on this relationship and the date the next one falls
   // due. Never derived from updated_at or profile edits.
@@ -494,6 +514,59 @@ export async function listPortalAnimals(
     chipRows.map((c) => [c.animalId, c.chipDisplay ?? c.chipNumber]),
   );
 
+  // Registration state (#169) — one batch over the animal's ACTIVE
+  // registration rows; cancelled rows are history but never count as
+  // "registered". Payment state is derived from the payments ledger.
+  const regRows =
+    animalIds.length > 0
+      ? await db
+          .select({
+            id: registrations.id,
+            animalId: registrations.animalId,
+            year: registrations.year,
+            amountDueCents: registrations.amountDueCents,
+            currency: registrations.currency,
+            resolution: registrations.resolution,
+          })
+          .from(registrations)
+          .where(
+            and(
+              inArray(registrations.animalId, animalIds),
+              eq(registrations.status, "active"),
+            ),
+          )
+      : [];
+  const paidByReg = await confirmedPaidByRegistration(
+    db,
+    regRows.map((r) => r.id),
+  );
+  const periodYear = currentRegistrationYear(asOf);
+  const currentRegByAnimal = new Map<
+    string,
+    NonNullable<PortalAnimal["registration"]>
+  >();
+  const regYearsByAnimal = new Map<string, number[]>();
+  for (const r of regRows) {
+    const years = regYearsByAnimal.get(r.animalId) ?? [];
+    years.push(r.year);
+    regYearsByAnimal.set(r.animalId, years);
+    if (r.year === periodYear) {
+      currentRegByAnimal.set(r.animalId, {
+        year: r.year,
+        paymentState: derivePaymentState(
+          r.amountDueCents,
+          paidByReg.get(r.id) ?? 0,
+          isRegistrationResolution(r.resolution) ? r.resolution : null,
+        ),
+        amountDueCents: r.amountDueCents,
+        currency: r.currency,
+      });
+    }
+  }
+  for (const years of regYearsByAnimal.values()) {
+    years.sort((a, b) => b - a);
+  }
+
   // One card per animal: when a person reaches the same animal through
   // both a direct and a household ownership, the direct relationship
   // wins — the household row is still real history, just redundant for
@@ -524,6 +597,8 @@ export async function listPortalAnimals(
       householdName: row.personId === personId ? null : row.householdName,
       validFrom: row.validFrom,
       chipNumber: chipByAnimal.get(row.animalId) ?? null,
+      registration: currentRegByAnimal.get(row.animalId) ?? null,
+      registrationYears: regYearsByAnimal.get(row.animalId) ?? [],
       lastConfirmedOn: row.lastConfirmedOn,
       confirmationDueOn: dueOn,
       confirmationDue: dueOn <= asOf,
