@@ -136,6 +136,11 @@ function AnimalCard({ animal }: { animal: PortalAnimal }) {
             <p className="text-xs text-muted-foreground">
               Registered with you since {animal.validFrom}
             </p>
+            {animal.chipNumber && (
+              <p className="text-xs text-muted-foreground">
+                Microchip: <span className="font-mono">{animal.chipNumber}</span>
+              </p>
+            )}
           </div>
         </div>
 

@@ -20,6 +20,8 @@ import {
   authIdentities,
   householdMembers,
   households,
+  microchipConflicts,
+  microchipRecords,
   ownerships,
   persons,
 } from "../../src/lib/db/schema";
@@ -210,6 +212,34 @@ export default async function globalSetup() {
     validFrom: recent.toISOString().slice(0, 10),
   });
 
+  // --- Microchip registry fixtures (#168) ---------------------------------
+  // Rexley carries a chip — the scan workflow's happy path, exercised
+  // with a formatted number to prove normalization. Whiskers' chip was
+  // ALSO claimed on Claimdog at intake — the open conflict row the
+  // match result must surface for staff review.
+  await pgliteDb.insert(microchipRecords).values([
+    {
+      animalId: personAnimal.id,
+      chipNumber: "985113001234567",
+      chipDisplay: "985-113-001-234-567",
+      manufacturer: "Datamars",
+      assignedFrom: "2024-01-01",
+    },
+    {
+      animalId: householdAnimal.id,
+      chipNumber: "999000111222",
+      chipDisplay: "999-000-111-222",
+      assignedFrom: "2024-01-01",
+    },
+  ]);
+  await pgliteDb.insert(microchipConflicts).values({
+    chipNumber: "999000111222",
+    claimedAnimalId: claimAnimal.id,
+    existingAnimalId: householdAnimal.id,
+    source: "staff",
+    detail: "Scanner read the same chip on Claimdog at intake.",
+  });
+
   // FAQs so the public accordion renders real items.
   const faqs = [
     {
@@ -225,6 +255,8 @@ export default async function globalSetup() {
       order: 2,
     },
   ];
+  const existingFaqs = await db.collection("faq").listDocuments();
+  await Promise.all(existingFaqs.map((doc) => doc.delete()));
   for (const faq of faqs) {
     await db.collection("faq").add({ ...faq, createdAt: new Date() });
   }

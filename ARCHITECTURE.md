@@ -160,7 +160,9 @@ plain SQL.
 | `registration_submissions` | Intake events (today's `animalRegistrations`) | `unique(legacy_id)`; owner contact snapshot; receipt **path** only |
 | `registrations` | Per-animal per-year record | `unique(animal_id, year)` |
 | `payments` | Provider-neutral ledger | integer cents + currency; kind/status CHECKs; no cascade deletes |
-| `microchip_records` | Chip assignments w/ history | partial `unique(chip_number) WHERE assigned_to IS NULL` — one active assignment |
+| `microchip_records` | Chip assignments w/ history (#168) | `chip_number` stored normalized; `chip_display` keeps as-entered formatting; optional implantation metadata (manufacturer/implanted_on/implanted_by/notes); partial `unique(chip_number)` AND `unique(animal_id)` `WHERE assigned_to IS NULL` — one active assignment per chip AND one current chip per animal; `closed_reason` CHECK `replaced\|removed\|corrected` + closure-consistency CHECK; `replaced_by_id` links a replaced row to its successor; restrictive animal FK |
+| `microchip_conflicts` | Rejected duplicate chip claims (#168) | evidence rows, one open per (chip, claimant) via partial unique; `source` CHECK `staff\|import`; resolution is human — never auto-moves a chip |
+| `found_reports` | Found-animal scan/resolution log (#168) | `status` CHECK `open\|resolved` with `resolved_on` consistency + range CHECKs; `outcome` CHECK `reunited\|in-care\|other`; open dedupe per (chip, animal); `animal_id` nullable (unidentified chip) |
 | `vet_encounters` | One dated clinical record per row (#174) — `kind` CHECK `visit`/`history`/`note` absorbs structured visits AND the old `vet_events` roles (reported history, standalone notes) | concise optional text fields (reason/complaint/findings/assessment/plan/notes); `visit` requires `reason`; no SOAP machinery |
 | `vet_procedures` | Significant interventions incl. spay/neuter (#174) | kind CHECK; `performed_on` nullable (unknown historical dates); optional `encounter_id` |
 | `vet_medications` | Medication/course history — treatment record, not prescribing | `end_on ≥ start_on` or null (ongoing); "active" derived, never stored |
@@ -209,8 +211,79 @@ identity, lifecycle + history, sterilization + evidence, ownership,
 registrations, payments, microchips, documents, audit. Registration
 independence is a hard invariant — nothing infers existence or
 lifecycle from current registration. Boundaries: #168 owns the
-microchip workflow, #169 annual registration, #176 lost/found, #178
-duplicate merge.
+microchip workflow (below), #169 annual registration, #176 lost/found,
+#178 duplicate merge.
+
+**Microchip identity & the found-animal workflow (#168):** the
+registry's answer to "a volunteer is standing next to a stray with a
+scanner". Scanner assumption: **keyboard-wedge input followed by
+Enter** — USB/Bluetooth scanners behave like keyboards, so no drivers
+or hardware integration exist; `/admin/chip-lookup` is a focused,
+autofocused, Enter-submit field that stays focused between scans.
+
+- **Normalization.** `src/lib/microchips.ts` exports THE canonical
+  `normalizeChipNumber`: uppercase, then strip everything outside
+  A–Z0–9 (whitespace, hyphens, dots, asterisks, slashes are scanner/
+  paperwork formatting; real chip formats — ISO 11784/11785, AVID,
+  Trovan, Datamars — are alphanumeric only, so nothing meaningful is
+  dropped). Lookup, creation, correction, registry search, imports,
+  and duplicate detection all call it — two representations of one
+  chip can never diverge. `chip_display` preserves the as-entered
+  string for display whenever normalization removed formatting.
+- **Uniqueness & conflicts.** Strict database protection: a second
+  ACTIVE `microchip_records` row for a normalized number cannot exist
+  (partial unique index), and one animal holds at most one current
+  chip. A rejected duplicate claim is never silently overwritten or
+  moved — the service returns `chip-conflict` and flags a
+  `microchip_conflicts` row (open, deduped per chip+claimant) as
+  human-resolution evidence. Resolution is manual: staff fix the
+  underlying records, then mark the conflict resolved. #178 owns the
+  generic duplicate/merge engine — this stays scoped to chip identity.
+- **Current vs historical.** `assigned_to IS NULL` = current. A chip
+  leaving use is CLOSED, never deleted: `closed_reason` records why —
+  `replaced` (with `replaced_by_id` linking the successor, written in
+  the same transaction so currency never gaps), `removed` (no
+  successor), `corrected` (the record itself was wrong — never this
+  animal's chip). A same-record data fix goes through the correction
+  path — an audited in-place edit guarded by a `created_at` token —
+  and never fabricates a replacement event.
+- **Lookup.** `lookupChip` (`src/lib/registry/microchips.ts`) is an
+  exact equality read on the indexed normalized column — no registry
+  scan. Active matches rank first; a replaced/removed chip still
+  identifies the animal and the result says so, surfacing the current
+  chip alongside. **Lifecycle never suppresses a match** — a deceased
+  or off-island animal still resolves, flagged for staff review
+  because that discrepancy usually means stale registry state.
+  `/admin/animals` search uses the same canonical normalization with
+  left-anchored prefix matching (index-compatible — staff type chips
+  left to right).
+- **Owner contact.** The match result resolves WHO is current through
+  the canonical `listCurrentOwnerships` projection — never a second
+  definition — then renders contact detail: person owners directly,
+  household ownerships through members (primary first). Multiple
+  current ownerships render as ambiguous rather than guessed; an
+  owner with no contact details and "no current owner" are explicit
+  states, not silence. This data is staff-only: it arrives via a
+  `requireAdmin`-gated server action, never in public DTOs, public
+  pages, or page source.
+- **Found reports.** `found_reports` is the deliberately small
+  "scanned, and what came of it" log — NOT #176 case management (no
+  public reports, sightings, or workflow states). Open rows dedupe
+  per (chip, animal); a resolution stamps `resolved_on` + a bounded
+  `outcome` (`reunited`/`in-care`/`other`). An unidentified scan can
+  be flagged with a null `animal_id` so unknown chips leave a
+  follow-up trail. Rows are never deleted.
+- **Profile & audit.** The animal profile's MicrochipPanel shows the
+  current chip, full closed history, open conflicts, and found
+  reports, with staff mutations (add / replace / end use / correct /
+  resolve conflict). Every mutation lands an `audit_events` row in
+  the same transaction; payloads carry chip data, not owner PII.
+- **Owner portal.** Owners see their own animals' current chip number
+  read-only — useful for vet visits and insurance; mutation stays
+  staff-controlled and no other animal's chip is ever exposed. A
+  future public "I found an animal" flow would need a separate
+  public-safe lookup result — owner contact must never flow through
+  it.
 
 **Veterinary continuity model (#174):** the admin animal page is a
 single chronological timeline (`listMedicalTimeline`) combining

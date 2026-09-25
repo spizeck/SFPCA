@@ -28,7 +28,9 @@ when the token is unset.
   popup); `POST|DELETE /api/auth/session` is the only API route
 - **Admin** (`/admin`, protected): dashboard, `homepage`, `animals`,
   `animal-adoptions`, `animal-registration`, `registrations`, `faq`,
-  `veterinary-services`, `settings`
+  `veterinary-services`, `settings`, `chip-lookup` (found-animal scan
+  workflow, #168 — owner contact is staff-only via authorized server
+  actions)
 - **Production gate**: `SITE_MAINTENANCE_MODE=true` (Vercel Production
   only) redirects all public paths to `/under-construction`; `/login`,
   `/admin`, `/api/auth`, and static assets stay reachable

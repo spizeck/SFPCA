@@ -55,6 +55,15 @@ import {
   type AnimalLifecycleStatus,
 } from "../animal-lifecycle";
 import { isIsoDateString, todayIsoDate } from "../vaccinations";
+import { normalizeChipNumber } from "../microchips";
+import {
+  listChipConflicts,
+  listFoundReportsForAnimal,
+  listMicrochipsForAnimal,
+  type ChipConflictRecord,
+  type FoundReportRecord,
+  type MicrochipRecord,
+} from "./microchips";
 import type { RegistryDb } from "./public-animals";
 
 // Admin DTO — all animals columns are staff-safe (no owner data lives on
@@ -649,14 +658,20 @@ export async function searchAnimals(
     if (UUID_RE.test(q)) {
       clauses.push(sql`${animals.id} = ${q}::uuid`);
     }
-    // Microchip numbers are stored normalized (uppercase, alphanumerics
-    // only) — normalize the query the same way before matching.
-    const chipQuery = q.toUpperCase().replace(/[^A-Z0-9]+/g, "");
+    // Microchip numbers are stored normalized — the canonical
+    // normalizeChipNumber keeps search and the dedicated chip lookup on
+    // exactly the same matching semantics. Matching is EXACT or
+    // left-anchored prefix (staff type a chip left to right): the
+    // prefix LIKE stays btree-index compatible on mc.chip_number where
+    // a leading-wildcard ILIKE could not use any index. Normalized
+    // values are A-Z0-9 only, so no LIKE metacharacter escaping is
+    // needed.
+    const chipQuery = normalizeChipNumber(q);
     if (chipQuery.length >= 4) {
       clauses.push(sql`EXISTS (
         SELECT 1 FROM microchip_records mc
         WHERE mc.animal_id = ${animals.id}
-          AND mc.chip_number ILIKE ${`%${chipQuery}%`}
+          AND mc.chip_number LIKE ${`${chipQuery}%`}
       )`);
     }
     conditions.push(or(...clauses) as SQL);
@@ -685,6 +700,7 @@ export async function searchAnimals(
     .select({
       animalId: microchipRecords.animalId,
       chipNumber: microchipRecords.chipNumber,
+      chipDisplay: microchipRecords.chipDisplay,
     })
     .from(microchipRecords)
     .where(
@@ -705,7 +721,7 @@ export async function searchAnimals(
   const chipsByAnimal = new Map<string, string[]>();
   for (const r of chipRows) {
     const list = chipsByAnimal.get(r.animalId) ?? [];
-    list.push(r.chipNumber);
+    list.push(r.chipDisplay ?? r.chipNumber);
     chipsByAnimal.set(r.animalId, list);
   }
 
@@ -724,12 +740,13 @@ export async function searchAnimals(
 // payment workflows, vet documents are references only. The profile
 // links and summarizes; it never reimplements their state machines.
 export interface AnimalRegistryContext {
-  microchips: {
-    id: string;
-    chipNumber: string;
-    assignedFrom: string;
-    assignedTo: string | null;
-  }[];
+  // Full chip history (#168) — current and closed rows with display
+  // numbers, provenance, and closure reasons.
+  microchips: MicrochipRecord[];
+  // Open chip-identity conflicts this animal is a party to (#168).
+  chipConflicts: ChipConflictRecord[];
+  // Found-animal scan/resolution history for this animal (#168).
+  foundReports: FoundReportRecord[];
   registrations: {
     id: string;
     year: number;
@@ -767,19 +784,19 @@ export async function getAnimalRegistryContext(
 ): Promise<AnimalRegistryContext | null> {
   if (!UUID_RE.test(animalId)) return null;
 
-  const [chipRows, registrationRows, paymentRows, documentRows, auditRows] =
-    await Promise.all([
-      db
-        .select({
-          id: microchipRecords.id,
-          chipNumber: microchipRecords.chipNumber,
-          assignedFrom: microchipRecords.assignedFrom,
-          assignedTo: microchipRecords.assignedTo,
-        })
-        .from(microchipRecords)
-        .where(eq(microchipRecords.animalId, animalId))
-        .orderBy(desc(microchipRecords.assignedFrom)),
-      db
+  const [
+    chipRows,
+    chipConflictRows,
+    foundReportRows,
+    registrationRows,
+    paymentRows,
+    documentRows,
+    auditRows,
+  ] = await Promise.all([
+    listMicrochipsForAnimal(animalId, db),
+    listChipConflicts({ animalId }, db),
+    listFoundReportsForAnimal(animalId, db),
+    db
         .select({
           id: registrations.id,
           year: registrations.year,
@@ -837,6 +854,8 @@ export async function getAnimalRegistryContext(
 
   return {
     microchips: chipRows,
+    chipConflicts: chipConflictRows,
+    foundReports: foundReportRows,
     registrations: registrationRows.map((r) => ({
       ...r,
       createdAt: r.createdAt.toISOString(),

@@ -74,6 +74,7 @@ import { ClinicExpectationPanel } from "@/components/admin/medical/clinic-expect
 import { MarkSeenDialog } from "@/components/admin/medical/mark-seen-dialog";
 import { CommunicationsPanel } from "@/components/admin/medical/communications-panel";
 import { OwnershipPanel } from "@/components/admin/medical/ownership-panel";
+import { MicrochipPanel } from "@/components/admin/microchip-panel";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -338,12 +339,12 @@ export default function AnimalMedicalPage() {
                 <ul className="space-y-1">
                   {registry.microchips.map((c) => (
                     <li key={c.id} className="font-mono text-xs">
-                      {c.chipNumber}
+                      {c.chipDisplay}
                       <span className="text-muted-foreground font-sans">
                         {" "}
                         {c.assignedTo
                           ? `${c.assignedFrom} → ${c.assignedTo}`
-                          : `active since ${c.assignedFrom}`}
+                          : `current since ${c.assignedFrom}`}
                       </span>
                     </li>
                   ))}
@@ -437,6 +438,15 @@ export default function AnimalMedicalPage() {
           </div>
         </CardContent>
       </Card>
+
+      <MicrochipPanel
+        animalId={animal.id}
+        microchips={registry.microchips}
+        chipConflicts={registry.chipConflicts}
+        foundReports={registry.foundReports}
+        today={today}
+        onChanged={loadRecord}
+      />
 
       <ActiveAlerts timeline={timeline} />
 

@@ -1576,3 +1576,76 @@ through the UI; historical ownership references them.
 - Owner reports a missing animal: check ownership history on the animal
   record — a closed interval means a transfer/report was resolved;
   an absent row means the link never existed.
+
+## 24. Microchip lookup & found animals (#168)
+
+### 24a. The volunteer scan workflow
+
+`/admin/chip-lookup` (admin-only, `noindex`) is the found-animal tool —
+optimized for a volunteer standing next to a stray with a scanner.
+Scanners are **keyboard-wedge devices**: they type the number and send
+Enter; no drivers or special hardware are involved, and nothing in the
+app is hardware-specific.
+
+1. Open Chip Lookup (nav, or the dashboard card). The field is already
+   focused — do NOT click into it first.
+2. Scan (or type) the chip number and press Enter. Formatting does not
+   matter: `"985 112 345 678 901"`, `"985-112-345-678-901"`, and
+   `"985112345678901"` are the same chip — the canonical normalizer
+   (uppercase, non-alphanumerics stripped) handles it identically to
+   registry search and record creation.
+3. On a match, verify identity first: name, registry ref, species/sex,
+   photo/identifying notes, and the lifecycle badge. **If the badge says
+   deceased or moved-off-Saba, verify carefully** — the registry may be
+   stale; flag it rather than trusting it.
+4. The Owner contact block is what you need to return the animal.
+   Multiple current owners show an ambiguity warning — verify before
+   releasing the animal. "No registered owner" is explicit, not an error.
+5. Optionally record the outcome in the result card (open / reunited /
+   in-care / other + a short note). This lands a `found_reports` row —
+   small durable history, not a case-management ticket.
+6. Scan the next animal — the field is cleared and focused already.
+
+### 24b. Unknown and conflict states
+
+- **No match** — the normalized number is shown so you can copy it. The
+  obvious next steps are on the card: search the registry (the animal
+  may be registered without a chip) or flag the chip for follow-up —
+  which logs an open `found_reports` row with no animal attached.
+  Nothing creates an animal automatically on an unknown scan.
+- **Conflict warning** — the chip number was claimed for a second
+  animal while already assigned. The match still shows the current
+  holder, plus a warning banner. Resolve it on the animal profile's
+  Microchips panel (inspect both animals, correct or close the wrong
+  record, then Resolve the conflict). The registry never silently
+  moves a chip between animals.
+
+### 24c. Chip record management (animal profile → Microchips panel)
+
+- **Add chip** — only when the animal has no current chip. If the
+  number already identifies another animal the write is rejected and a
+  conflict is flagged for review — that is the protection working, not
+  a failure.
+- **Replace chip** — a new chip was implanted; closes the old record
+  (`closed_reason='replaced'`, linked to the successor) and opens the
+  new one atomically.
+- **End use** — chip removed or the record was wrong (`corrected` —
+  the chip never belonged to this animal). History is preserved either
+  way; rows are never deleted.
+- **Correct** — fix a typo in the number or metadata in place. This is
+  NOT a replacement and manufactures no fake history.
+- Old/replaced chips still match a scan — the result says "no longer
+  current" and shows the successor, so a scan of stale hardware still
+  finds the animal.
+
+### 24d. Failure modes
+
+- Lookup says "not a recognizable chip number": fewer than 4 or more
+  than 32 alphanumeric characters after normalization — re-scan or
+  check the paperwork.
+- "The registry lookup failed" (retryable): Postgres unreachable —
+  same DATABASE_URL dependency as the rest of the registry; check Neon
+  status per §19.
+- A scan finds the animal but no owner appears even though one is
+  expected: check ownership intervals on the profile — a closed
+  interval means a transfer/report already ran; add a new owner there.

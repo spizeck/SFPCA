@@ -162,12 +162,14 @@ describe("schema constraints", () => {
     ).rejects.toThrow();
     // A closed assignment does not conflict — the partial unique index
     // only covers rows where assigned_to IS NULL, so history is kept.
+    // (#168: closed rows must carry the reason they left use.)
     await expect(
       db.insert(schema.microchipRecords).values({
         chipNumber: "ABC123",
         animalId: a2.id,
         assignedFrom: "2026-02-01",
         assignedTo: "2026-03-01",
+        closedReason: "removed",
       }),
     ).resolves.toBeDefined();
   });

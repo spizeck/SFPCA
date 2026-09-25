@@ -729,6 +729,7 @@ describe("staff search", () => {
       chipNumber: "111222333444555",
       assignedFrom: "2020-01-01",
       assignedTo: "2024-01-01", // reassigned away — closed assignment
+      closedReason: "removed",
     });
     const hits = await searchAnimals(BASE.name, {}, db);
     const hit = hits.find((h) => h.animal.id === created.animal.id);
