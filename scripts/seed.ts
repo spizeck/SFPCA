@@ -58,12 +58,17 @@ async function seed() {
     console.log("Seeding animals (Postgres)...");
     for (const animal of seedData.animals) {
       const { id, status, photos, ...rest } = animal;
+      // The seed's `status` is the adoption-catalog value; every seeded
+      // animal is lifecycle 'active'. Legacy approxAge text is kept as
+      // staff-only identifying notes (see #167 transform rules).
       await pgdb.execute(dsql`
-        INSERT INTO animals (legacy_id, name, species, sex, approx_age,
-          description, lifecycle_status, photo_urls)
+        INSERT INTO animals (legacy_id, name, species, sex,
+          identifying_notes, description, lifecycle_status,
+          adoption_status, photo_urls)
         VALUES (${id ?? null}, ${rest.name}, ${rest.species}, ${rest.sex},
-          ${rest.approxAge ?? null}, ${rest.description ?? null},
-          ${status}, ${JSON.stringify(photos ?? [])}::jsonb)
+          ${rest.approxAge ? `Approx. age at import: ${rest.approxAge}` : null},
+          ${rest.description ?? null},
+          'active', ${status}, ${JSON.stringify(photos ?? [])}::jsonb)
       `);
     }
 

@@ -13,11 +13,13 @@
 //     transaction as the status flip, so a request can never read as
 //     "approved" while its effect didn't land.
 //
-// This is also the seam for work #166 deliberately does NOT do itself:
-// 'lifecycle-deceased'/'lifecycle-moved-off-saba' approval ends the
-// reporting owner's ownership interval; the animal's own
-// lifecycle_status transition is #167's authoritative job (the
-// resolution audit row records the approved report for it to consume).
+// This is also where #167's lifecycle authority meets the portal:
+// approving 'lifecycle-deceased'/'lifecycle-moved-off-saba' now performs
+// the authoritative animal lifecycle transition through
+// transitionAnimalLifecycle (which closes every open ownership interval
+// and preserves the transition in animal_lifecycle_events), so the
+// approved report, the registry state, and the history row can never
+// diverge.
 //
 // The pending-queue read (listOwnerRequests) is the canonical
 // owner/registry exception query #177's dashboard should compose.
@@ -39,6 +41,7 @@ import {
   closeOwnership,
   transferOwnership,
 } from "./ownership";
+import { transitionAnimalLifecycle } from "./animals";
 import {
   createPerson,
   findClaimCandidates,
@@ -648,28 +651,43 @@ async function applyApproval(
     }
     case "lifecycle-deceased":
     case "lifecycle-moved-off-saba": {
-      // #166 scope boundary: approving the report ends the reporter's
-      // ownership interval — the registry stops treating them as the
-      // responsible owner (reminders, portal, confirmations). The
-      // animal's own lifecycle_status vocabulary is #167's job; until
-      // it lands, staff see the approved report here and the audit
-      // trail, and apply the status change on the animal record.
-      if (row.ownershipId) {
-        const [o] = await db
-          .select({ validTo: ownerships.validTo })
-          .from(ownerships)
-          .where(eq(ownerships.id, row.ownershipId));
-        if (o && o.validTo === null) {
-          const closed = await closeOwnership(
-            row.ownershipId,
-            effectiveOn,
-            actorLabel,
-            db,
-          );
-          if (!closed.ok && closed.reason !== "conflict") {
-            return { ok: false, reason: "apply-failed" };
-          }
-        }
+      // #167: approving the report performs the authoritative
+      // whole-animal transition. The transition closes EVERY open
+      // ownership interval (a deceased/off-island animal has no
+      // on-island owner of record) — co-owners' intervals close too,
+      // which is why the report requires staff approval rather than
+      // applying on submission. All intervals are preserved as history.
+      const toStatus =
+        row.kind === "lifecycle-deceased" ? "deceased" : "moved-off-saba";
+      if (!row.animalId) return { ok: false, reason: "invalid", field: "kind" };
+      const [animal] = await db
+        .select({ lifecycleStatus: animals.lifecycleStatus })
+        .from(animals)
+        .where(eq(animals.id, row.animalId));
+      if (!animal) return { ok: false, reason: "not-found" };
+      if (animal.lifecycleStatus === toStatus) {
+        // Already in the target state (another owner's report already
+        // resolved it) — nothing to apply; still resolvable.
+        return null;
+      }
+      const transitioned = await transitionAnimalLifecycle(
+        row.animalId,
+        {
+          toStatus,
+          effectiveOn,
+          reason: row.detail,
+          source: "owner-request",
+          sourceRef: requestId,
+          actorLabel,
+        },
+        db,
+      );
+      if (!transitioned.ok) {
+        return {
+          ok: false,
+          reason:
+            transitioned.reason === "invalid" ? "invalid" : "apply-failed",
+        };
       }
       return null;
     }

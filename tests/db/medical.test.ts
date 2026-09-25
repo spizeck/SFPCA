@@ -45,7 +45,7 @@ async function seedAnimal(name = "Rex") {
       name,
       species: "dog",
       sex: "male",
-      lifecycleStatus: "adopted",
+      lifecycleStatus: "active",
     })
     .returning();
   return animal;

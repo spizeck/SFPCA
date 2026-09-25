@@ -205,9 +205,10 @@ async function main() {
             name: dsql`excluded.name`,
             species: dsql`excluded.species`,
             sex: dsql`excluded.sex`,
-            approxAge: dsql`excluded.approx_age`,
+            identifyingNotes: dsql`excluded.identifying_notes`,
             description: dsql`excluded.description`,
             lifecycleStatus: dsql`excluded.lifecycle_status`,
+            adoptionStatus: dsql`excluded.adoption_status`,
             photoUrls: dsql`excluded.photo_urls`,
             // created_at intentionally absent from the update set — the
             // original import timestamp is the record's provenance.

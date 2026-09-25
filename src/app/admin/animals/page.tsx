@@ -1,21 +1,36 @@
 "use client";
 
+// The staff animal registry (#167): fast search across name, registry
+// ref, microchip, owner/household, and identifying notes, with lifecycle
+// and listing filters. Each row links to the canonical animal profile.
+// The add/edit dialog manages CORE identity + listing fields only —
+// registry lifecycle changes go through the profile's transition
+// control so history is always preserved.
+
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import {
   deleteAnimalAction,
-  listAnimalsAction,
   saveAnimalAction,
+  searchAnimalsAction,
   type AdminAnimalRow,
 } from "./actions";
 import {
-  ANIMAL_STATUSES,
-  ANIMAL_STATUS_LABELS,
-  AnimalStatus,
-  getAnimalStatusVisibilityHint,
-  isAnimalStatus,
+  ANIMAL_ADOPTION_LABELS,
+  ANIMAL_ADOPTION_STATUSES,
+  ANIMAL_LIFECYCLE_LABELS,
+  ANIMAL_LIFECYCLE_STATUSES,
+  ANIMAL_STERILIZATION_STATUSES,
+  formatAnimalAge,
+  getAdoptionVisibilityHint,
+  isAnimalAdoptionStatus,
+  type AnimalAdoptionStatus,
+  type AnimalLifecycleStatus,
 } from "@/lib/animal-lifecycle";
-import { AnimalStatusBadge } from "@/components/admin/animal-status-badge";
+import {
+  AnimalAdoptionBadge,
+  AnimalLifecycleBadge,
+} from "@/components/admin/animal-status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -26,20 +41,32 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@/hooks/use-mutation";
-import { Plus, Pencil, Trash, Syringe } from "lucide-react";
+import { Plus, Pencil, Trash, Search } from "lucide-react";
 import { logError } from "@/lib/logger";
 import { ConfirmDialog } from "@/components/admin/confirm-dialog";
 import { LoadError } from "@/components/admin/load-error";
+
+const STERILIZATION_LABELS: Record<string, string> = {
+  unknown: "Unknown",
+  sterilized: "Sterilized",
+  intact: "Not sterilized",
+};
 
 const EMPTY_FORM = {
   name: "",
   species: "dog" as "dog" | "cat" | "other",
   sex: "unknown" as "male" | "female" | "unknown",
-  approxAge: "",
+  birthDate: "",
+  birthDateEstimated: false,
   description: "",
-  // Empty string means "no valid status chosen" — used when editing an
-  // animal whose stored status is unrecognized so staff must pick one.
-  status: "available" as AnimalStatus | "",
+  identifyingNotes: "",
+  lifecycleStatus: "active" as AnimalLifecycleStatus,
+  // Empty string means "no valid listing state chosen" — used when
+  // editing an animal whose stored value is unrecognized.
+  adoptionStatus: "not-listed" as AnimalAdoptionStatus | "",
+  sterilizationStatus: "unknown",
+  sterilizedOn: "",
+  sterilizedBy: "",
   photos: [] as string[],
 };
 
@@ -54,20 +81,30 @@ export default function AnimalsManager() {
   const [initialFormJson, setInitialFormJson] = useState(() =>
     JSON.stringify(EMPTY_FORM),
   );
+  const [query, setQuery] = useState("");
+  const [lifecycleFilter, setLifecycleFilter] = useState("");
+  const [adoptionFilter, setAdoptionFilter] = useState("");
   const mutation = useMutation();
   const { toast } = useToast();
 
   const [formData, setFormData] = useState({ ...EMPTY_FORM });
 
   useEffect(() => {
-    loadAnimals();
-  }, []);
+    const t = setTimeout(() => loadAnimals(), query ? 250 : 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, lifecycleFilter, adoptionFilter]);
 
   const loadAnimals = async () => {
     setLoading(true);
     setLoadError(false);
     try {
-      setAnimals(await listAnimalsAction());
+      setAnimals(
+        await searchAnimalsAction(query, {
+          lifecycleStatus: lifecycleFilter || undefined,
+          adoptionStatus: adoptionFilter || undefined,
+        }),
+      );
     } catch (error) {
       logError("animals", "admin-load", error);
       setLoadError(true);
@@ -77,10 +114,10 @@ export default function AnimalsManager() {
   };
 
   const handleSubmit = () => {
-    // Never write an unrecognized status: unknown values fail closed
-    // publicly but would corrupt the admin lifecycle view.
-    if (!isAnimalStatus(formData.status)) {
-      setStatusError("Select a valid animal status before saving.");
+    // Never write an unrecognized listing state: unknown values fail
+    // closed publicly but would corrupt the admin view.
+    if (!isAnimalAdoptionStatus(formData.adoptionStatus)) {
+      setStatusError("Select a valid listing state before saving.");
       return;
     }
 
@@ -91,13 +128,19 @@ export default function AnimalsManager() {
             name: formData.name,
             species: formData.species,
             sex: formData.sex,
-            approxAge: formData.approxAge,
+            birthDate: formData.birthDate || null,
+            birthDateEstimated: formData.birthDateEstimated,
             description: formData.description,
-            lifecycleStatus: formData.status,
+            identifyingNotes: formData.identifyingNotes,
+            adoptionStatus: formData.adoptionStatus,
+            sterilizationStatus: formData.sterilizationStatus,
+            sterilizedOn: formData.sterilizedOn || null,
+            sterilizedBy: formData.sterilizedBy,
             photoUrls: formData.photos,
+            lifecycleStatus: formData.lifecycleStatus,
           },
-          editingAnimal?.registryId ?? null,
-          editingAnimal?.updatedAt,
+          editingAnimal?.animal.id ?? null,
+          editingAnimal?.animal.updatedAt,
         );
         if (!result.ok) {
           toast({
@@ -132,16 +175,25 @@ export default function AnimalsManager() {
     });
   };
 
-  const handleEdit = (animal: AdminAnimalRow) => {
-    setEditingAnimal(animal);
+  const handleEdit = (row: AdminAnimalRow) => {
+    setEditingAnimal(row);
+    const a = row.animal;
     const editForm = {
-      name: animal.name,
-      species: animal.species,
-      sex: animal.sex,
-      approxAge: animal.approxAge,
-      description: animal.description,
-      status: isAnimalStatus(animal.status) ? animal.status : ("" as const),
-      photos: animal.photos || [],
+      name: a.name,
+      species: a.species as "dog" | "cat" | "other",
+      sex: a.sex as "male" | "female" | "unknown",
+      birthDate: a.birthDate ?? "",
+      birthDateEstimated: a.birthDateEstimated,
+      description: a.description ?? "",
+      identifyingNotes: a.identifyingNotes ?? "",
+      lifecycleStatus: a.lifecycleStatus as AnimalLifecycleStatus,
+      adoptionStatus: isAnimalAdoptionStatus(a.adoptionStatus)
+        ? a.adoptionStatus
+        : ("" as const),
+      sterilizationStatus: a.sterilizationStatus,
+      sterilizedOn: a.sterilizedOn ?? "",
+      sterilizedBy: a.sterilizedBy ?? "",
+      photos: a.photoUrls || [],
     };
     setFormData(editForm);
     setInitialFormJson(JSON.stringify(editForm));
@@ -154,7 +206,7 @@ export default function AnimalsManager() {
     if (!target) return;
     mutation.run(async () => {
       try {
-        const result = await deleteAnimalAction(target.registryId);
+        const result = await deleteAnimalAction(target.animal.id);
         if (!result.ok) {
           toast({
             title: "Error",
@@ -188,14 +240,6 @@ export default function AnimalsManager() {
     setInitialFormJson(JSON.stringify(EMPTY_FORM));
   };
 
-  if (loading) {
-    return <div>Loading...</div>;
-  }
-
-  if (loadError) {
-    return <LoadError label="animals" onRetry={loadAnimals} />;
-  }
-
   const closeDialog = (open: boolean) => {
     if (open) {
       setDialogOpen(true);
@@ -212,7 +256,7 @@ export default function AnimalsManager() {
   return (
     <div className="max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold">Manage Animals</h1>
+        <h1 className="text-3xl font-bold">Animal Registry</h1>
         <Dialog open={dialogOpen} onOpenChange={closeDialog}>
           <DialogTrigger asChild>
             <Button>
@@ -224,7 +268,9 @@ export default function AnimalsManager() {
             <DialogHeader>
               <DialogTitle>{editingAnimal ? "Edit Animal" : "Add New Animal"}</DialogTitle>
               <DialogDescription>
-                {editingAnimal ? "Update animal information" : "Add a new animal to the adoption list"}
+                {editingAnimal
+                  ? "Update animal information"
+                  : "Add a new animal to the permanent registry"}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
@@ -264,40 +310,93 @@ export default function AnimalsManager() {
                   </Select>
                 </div>
               </div>
-              <div>
-                <Label htmlFor="age">Approximate Age</Label>
-                <Input
-                  id="age"
-                  value={formData.approxAge}
-                  onChange={(e) => setFormData({ ...formData, approxAge: e.target.value })}
-                  placeholder="e.g., 2 years, 6 months"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="birthDate">Birth date</Label>
+                  <Input
+                    id="birthDate"
+                    type="date"
+                    value={formData.birthDate}
+                    onChange={(e) => setFormData({ ...formData, birthDate: e.target.value })}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Leave blank when unknown — never guess to fill the field.
+                  </p>
+                </div>
+                <div className="flex items-end pb-2">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={formData.birthDateEstimated}
+                      disabled={!formData.birthDate}
+                      onChange={(e) =>
+                        setFormData({ ...formData, birthDateEstimated: e.target.checked })
+                      }
+                    />
+                    Birth date is an estimate
+                  </label>
+                </div>
               </div>
               <div>
-                <Label htmlFor="description">Description</Label>
+                <Label htmlFor="description">Description (public listing copy)</Label>
                 <Textarea
                   id="description"
-                  rows={4}
+                  rows={3}
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 />
               </div>
               <div>
-                <Label htmlFor="status">Status</Label>
+                <Label htmlFor="identifyingNotes">Identifying notes (staff only)</Label>
+                <Textarea
+                  id="identifyingNotes"
+                  rows={2}
+                  value={formData.identifyingNotes}
+                  placeholder="Markings, scars, distinguishing features — never shown publicly"
+                  onChange={(e) => setFormData({ ...formData, identifyingNotes: e.target.value })}
+                />
+              </div>
+              {!editingAnimal && (
+                <div>
+                  <Label htmlFor="lifecycle">Initial registry status</Label>
+                  <Select
+                    value={formData.lifecycleStatus}
+                    onValueChange={(value: any) => setFormData({ ...formData, lifecycleStatus: value })}
+                  >
+                    <SelectTrigger id="lifecycle">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ANIMAL_LIFECYCLE_STATUSES.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {ANIMAL_LIFECYCLE_LABELS[status]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Almost always &quot;Active on Saba&quot;. Use another
+                    state only when recording an animal already known to be
+                    deceased or off-island.
+                  </p>
+                </div>
+              )}
+              <div>
+                <Label htmlFor="adoptionStatus">Adoption listing</Label>
                 <Select
-                  value={formData.status}
+                  value={formData.adoptionStatus}
                   onValueChange={(value: any) => {
-                    setFormData({ ...formData, status: value });
+                    setFormData({ ...formData, adoptionStatus: value });
                     setStatusError("");
                   }}
                 >
-                  <SelectTrigger id="status" aria-invalid={!!statusError} aria-describedby={statusError ? "status-error" : undefined}>
-                    <SelectValue placeholder="Choose a status" />
+                  <SelectTrigger id="adoptionStatus" aria-invalid={!!statusError} aria-describedby={statusError ? "status-error" : undefined}>
+                    <SelectValue placeholder="Choose a listing state" />
                   </SelectTrigger>
                   <SelectContent>
-                    {ANIMAL_STATUSES.map((status) => (
+                    {ANIMAL_ADOPTION_STATUSES.map((status) => (
                       <SelectItem key={status} value={status}>
-                        {ANIMAL_STATUS_LABELS[status]}
+                        {ANIMAL_ADOPTION_LABELS[status]}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -308,9 +407,52 @@ export default function AnimalsManager() {
                   </p>
                 ) : (
                   <p className="text-xs text-muted-foreground mt-1">
-                    {getAnimalStatusVisibilityHint(formData.status)}
+                    {getAdoptionVisibilityHint(
+                      editingAnimal?.animal.lifecycleStatus ?? formData.lifecycleStatus,
+                      formData.adoptionStatus,
+                    )}
                   </p>
                 )}
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <Label htmlFor="sterilizationStatus">Sterilization</Label>
+                  <Select
+                    value={formData.sterilizationStatus}
+                    onValueChange={(value: any) => setFormData({ ...formData, sterilizationStatus: value })}
+                  >
+                    <SelectTrigger id="sterilizationStatus">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ANIMAL_STERILIZATION_STATUSES.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {STERILIZATION_LABELS[s]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="sterilizedOn">Sterilized on</Label>
+                  <Input
+                    id="sterilizedOn"
+                    type="date"
+                    value={formData.sterilizedOn}
+                    disabled={formData.sterilizationStatus !== "sterilized"}
+                    onChange={(e) => setFormData({ ...formData, sterilizedOn: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="sterilizedBy">Sterilized by</Label>
+                  <Input
+                    id="sterilizedBy"
+                    value={formData.sterilizedBy}
+                    disabled={formData.sterilizationStatus !== "sterilized"}
+                    placeholder="Clinic or vet"
+                    onChange={(e) => setFormData({ ...formData, sterilizedBy: e.target.value })}
+                  />
+                </div>
               </div>
               <div>
                 <Label htmlFor="photos">Photo URL (optional)</Label>
@@ -336,71 +478,141 @@ export default function AnimalsManager() {
         </Dialog>
       </div>
 
+      <Card className="mb-6">
+        <CardContent className="pt-6">
+          <div className="flex flex-wrap gap-3">
+            <div className="relative flex-1 min-w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                className="pl-9"
+                placeholder="Search name, registry ref, microchip, owner, identifying notes…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                aria-label="Search animals"
+              />
+            </div>
+            <Select value={lifecycleFilter} onValueChange={(v) => setLifecycleFilter(v === "all" ? "" : v)}>
+              <SelectTrigger className="w-48" aria-label="Lifecycle filter">
+                <SelectValue placeholder="All lifecycle states" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All lifecycle states</SelectItem>
+                {ANIMAL_LIFECYCLE_STATUSES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {ANIMAL_LIFECYCLE_LABELS[s]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={adoptionFilter} onValueChange={(v) => setAdoptionFilter(v === "all" ? "" : v)}>
+              <SelectTrigger className="w-44" aria-label="Listing filter">
+                <SelectValue placeholder="All listing states" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All listing states</SelectItem>
+                {ANIMAL_ADOPTION_STATUSES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {ANIMAL_ADOPTION_LABELS[s]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
-          <CardTitle>Animals List</CardTitle>
-          <CardDescription>Manage all animals in the system</CardDescription>
+          <CardTitle>Animals</CardTitle>
+          <CardDescription>
+            Every animal known to SFPCA — search or filter to find one.
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Species</TableHead>
-                <TableHead>Sex</TableHead>
-                <TableHead>Age</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {animals.length === 0 ? (
+          {loading ? (
+            <div>Loading...</div>
+          ) : loadError ? (
+            <LoadError label="animals" onRetry={loadAnimals} />
+          ) : (
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-gray-500">
-                    No animals found. Add your first animal!
-                  </TableCell>
+                  <TableHead>Ref</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Species</TableHead>
+                  <TableHead>Sex</TableHead>
+                  <TableHead>Age</TableHead>
+                  <TableHead>Registry status</TableHead>
+                  <TableHead>Listing</TableHead>
+                  <TableHead>Owner</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
-              ) : (
-                animals.map((animal) => (
-                  <TableRow key={animal.id}>
-                    <TableCell className="font-medium">{animal.name}</TableCell>
-                    <TableCell className="capitalize">{animal.species}</TableCell>
-                    <TableCell className="capitalize">{animal.sex}</TableCell>
-                    <TableCell>{animal.approxAge}</TableCell>
-                    <TableCell>
-                      <AnimalStatusBadge status={animal.status} />
-                    </TableCell>
-                    <TableCell className="text-right space-x-2">
-                      <Button variant="ghost" size="sm" asChild>
-                        <Link
-                          href={`/admin/animals/${animal.registryId}`}
-                          aria-label={`Medical records for ${animal.name}`}
-                        >
-                          <Syringe className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        aria-label={`Edit ${animal.name}`}
-                        onClick={() => handleEdit(animal)}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        aria-label={`Delete ${animal.name}`}
-                        onClick={() => setDeleteTarget(animal)}
-                      >
-                        <Trash className="h-4 w-4 text-red-500" />
-                      </Button>
+              </TableHeader>
+              <TableBody>
+                {animals.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={9} className="text-center text-gray-500">
+                      No animals found.
                     </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+                ) : (
+                  animals.map((row) => {
+                    const animal = row.animal;
+                    return (
+                      <TableRow key={animal.id}>
+                        <TableCell className="font-mono text-xs">
+                          {animal.registryRef}
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          <Link
+                            href={`/admin/animals/${animal.id}`}
+                            className="hover:underline"
+                          >
+                            {animal.name}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="capitalize">{animal.species}</TableCell>
+                        <TableCell className="capitalize">{animal.sex}</TableCell>
+                        <TableCell>
+                          {formatAnimalAge(animal.birthDate, animal.birthDateEstimated) ?? "—"}
+                        </TableCell>
+                        <TableCell>
+                          <AnimalLifecycleBadge status={animal.lifecycleStatus} />
+                        </TableCell>
+                        <TableCell>
+                          <AnimalAdoptionBadge
+                            status={animal.adoptionStatus}
+                            lifecycleStatus={animal.lifecycleStatus}
+                          />
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {row.owners.join(", ") || "—"}
+                        </TableCell>
+                        <TableCell className="text-right space-x-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            aria-label={`Edit ${animal.name}`}
+                            onClick={() => handleEdit(row)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            aria-label={`Delete ${animal.name}`}
+                            onClick={() => setDeleteTarget(row)}
+                          >
+                            <Trash className="h-4 w-4 text-red-500" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
 
@@ -411,10 +623,11 @@ export default function AnimalsManager() {
           deleteTarget ? (
             <>
               Permanently delete the record for{" "}
-              <strong>{deleteTarget.name || "this unnamed animal"}</strong>?
-              This cannot be undone. If the animal was adopted or is
-              temporarily unavailable, set a different status instead — that
-              hides it from the public site while keeping the record.
+              <strong>{deleteTarget.animal.name || "this unnamed animal"}</strong>?
+              This cannot be undone and only works for records with no
+              registry history. For an animal that has died, left Saba, or
+              been adopted, update its registry status or listing on the
+              profile instead — the record stays in the registry.
             </>
           ) : null
         }

@@ -107,8 +107,11 @@ export function transformAnimal(
     exceptions.push(exc(c, docId, "missing-field", "sex", `type=${typeof d.sex}`));
   }
 
-  // Fail closed on the public boundary: unrecognized lifecycle imports
-  // as private "pending", never "available" — and is always flagged.
+  // Fail closed on the public boundary: unrecognized listing states
+  // import as private "pending", never "available" — and are always
+  // flagged. The Firestore `status` was the adoption-catalog state; #167
+  // made it adoption_status — imported animals enter the registry
+  // lifecycle as 'active' (they were all known on-island animals).
   let status = str(d.status);
   if (!status || !KNOWN_ANIMAL_STATUSES.has(status)) {
     exceptions.push(
@@ -116,6 +119,14 @@ export function transformAnimal(
     );
     status = "pending";
   }
+
+  // The free-text approxAge has no honest mapping to birth_date (#167's
+  // structured birth semantics) — preserve it as staff-only identifying
+  // context rather than fabricating a date.
+  const approxAge = str(d.approxAge);
+  const identifyingNotes = approxAge
+    ? `Approx. age at import: ${approxAge}`
+    : null;
 
   let photoUrls: string[] = [];
   if (d.photos !== undefined) {
@@ -145,9 +156,10 @@ export function transformAnimal(
       name: name ?? "(unnamed)",
       species,
       sex,
-      approxAge: str(d.approxAge) ?? null,
+      identifyingNotes,
       description: str(d.description) ?? null,
-      lifecycleStatus: status,
+      lifecycleStatus: "active",
+      adoptionStatus: status,
       photoUrls,
       ...(created ? { createdAt: created } : {}),
       ...(updated ? { updatedAt: updated } : {}),
@@ -266,9 +278,10 @@ export function animalProjection(r: AnimalInsert): Record<string, unknown> {
     name: r.name,
     species: r.species,
     sex: r.sex,
-    approxAge: canon(r.approxAge),
+    identifyingNotes: canon(r.identifyingNotes),
     description: canon(r.description),
     lifecycleStatus: r.lifecycleStatus,
+    adoptionStatus: r.adoptionStatus,
     photoUrls: canon(r.photoUrls),
     ...(r.createdAt ? { createdAt: canon(r.createdAt) } : {}),
     ...(r.updatedAt ? { updatedAt: canon(r.updatedAt) } : {}),

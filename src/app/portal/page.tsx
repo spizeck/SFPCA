@@ -1,6 +1,9 @@
 import { requireOwner } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { listPortalAnimals } from "@/lib/registry/ownership";
+import {
+  listPortalAnimals,
+  listPortalPastAnimals,
+} from "@/lib/registry/ownership";
 import { householdsForPerson } from "@/lib/registry/persons";
 import { listOwnerRequestsForPerson } from "@/lib/registry/owner-requests";
 import { PortalClient } from "./portal-client";
@@ -22,8 +25,9 @@ export default async function PortalPage() {
     return <PortalPending email={ctx.identity.email} />;
   }
 
-  const [animals, households, requests] = await Promise.all([
+  const [animals, pastAnimals, households, requests] = await Promise.all([
     listPortalAnimals(ctx.person.id),
+    listPortalPastAnimals(ctx.person.id),
     householdsForPerson(ctx.person.id),
     listOwnerRequestsForPerson(ctx.person.id),
   ]);
@@ -32,6 +36,7 @@ export default async function PortalPage() {
     <PortalClient
       person={ctx.person}
       animals={animals}
+      pastAnimals={pastAnimals}
       households={households}
       requests={requests}
     />

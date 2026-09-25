@@ -34,11 +34,10 @@ test.describe("admin vaccination records", () => {
       page.getByText("Animal added successfully", { exact: true }),
     ).toBeVisible();
 
-    // Open the medical record from the row action.
+    // Open the canonical animal profile from the registry row.
     await page
-      .getByRole("link", {
-        name: "Medical records for E2E Vaccination Dog",
-      })
+      .getByRole("row", { name: /E2E Vaccination Dog/ })
+      .getByRole("link", { name: "E2E Vaccination Dog" })
       .click();
     await expect(page).toHaveURL(/\/admin\/animals\/[0-9a-f-]{36}/);
     await expect(
@@ -91,9 +90,8 @@ test.describe("admin vaccination records", () => {
     ).toBeVisible();
 
     await page
-      .getByRole("link", {
-        name: "Medical records for E2E Validation Cat",
-      })
+      .getByRole("row", { name: /E2E Validation Cat/ })
+      .getByRole("link", { name: "E2E Validation Cat" })
       .click();
     await page
       .getByRole("button", { name: "Add vaccination" })

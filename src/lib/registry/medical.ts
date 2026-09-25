@@ -30,6 +30,7 @@ import {
   isNull,
   lte,
   or,
+  sql,
 } from "drizzle-orm";
 import {
   animals,
@@ -773,6 +774,49 @@ export async function listEncountersForAnimal(
 
 // --- Procedures -----------------------------------------------------------------
 
+// #167 sterilization authority: a recorded spay/neuter procedure is the
+// authoritative EVIDENCE for the animal's sterilization fact, so writing
+// one marks animals.sterilization_status='sterilized' and fills
+// still-empty date/provider fields in the same transaction. Non-empty
+// fields are never overwritten — an earlier assertion or earlier
+// evidence wins. The reverse is deliberately NOT automatic: editing or
+// removing a procedure never clears the fact (it may have a different
+// source — an owner-reported historical spay); staff correct
+// sterilization on the animal record directly.
+async function syncSterilizationFromProcedure(
+  tx: Tx,
+  animalId: string,
+  kind: string,
+  performedOn: string | null,
+  provider: string | null,
+  actorLabel: string,
+): Promise<void> {
+  if (kind !== "spay" && kind !== "neuter") return;
+  const [row] = await tx
+    .update(animals)
+    .set({
+      sterilizationStatus: "sterilized",
+      sterilizedOn: sql`coalesce(${animals.sterilizedOn}, ${performedOn})`,
+      sterilizedBy: sql`coalesce(${animals.sterilizedBy}, ${provider})`,
+      updatedAt: new Date(),
+    })
+    .where(eq(animals.id, animalId))
+    .returning();
+  if (row) {
+    await tx.insert(auditEvents).values({
+      actorLabel,
+      entityType: "animal",
+      entityId: animalId,
+      action: "sterilization-sync",
+      after: {
+        sterilizationStatus: row.sterilizationStatus,
+        sterilizedOn: row.sterilizedOn,
+        sterilizedBy: row.sterilizedBy,
+      },
+    });
+  }
+}
+
 export async function createProcedure(
   input: ProcedureWriteInput,
   actorLabel: string,
@@ -815,6 +859,14 @@ export async function createProcedure(
       action: "create",
       after: procedureDto(row),
     });
+    await syncSterilizationFromProcedure(
+      tx,
+      input.animalId,
+      input.kind,
+      row.performedOn,
+      row.provider,
+      actorLabel,
+    );
     return { ok: true, record: procedureDto(row) };
   });
 }
@@ -846,8 +898,8 @@ export async function updateProcedure(
             .for("update")
         )[0],
       check: encounterLinkCheck(tx, input.encounterId),
-      applyUpdate: async () =>
-        (
+      applyUpdate: async () => {
+        const updated = (
           await tx
             .update(vetProcedures)
             .set({
@@ -861,7 +913,19 @@ export async function updateProcedure(
             })
             .where(eq(vetProcedures.id, id))
             .returning()
-        )[0],
+        )[0];
+        if (updated) {
+          await syncSterilizationFromProcedure(
+            tx,
+            updated.animalId,
+            updated.kind,
+            updated.performedOn,
+            updated.provider,
+            actorLabel,
+          );
+        }
+        return updated;
+      },
     }),
   );
 }

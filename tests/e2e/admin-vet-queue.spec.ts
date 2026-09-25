@@ -28,8 +28,10 @@ async function createAnimal(page: Page, name: string) {
   await expect(
     page.getByText("Animal added successfully", { exact: true }),
   ).toBeVisible();
+  // The registry row's name links to the canonical animal profile.
   await page
-    .getByRole("link", { name: `Medical records for ${name}` })
+    .getByRole("row", { name: new RegExp(name) })
+    .getByRole("link", { name })
     .click();
   await expect(page).toHaveURL(/\/admin\/animals\/[0-9a-f-]{36}/);
 }

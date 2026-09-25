@@ -51,7 +51,7 @@ async function seedOwner(email: string | null, name = "Jane Owner") {
 async function seedAnimal(name: string) {
   const [animal] = await db
     .insert(schema.animals)
-    .values({ name, species: "dog", sex: "male", lifecycleStatus: "adopted" })
+    .values({ name, species: "dog", sex: "male", lifecycleStatus: "active" })
     .returning();
   return animal;
 }

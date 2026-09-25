@@ -1,26 +1,27 @@
-// Component tests for /admin/animals (#91, Postgres cutover in #183).
-// The server actions are mocked at the module boundary; these tests pin
-// down mutation hardening: pending guards, double-click prevention,
-// field-level validation preserving data, named destructive
-// confirmation, and a retryable load-error state distinct from "no
-// records". Postgres behavior itself is covered by tests/db.
+// Component tests for /admin/animals (#91, Postgres cutover in #183,
+// registry rewrite in #167). The server actions are mocked at the
+// module boundary; these tests pin down mutation hardening: pending
+// guards, double-click prevention, field-level validation preserving
+// data, named destructive confirmation, and a retryable load-error
+// state distinct from "no records". Postgres behavior itself is
+// covered by tests/db.
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const {
-  mockListAnimals,
+  mockSearchAnimals,
   mockSaveAnimal,
   mockDeleteAnimal,
   mockToast,
 } = vi.hoisted(() => ({
-  mockListAnimals: vi.fn(),
+  mockSearchAnimals: vi.fn(),
   mockSaveAnimal: vi.fn(),
   mockDeleteAnimal: vi.fn(),
   mockToast: vi.fn(),
 }));
 
 vi.mock("@/app/admin/animals/actions", () => ({
-  listAnimalsAction: mockListAnimals,
+  searchAnimalsAction: mockSearchAnimals,
   saveAnimalAction: mockSaveAnimal,
   deleteAnimalAction: mockDeleteAnimal,
 }));
@@ -31,39 +32,54 @@ vi.mock("@/hooks/use-toast", () => ({
 
 import AnimalsManager from "@/app/admin/animals/page";
 
+// One registry-list row: the admin animal DTO plus the search context
+// (current owners, active chips) the list renders.
 function animalRow(
-  registryId: string,
-  data: Record<string, unknown>,
+  id: string,
+  data: Record<string, unknown> = {},
+  owners: string[] = [],
 ) {
   return {
-    id: registryId,
-    registryId,
-    name: "",
-    species: "dog",
-    sex: "unknown",
-    approxAge: "",
-    description: "",
-    status: "available",
-    photos: [],
-    createdAt: "2026-01-01T00:00:00.000Z",
-    updatedAt: "2026-01-01T00:00:00.000Z",
-    ...data,
+    animal: {
+      id,
+      legacyId: null,
+      registryRef: "SFPCA-000001",
+      name: "",
+      species: "dog",
+      sex: "unknown",
+      birthDate: null,
+      birthDateEstimated: false,
+      description: "",
+      identifyingNotes: null,
+      lifecycleStatus: "active",
+      lifecycleEffectiveOn: "2026-01-01",
+      adoptionStatus: "available",
+      sterilizationStatus: "unknown",
+      sterilizedOn: null,
+      sterilizedBy: null,
+      photoUrls: [],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      ...data,
+    },
+    owners,
+    microchips: [],
   };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockListAnimals.mockResolvedValue([]);
+  mockSearchAnimals.mockResolvedValue([]);
   mockSaveAnimal.mockResolvedValue({ ok: true });
   mockDeleteAnimal.mockResolvedValue({ ok: true });
 });
 
 describe("admin animals", () => {
   test("shows a retryable error state when the list fails to load", async () => {
-    mockListAnimals
+    mockSearchAnimals
       .mockRejectedValueOnce(new Error("permission-denied"))
       .mockResolvedValueOnce([
-        animalRow("a1", { name: "Buddy", species: "dog", sex: "male", approxAge: "2y" }),
+        animalRow("a1", { name: "Buddy", species: "dog", sex: "male" }),
       ]);
 
     render(<AnimalsManager />);
@@ -91,6 +107,25 @@ describe("admin animals", () => {
     );
   });
 
+  test("search box and lifecycle filter drive the search action", async () => {
+    render(<AnimalsManager />);
+    await waitFor(() => expect(mockSearchAnimals).toHaveBeenCalled());
+    expect(mockSearchAnimals).toHaveBeenLastCalledWith("", {
+      lifecycleStatus: undefined,
+      adoptionStatus: undefined,
+    });
+
+    fireEvent.change(screen.getByLabelText("Search animals"), {
+      target: { value: "SFPCA-000" },
+    });
+    await waitFor(() =>
+      expect(mockSearchAnimals).toHaveBeenLastCalledWith(
+        "SFPCA-000",
+        expect.anything(),
+      ),
+    );
+  });
+
   test("double-clicking Add Animal submits only once", async () => {
     let resolveSave: () => void = () => {};
     mockSaveAnimal.mockImplementation(
@@ -112,7 +147,7 @@ describe("admin animals", () => {
     expect(mockSaveAnimal).toHaveBeenCalledTimes(1);
 
     resolveSave();
-    await waitFor(() => expect(mockListAnimals).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockSearchAnimals).toHaveBeenCalledTimes(2));
   }, 15000);
 
   test("keeps dialog data and shows a safe error when save fails", async () => {
@@ -144,7 +179,7 @@ describe("admin animals", () => {
   });
 
   test("a concurrency conflict tells staff to reopen the record", async () => {
-    mockListAnimals.mockResolvedValue([
+    mockSearchAnimals.mockResolvedValue([
       animalRow("a1", { name: "Buddy", species: "dog", sex: "male" }),
     ]);
     mockSaveAnimal.mockResolvedValue({ ok: false, reason: "conflict" });
@@ -166,14 +201,13 @@ describe("admin animals", () => {
     );
   });
 
-  test("shows a field-level error instead of writing an invalid status", async () => {
-    mockListAnimals.mockResolvedValue([
+  test("shows a field-level error instead of writing an invalid listing state", async () => {
+    mockSearchAnimals.mockResolvedValue([
       animalRow("a1", {
         name: "Buddy",
         species: "dog",
         sex: "male",
-        approxAge: "2y",
-        status: "bogus-legacy",
+        adoptionStatus: "bogus-legacy",
       }),
     ]);
     render(<AnimalsManager />);
@@ -186,7 +220,7 @@ describe("admin animals", () => {
 
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent(
-        /Select a valid animal status/,
+        /Select a valid listing state/,
       ),
     );
     expect(mockSaveAnimal).not.toHaveBeenCalled();
@@ -195,13 +229,8 @@ describe("admin animals", () => {
   });
 
   test("delete requires confirmation naming the animal; cancel keeps it", async () => {
-    mockListAnimals.mockResolvedValue([
-      animalRow("a1", {
-        name: "Buddy",
-        species: "dog",
-        sex: "male",
-        approxAge: "2y",
-      }),
+    mockSearchAnimals.mockResolvedValue([
+      animalRow("a1", { name: "Buddy", species: "dog", sex: "male" }),
     ]);
     render(<AnimalsManager />);
     await waitFor(() => screen.getByText("Buddy"));
@@ -219,13 +248,8 @@ describe("admin animals", () => {
   });
 
   test("confirming delete removes the animal", async () => {
-    mockListAnimals.mockResolvedValue([
-      animalRow("a1", {
-        name: "Buddy",
-        species: "dog",
-        sex: "male",
-        approxAge: "2y",
-      }),
+    mockSearchAnimals.mockResolvedValue([
+      animalRow("a1", { name: "Buddy", species: "dog", sex: "male" }),
     ]);
     render(<AnimalsManager />);
     await waitFor(() => screen.getByText("Buddy"));

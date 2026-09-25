@@ -80,7 +80,7 @@ async function seedAnimal(name?: string) {
       name: name ?? `Animal-${++animalSeq}`,
       species: "dog",
       sex: "male",
-      lifecycleStatus: "adopted",
+      lifecycleStatus: "active",
     })
     .returning();
   return animal;

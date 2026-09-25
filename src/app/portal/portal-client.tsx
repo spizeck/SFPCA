@@ -34,7 +34,11 @@ import {
   OWNER_REQUEST_KIND_LABELS,
   OWNER_SUBMITTABLE_KINDS,
 } from "@/lib/registry/owner-request-kinds";
-import type { PortalAnimal } from "@/lib/registry/ownership";
+import type {
+  PortalAnimal,
+  PortalPastAnimal,
+} from "@/lib/registry/ownership";
+import { getAnimalLifecycleLabel } from "@/lib/animal-lifecycle";
 import type { HouseholdRecord, PersonRecord } from "@/lib/registry/persons";
 import type { OwnerRequestRecord, OwnerRequestKind } from "@/lib/registry/owner-requests";
 import { CheckCircle2, PawPrint, CircleAlert } from "lucide-react";
@@ -238,11 +242,13 @@ function AnimalCard({ animal }: { animal: PortalAnimal }) {
 export function PortalClient({
   person,
   animals,
+  pastAnimals,
   households,
   requests,
 }: {
   person: PersonRecord;
   animals: PortalAnimal[];
+  pastAnimals: PortalPastAnimal[];
   households: HouseholdRecord[];
   requests: OwnerRequestRecord[];
 }) {
@@ -315,6 +321,51 @@ export function PortalClient({
           ))
         )}
       </section>
+
+      {pastAnimals.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-lg font-medium">Previously with you</h2>
+          <Card>
+            <CardContent className="pt-6">
+              <ul className="divide-y">
+                {pastAnimals.map((a) => (
+                  <li
+                    key={a.animalId}
+                    className="py-3 flex items-center gap-3 text-sm"
+                  >
+                    {a.photoUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={a.photoUrl}
+                        alt={a.name}
+                        className="h-10 w-10 rounded-md object-cover flex-shrink-0"
+                      />
+                    ) : (
+                      <div className="h-10 w-10 rounded-md bg-muted flex items-center justify-center flex-shrink-0">
+                        <PawPrint className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                    )}
+                    <div>
+                      <p className="font-medium">
+                        {a.name}
+                        {a.basis === "household" && a.householdName
+                          ? ` (${a.householdName})`
+                          : ""}
+                      </p>
+                      <p className="text-muted-foreground capitalize">
+                        {a.species} · {a.sex}
+                        {a.approxAge ? ` · ${a.approxAge}` : ""} ·{" "}
+                        {getAnimalLifecycleLabel(a.lifecycleStatus)} · with you{" "}
+                        {a.validFrom} → {a.validTo}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        </section>
+      )}
 
       {requests.length > 0 && (
         <section className="space-y-3">

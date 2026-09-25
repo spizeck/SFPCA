@@ -100,11 +100,15 @@ admin status on every request.
 - `homepage/main`, `siteSettings/global`, `faq`, `vetServices`,
   `animalAdoptions`, `animalRegistration` — public read, admin write
   (page-content docs; copy only — fees/workflows live in code)
-- `animals` — public reads only `status == "available"`; admin read/write.
-  Admin writes must carry a supported `status` value (see lifecycle below).
-  The public detail route `/animal-adoptions/[id]` renders per-request and
-  404s any non-`available` animal — never reveal that a private animal
-  exists
+- `animals` — **Postgres** is authoritative (#183); the Firestore
+  collection is retired/deny-all. Public reads see only
+  `adoption_status == "available"` AND `lifecycle_status == "active"`
+  via redacted DTOs (`src/lib/registry/public-animals.ts`); admin
+  read/write goes through `src/lib/registry/animals.ts` server actions.
+  Admin writes must carry a supported `adoption_status` (see lifecycle
+  below). The public detail route `/animal-adoptions/[id]` renders
+  per-request and 404s any non-public animal — never reveal that a
+  private animal exists
 - `animalRegistrations` — private submissions. Public **create**
   (unauthenticated, shape-validated, forced `status="pending"`); admin
   read/update/delete. See the submission section below
@@ -127,28 +131,51 @@ admin status on every request.
   object at `receipts/<id>` (the orphan-cleanup path — see below).
   Default deny elsewhere
 
-## Animal lifecycle (canonical)
+## Animal lifecycle (canonical, #167)
 
 `src/lib/animal-lifecycle.ts` is the single authoritative definition of
-animal states; `firestore.rules` mirrors its public-visibility decision.
-Do not compare `status` against string literals elsewhere — use the
-module's predicates (`isAnimalStatus`, `isPublicAnimalStatus`).
+BOTH vocabularies — they are deliberately separate. Do not compare
+statuses against string literals elsewhere — use the module's
+predicates (`isAnimalLifecycleStatus`, `isAnimalAdoptionStatus`,
+`isPubliclyListed`).
+
+**Registry lifecycle** (`animals.lifecycle_status`) — the animal's real
+state; never public; changed only through `transitionAnimalLifecycle`
+in `src/lib/registry/animals.ts`, which writes the
+`animal_lifecycle_events` history row and the audit row in the same
+transaction:
+
+| Status | Meaning |
+|--------|---------|
+| `active` | Living on Saba / in registry care (the default) |
+| `deceased` | Confirmed dead — terminal in fact, still correctable |
+| `moved-off-saba` | Confirmed to have left Saba |
+| `unknown` | Record exists but living/on-island status unconfirmed |
+
+Every state can transition to every other (`canTransitionAnimalLifecycle`)
+— corrections are new history rows, not rewrites. `deceased` and
+`moved-off-saba` are ownership-ending: the transition closes ALL open
+ownership intervals (co-owners included) and cancels open follow-ups /
+clinic expectations in the same transaction.
+
+**Adoption listing** (`animals.adoption_status`) — the public catalog
+switch, freely staff-editable:
 
 | Status | Meaning | Public? |
 |--------|---------|---------|
-| `available` | Ready for adoption; homepage preview + listed on `/animal-adoptions` | yes — the only public state |
-| `pending` | Not currently adoptable (adoption in progress or temporary hold) | no |
-| `adopted` | Permanently homed; retained for historical record | no |
-| unknown/missing | Malformed or unrecognized value | never — fails closed |
+| `not-listed` | Not in the adoption program (the default) | no |
+| `available` | Listed: homepage preview + `/animal-adoptions` | yes* |
+| `pending` | Adoption in progress or temporarily held | no |
+| `adopted` | Permanently homed; kept for historical record | no |
 
-- Record existence is separate from visibility: non-public animals stay
-  in Firestore. Hard delete exists only for erroneous/test records.
-- Every supported status can transition to every other — no state is
-  terminal, so staff can correct mistakes (`canTransitionAnimalStatus`).
+*Public visibility requires BOTH `adoption_status='available'` AND
+`lifecycle_status='active'`.
+
+- Record existence is separate from visibility: a non-public animal
+  stays in the registry. Hard delete exists only for erroneous/test
+  records and is blocked by restrictive FKs on any domain history.
 - **Invariant: unknown or unsupported animal states are never publicly
-  visible.** Firestore rules require `status == "available"` for
-  unauthenticated reads, and admin writes with an unrecognized `status`
-  are rejected.
+  visible** — `isPubliclyListed` fails closed on malformed values.
 
 ## Registration submissions (canonical)
 

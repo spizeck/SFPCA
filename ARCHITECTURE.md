@@ -40,7 +40,7 @@ registry data in Firestore is now a mistake, not a shortcut.
 | `animalAdoptions/main` | CMS (Firestore) | public read | `/animal-adoptions` | admin client SDK |
 | `animalRegistration/main` | CMS (Firestore) | public read | `/animal-registration` copy | admin client SDK |
 | `faq/*` | CMS (Firestore) | public read | `/faq`, homepage FAQ section | admin client SDK |
-| `animals` (Postgres) | **operational** | public iff `lifecycle_status='available'` | `src/lib/registry/public-animals.ts` (public DTO); `registry/animals.ts` (admin) | `admin/animals/actions.ts` server actions |
+| `animals` (Postgres) | **operational** | public iff `adoption_status='available'` AND `lifecycle_status='active'` | `src/lib/registry/public-animals.ts` (public DTO); `registry/animals.ts` (admin) | `admin/animals/actions.ts` server actions |
 | `registration_submissions` (Postgres) | **operational, PII** | admin-only; never public | `registry/registrations.ts` | `animal-registration/actions.ts` (public intake); `admin/registrations/actions.ts` (review) |
 | `admin_users` (Postgres) | **authz config** | server-only | `registry/admin-users.ts` → `isAdmin()` | `provisionAdminUser` (session route, insert-only) / SQL |
 | `vaccinations` (Postgres) | **operational, medical** | admin-only; never public | `registry/vaccinations.ts` | `admin/animals/[id]/actions.ts` server actions |
@@ -152,7 +152,8 @@ plain SQL.
 | `auth_identities` | Firebase UID → Person map | `unique(provider, provider_uid)` |
 | `admin_users` | Staff allowlist | `unique(lower(email))`, role `admin\|editor` CHECK |
 | `households` + `household_members` | Grouped people/animals | composite PK, role CHECK |
-| `animals` | Permanent animal identity | `unique(legacy_id)`; species/sex/lifecycle CHECKs; **no** registration/payment columns |
+| `animals` | Permanent animal identity (#167) | `unique(legacy_id)`; sequential `registry_ref` (`SFPCA-######`); species/sex/lifecycle/adoption/sterilization CHECKs; `birth_date` + `birth_date_estimated` (estimate requires a date); **no** registration/payment columns — the record exists independently of owner, registration, payment, vet visit, vaccination, or portal account |
+| `animal_lifecycle_events` | Append-only lifecycle history (#167) | `from_status`/`to_status` CHECKs (`null` from = registry entry); `source` CHECK `staff\|owner-request\|import`; `effective_on` is the real-world date (may precede `created_at`); restrictive animal FK |
 | `ownerships` | Historical animal↔person/household | exactly one of person/household (`num_nonnulls=1`); `valid_to > valid_from` |
 | `ownership_confirmations` | Append-only annual-confirmation events (#166) | one row per deliberate "still mine, still on Saba" attestation; restrictive FKs — evidence survives owner churn; `person_id` is the attesting member, `confirmed_by_identity_id` the account used (null for staff-recorded) |
 | `owner_requests` | Owner-originated requests + staff resolution (#166) | status CHECK `pending\|approved\|rejected\|cancelled`; `resolved_at`/`resolved_by` set exactly when leaving `pending`; kind CHECK `account-claim\|no-longer-mine\|transfer\|lifecycle-*`; `payload` holds free-text hints (never link keys) |
@@ -177,6 +178,39 @@ plain SQL.
 integrity, closed status vocabularies, ownership ranges, money shape.
 Domain services — lifecycle transitions, dedupe, reminder scheduling.
 UI validation — form shape only, never trusted.
+
+**Permanent animal registry (#167):** `animals.id` (uuid) is the durable
+identity — it never changes when ownership, name, microchip, or
+lifecycle changes; `registry_ref` (`SFPCA-######`, sequence-generated)
+is the human-readable reference for staff use, not a key. Two
+deliberately separate vocabularies live on the row: `lifecycle_status`
+(`active`/`deceased`/`moved-off-saba`/`unknown`) is the registry
+reality, changed ONLY through `transitionAnimalLifecycle`, which lands
+the current-state update, the `animal_lifecycle_events` history row,
+ownership/follow-up side effects, and the audit row in one transaction
+— every state can reach every other (corrections are history, not
+rewrites), and ownership-ending states close ALL open intervals because
+a deceased/off-island animal has no on-island owner of record.
+`adoption_status` (`not-listed`/`available`/`pending`/`adopted`) is the
+public-catalog switch, freely editable. Birth data avoids false
+precision: `birth_date` is nullable and `birth_date_estimated` marks
+approximations (rendered with `~`); the old free-text `approx_age`
+column is gone — displays derive age at read time. Sterilization is an
+animal-level fact (`sterilization_status`/`sterilized_on`/
+`sterilized_by`) staff can assert for historical animals, while
+`vet_procedures` spay/neuter rows remain the clinical evidence — writing
+one marks the animal sterilized and fills still-empty fields in the same
+transaction, but never overwrites an asserted fact. Photos stay as
+validated URL strings (`photo_urls`); there is no `animals/` Storage
+prefix. `/admin/animals` is the staff search surface (name, ref, uuid,
+legacy id, identifying notes, owner/household, microchip + lifecycle /
+listing filters) and `/admin/animals/[id]` is the canonical profile:
+identity, lifecycle + history, sterilization + evidence, ownership,
+registrations, payments, microchips, documents, audit. Registration
+independence is a hard invariant — nothing infers existence or
+lifecycle from current registration. Boundaries: #168 owns the
+microchip workflow, #169 annual registration, #176 lost/found, #178
+duplicate merge.
 
 **Veterinary continuity model (#174):** the admin animal page is a
 single chronological timeline (`listMedicalTimeline`) combining
@@ -285,11 +319,15 @@ login account is not the ownership record** — `persons`,
   owner asks the registry to change. The portal writes `pending` rows;
   `/admin/requests` resolves them, applying the real change (link
   identity, close/transfer ownership) transactionally with the status
-  flip. `lifecycle-deceased`/`lifecycle-moved-off-saba` approval closes
-  the reporter's ownership interval but does **not** mutate
-  `animals.lifecycle_status` — that transition is #167's authoritative
-  job, and the resolution audit row is its seam. `listOwnerRequests` is
-  the canonical exception query #177's dashboard should compose.
+  flip. `lifecycle-deceased`/`lifecycle-moved-off-saba` approval runs
+  `transitionAnimalLifecycle` (#167's authoritative write path) before
+  the status flip: the animal's lifecycle changes, every open ownership
+  interval — the reporter's AND co-owners' — closes at the effective
+  date, open follow-ups/clinic expectations cancel, and the
+  `animal_lifecycle_events` row carries `source='owner-request'` +
+  `source_ref=<request id>`. If the transition fails the request stays
+  pending. `listOwnerRequests` is the canonical exception query #177's
+  dashboard should compose.
 
 **Owner communications & reminders (#172):** automated follow-up is one
 pipeline with five separate stages — eligibility, intent, delivery,
@@ -379,8 +417,9 @@ Deliberate properties:
 - **No dual-write, no sync, no flag.** Postgres is the only operational
   authority; a Postgres failure fails closed (public: empty/404; admin:
   error; authz: deny) — it never silently falls back to Firestore.
-- **Fail-closed visibility.** Only `lifecycle_status='available'` is
-  public — enforced in the query AND re-checked in the service.
+- **Fail-closed visibility.** Only `adoption_status='available'` AND
+  `lifecycle_status='active'` is public (`isPubliclyListed`) — enforced
+  in the query AND re-checked in the service.
 - **Retired collections are deny-all** in `firestore.rules` for every
   principal including claimed admins — they can never serve as an
   alternate write path. Pre-launch documents are inert; deletion is an

@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Animal } from "@/lib/types";
-import { getAnimalStatusLabel } from "@/lib/animal-lifecycle";
+import { getAnimalAdoptionLabel } from "@/lib/animal-lifecycle";
 
 // Presentational detail view for one publicly available animal. Every
 // field is optional-rendered: a record missing optional data still
@@ -50,7 +50,7 @@ export function AnimalDetail({ animal }: { animal: Animal }) {
                   <Badge variant="secondary">{animal.species}</Badge>
                 </div>
                 <p className="text-muted-foreground">
-                  {getAnimalStatusLabel(animal.status)} for adoption
+                  {getAnimalAdoptionLabel(animal.status)} for adoption
                 </p>
               </div>
 
