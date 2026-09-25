@@ -64,6 +64,10 @@ import {
   type FoundReportRecord,
   type MicrochipRecord,
 } from "./microchips";
+import {
+  listRegistrationsForAnimal,
+  type RegistrationRecord,
+} from "./registrations";
 import type { RegistryDb } from "./public-animals";
 
 // Admin DTO — all animals columns are staff-safe (no owner data lives on
@@ -747,12 +751,10 @@ export interface AnimalRegistryContext {
   chipConflicts: ChipConflictRecord[];
   // Found-animal scan/resolution history for this animal (#168).
   foundReports: FoundReportRecord[];
-  registrations: {
-    id: string;
-    year: number;
-    status: string;
-    createdAt: string;
-  }[];
+  // Full registration history (#169) — every period's authoritative
+  // record with owner snapshot, assessed amount, derived payment state,
+  // and resolution/cancellation lineage.
+  registrations: RegistrationRecord[];
   payments: {
     id: string;
     amountCents: number;
@@ -796,16 +798,7 @@ export async function getAnimalRegistryContext(
     listMicrochipsForAnimal(animalId, db),
     listChipConflicts({ animalId }, db),
     listFoundReportsForAnimal(animalId, db),
-    db
-        .select({
-          id: registrations.id,
-          year: registrations.year,
-          status: registrations.status,
-          createdAt: registrations.createdAt,
-        })
-        .from(registrations)
-        .where(eq(registrations.animalId, animalId))
-        .orderBy(desc(registrations.year)),
+    listRegistrationsForAnimal(animalId, db),
       // Payments reach the animal only through a registration — there is
       // deliberately no payments.animal_id.
       db
@@ -856,10 +849,7 @@ export async function getAnimalRegistryContext(
     microchips: chipRows,
     chipConflicts: chipConflictRows,
     foundReports: foundReportRows,
-    registrations: registrationRows.map((r) => ({
-      ...r,
-      createdAt: r.createdAt.toISOString(),
-    })),
+    registrations: registrationRows,
     payments: paymentRows.map((r) => ({
       ...r,
       occurredAt: r.occurredAt.toISOString(),

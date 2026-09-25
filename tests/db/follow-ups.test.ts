@@ -467,7 +467,7 @@ describe("veterinary work queue", () => {
     await db.insert(schema.registrations).values({
       animalId: animal.id,
       year: 2026,
-      status: "pending",
+      status: "active",
     });
     const [reg] = await db
       .select()

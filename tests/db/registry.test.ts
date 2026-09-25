@@ -131,7 +131,7 @@ describe("schema constraints", () => {
       .insert(schema.animals)
       .values({ name: "Annual", species: "dog", sex: "male", lifecycleStatus: "active" })
       .returning();
-    const reg = { animalId: animal.id, year: 2026, status: "approved" };
+    const reg = { animalId: animal.id, year: 2026, status: "active" };
     await db.insert(schema.registrations).values(reg);
     await expect(
       db.insert(schema.registrations).values(reg),

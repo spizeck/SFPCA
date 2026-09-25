@@ -92,6 +92,13 @@
       "when": 1790297902867,
       "tag": "0012_equal_the_liberteens",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1790339363739,
+      "tag": "0013_annual_registrations",
+      "breakpoints": true
     }
   ]
 }

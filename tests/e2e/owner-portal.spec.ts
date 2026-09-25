@@ -66,11 +66,14 @@ test.describe("owner portal", () => {
     await signIn(page, E2E_OWNER_EMAIL, E2E_OWNER_PASSWORD);
     await expect(page).toHaveURL("/portal");
 
-    // Rexley is overdue; Whiskers is not — only one confirm button
-    // should be enabled.
-    const confirm = page.getByRole("button", {
-      name: "Confirm still living on Saba with me",
-    });
+    // Rexley is overdue; Whiskers is not. Reggie (the #169 fixture) is
+    // also overdue, so scope the button to Rexley's card.
+    const confirm = page
+      .locator("[class*=bg-card]")
+      .filter({ has: page.getByRole("heading", { name: "Rexley" }) })
+      .getByRole("button", {
+        name: "Confirm still living on Saba with me",
+      });
     await expect(confirm).toBeVisible();
     await confirm.click();
 

@@ -158,7 +158,7 @@ plain SQL.
 | `ownership_confirmations` | Append-only annual-confirmation events (#166) | one row per deliberate "still mine, still on Saba" attestation; restrictive FKs — evidence survives owner churn; `person_id` is the attesting member, `confirmed_by_identity_id` the account used (null for staff-recorded) |
 | `owner_requests` | Owner-originated requests + staff resolution (#166) | status CHECK `pending\|approved\|rejected\|cancelled`; `resolved_at`/`resolved_by` set exactly when leaving `pending`; kind CHECK `account-claim\|no-longer-mine\|transfer\|lifecycle-*`; `payload` holds free-text hints (never link keys) |
 | `registration_submissions` | Intake events (today's `animalRegistrations`) | `unique(legacy_id)`; owner contact snapshot; receipt **path** only |
-| `registrations` | Per-animal per-year record | `unique(animal_id, year)` |
+| `registrations` | Authoritative per-animal-per-year record (#169) | `unique(animal_id, year)` (cancelled rows keep the slot); status CHECK `active\|cancelled` — payment is derived, never a status; owner snapshot (`ownership_id`/`person_id`/`household_id` + `owner_label`); `submitted_at`/`registered_at` distinct; `amount_due_cents` non-negative integer + currency; `resolution` CHECK `waived\|complimentary`; cancellation reason/note consistency CHECK; restrictive animal + submission FKs |
 | `payments` | Provider-neutral ledger | integer cents + currency; kind/status CHECKs; no cascade deletes |
 | `microchip_records` | Chip assignments w/ history (#168) | `chip_number` stored normalized; `chip_display` keeps as-entered formatting; optional implantation metadata (manufacturer/implanted_on/implanted_by/notes); partial `unique(chip_number)` AND `unique(animal_id)` `WHERE assigned_to IS NULL` — one active assignment per chip AND one current chip per animal; `closed_reason` CHECK `replaced\|removed\|corrected` + closure-consistency CHECK; `replaced_by_id` links a replaced row to its successor; restrictive animal FK |
 | `microchip_conflicts` | Rejected duplicate chip claims (#168) | evidence rows, one open per (chip, claimant) via partial unique; `source` CHECK `staff\|import`; resolution is human — never auto-moves a chip |
@@ -284,6 +284,61 @@ autofocused, Enter-submit field that stays focused between scans.
   future public "I found an animal" flow would need a separate
   public-safe lookup result — owner contact must never flow through
   it.
+
+**Annual registrations (#169):** `registrations` is the authoritative
+per-animal-per-year record — the durable history of "this animal was
+registered for this period". It is deliberately distinct from
+`registration_submissions`, which remains the intake record: a public
+form submission is the applicant's claim, never proof of identity,
+ownership, payment, or registration. Staff review submissions and then
+explicitly create the authoritative row (the intake card's link action
+or the queue's Register button); approval of a submission does not
+silently register an animal.
+
+- **Period.** Calendar-year: `year` is the period, centralized in
+  `src/lib/registrations.ts` (`currentRegistrationYear(asOf)` accepts
+  an explicit date so tests never roll over with the calendar;
+  `registrationPeriodLabel` is the display form). No year is
+  hard-coded outside that module.
+- **Record.** `unique(animal_id, year)` — one authoritative row per
+  animal per period, cancelled rows included (a cancelled row keeps
+  its slot; staff correct rather than re-add). `submitted_at` and
+  `registered_at` are distinct timestamps. The owner is frozen as a
+  registration-time snapshot — `ownership_id`/`person_id`/
+  `household_id` FKs plus `owner_label`, so history survives later
+  ownership transfers and renames.
+- **Status vs payment.** `status` is `active`/`cancelled` only —
+  payment is NEVER a status. `paymentState` is derived at read time
+  by `derivePaymentState(amount_due, confirmed_paid, resolution)` over
+  the `payments` ledger, so stored state can never disagree with
+  recorded money. `amount_due_cents` is an assessment snapshot taken
+  at creation (sterilized → fixed fee, else the intact fee —
+  `REGISTRATION_FEE_*` in `animal-registration.ts` — or an explicit
+  staff override); later fee changes never rewrite history.
+- **Non-payment resolution.** `waived`/`complimentary` are explicit
+  audited `resolution` values — never a fake $0 payment. Corrections
+  are `correct-amount` audits carrying before/after; a wrong row is
+  cancelled with a mandatory note (`cancellation_reason` ∈
+  `correction`/`withdrawn`), not edited away.
+- **Eligibility.** `listUnregisteredAnimals` is THE canonical
+  current-period source shared by the staff queue, the portal, and
+  the #172 evaluator: lifecycle `active`/`unknown` animals with no
+  `active` registration for the period. `deceased`/`moved-off-saba`
+  never appear as gaps; lifecycle is never inferred from registration.
+- **Queues.** `getRegistrationQueues` powers `/admin/registrations`:
+  unregistered-for-period, pending intake submissions, outstanding
+  balance, and completed — all set-based reads, every row linking to
+  the canonical animal profile (RegistrationPanel: register, record
+  payment, waive/complimentary, correct amount, notes, cancel).
+- **Payment boundary.** `src/lib/registry/payments.ts` is the seam:
+  `confirmedPaidByRegistration` nets CONFIRMED `payments` rows
+  (refunds subtract, void/pending/failed never count).
+  `recordRegistrationPayment` is the only #169 write — money that
+  actually arrived (provider `manual:*`). Refunds, adjustments,
+  reconciliation, and provider flows (Sentoo, #171) are #170 scope.
+- **Owner portal.** `listPortalAnimals` projects current-period state
+  (`paymentState`, amount due) plus the list of registered years —
+  owner-scoped only, no staff notes or provider internals.
 
 **Veterinary continuity model (#174):** the admin animal page is a
 single chronological timeline (`listMedicalTimeline`) combining
@@ -431,11 +486,14 @@ exposes the exception-first staff surface plus a preview button.
 confirmation state exists; household-owned animals resolve to a
 contactable member, and the kind is non-optional so opt-out
 preferences cannot silence an obligation notice — the
-`communication_preferences` CHECK refuses the kind outright). The #172
-registration-due and unpaid-balance kinds remain deliberately absent
-from `REMINDER_KINDS`: `registrations`/`payments` have no writers, so
-their eligibility would be fabricated. They plug in as new evaluators
-once #169/#170 land.
+`communication_preferences` CHECK refuses the kind outright). #169
+activated `registration-due-reminder`: its eligibility is the canonical
+`listUnregisteredAnimals` restricted to lifecycle 'active' (the staff
+queue still lists 'unknown', but an unconfirmed animal is never
+emailed), cycle-keyed on the period year, asking owners to register —
+it never mentions money because balance truth is #170's. The
+unpaid-balance kind remains deliberately absent from `REMINDER_KINDS`
+and activates once #170 provides authoritative balance state.
 
 ## 6. ID strategy
 

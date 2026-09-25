@@ -249,6 +249,30 @@ bound receipt path — it never reuses a stale receipt reference.
 indefinitely; rules permit admin delete but no UI exposes it — deletion
 is for erroneous/spam records only.
 
+## Authoritative registrations (canonical, #169)
+
+`registration_submissions` is **intake** — the applicant's claim. The
+authoritative record is `registrations` (one row per animal per year,
+`unique(animal_id, year)`, status `active`/`cancelled` only). Staff
+explicitly create it after reviewing a submission; approval of a
+submission never silently registers an animal, and submission approval
+is not proof of payment.
+
+`src/lib/registrations.ts` is the shared vocabulary: period helpers
+(`currentRegistrationYear(asOf)` — calendar-year periods, never
+hard-code a year), `derivePaymentState`, status/resolution/payment-state
+unions. `src/lib/registry/registrations.ts` is the server-only domain
+service (create/cancel/resolve/correct/notes, `listUnregisteredAnimals`
+— THE current-period eligibility source shared by the staff queue,
+portal, and #172's `registration-due-reminder` — and
+`getRegistrationQueues`). `src/lib/registry/payments.ts` is the
+ledger seam: payment state is derived from `confirmed` `payments` rows
+plus the row's `resolution` — never a stored flag. Waivers/
+complimentary are `resolution` values, not $0 payments; corrections
+carry before/after in `audit_events`. Animal lifecycle, registration
+status, and payment state are separate concepts — no code path may
+infer one from another.
+
 ## Code conventions
 
 - App Router only; Server Components by default, `"use client"` only

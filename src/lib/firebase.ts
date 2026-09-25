@@ -25,11 +25,22 @@ storage = getStorage(app);
 
 // Emulator connection is opt-in and only used by local/E2E test runs —
 // it is never enabled in production (the flag is never set there).
+// Ports default to firebase.json's but can be overridden so the harness
+// can dodge local port conflicts (other software bound to 8080/9099).
 if (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === "true") {
-  connectAuthEmulator(auth, "http://localhost:9099", {
-    disableWarnings: true,
-  });
-  connectFirestoreEmulator(db, "localhost", 8080);
+  connectAuthEmulator(
+    auth,
+    process.env.NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_URL ??
+      "http://localhost:9099",
+    {
+      disableWarnings: true,
+    },
+  );
+  connectFirestoreEmulator(
+    db,
+    "localhost",
+    Number(process.env.NEXT_PUBLIC_FIRESTORE_EMULATOR_PORT ?? 8080),
+  );
 }
 
 export { app, auth, db, storage };

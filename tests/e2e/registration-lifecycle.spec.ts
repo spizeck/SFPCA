@@ -4,7 +4,12 @@
 // against the Firebase emulators — never production. All data is
 // synthetic.
 import { expect, test } from "@playwright/test";
-import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./global-setup";
+import {
+  E2E_ADMIN_EMAIL,
+  E2E_ADMIN_PASSWORD,
+  E2E_OWNER_EMAIL,
+  E2E_OWNER_PASSWORD,
+} from "./global-setup";
 import { dismissConsentNotice } from "./helpers";
 
 async function signInAsAdmin(page: import("@playwright/test").Page) {
@@ -72,5 +77,88 @@ test.describe("animal registration lifecycle", () => {
       .getByRole("button", { name: "Reopen registration as pending" })
       .click();
     await expect(row).toContainText("Pending");
+  });
+});
+
+// The #169 authoritative-registration journey: an active animal with
+// only PRIOR-year history appears in the current-period exception
+// queue; staff register it from the queue; the profile shows current +
+// historical records; a recorded payment moves it to completed; the
+// owner portal reflects the new state. A deceased animal seeded without
+// a registration must never appear as a current-period gap.
+test.describe("annual registrations (#169)", () => {
+  test("queue → register → payment → profile history → portal", async ({
+    page,
+  }) => {
+    const year = new Date().getFullYear();
+    await signInAsAdmin(page);
+    await page.goto("/admin/registrations");
+
+    // Exception queue: Reggie is an active unregistered gap; the
+    // deceased Oldbones is lifecycle-excluded, not merely absent.
+    await expect(
+      page.getByRole("row", { name: /Reggie/ }),
+    ).toBeVisible();
+    await expect(page.getByText("Oldbones")).not.toBeVisible();
+
+    // Register straight from the queue — one authoritative row.
+    await page
+      .getByRole("row", { name: /Reggie/ })
+      .getByRole("button", { name: "Register" })
+      .click();
+    // The animal leaves the gap queue and lands in outstanding.
+    await expect(
+      page.getByRole("row", { name: /Reggie.*Unpaid/ }),
+    ).toBeVisible();
+
+    // The animal profile shows current + prior-year history.
+    await page
+      .getByRole("row", { name: /Reggie.*Unpaid/ })
+      .getByRole("link", { name: "Reggie" })
+      .click();
+    await expect(
+      page.getByText(`${year} registration — registered`),
+    ).toBeVisible();
+    await expect(
+      page.getByText(`${year - 1} registration`),
+    ).toBeVisible();
+
+    // Record a manual payment — payment state derives from the ledger.
+    await page
+      .getByRole("button", { name: "Record payment" })
+      .first()
+      .click();
+    await page
+      .locator('input[type="number"]')
+      .first()
+      .fill("100");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText("Paid").first()).toBeVisible();
+
+    // Back on the queue page the registration is completed.
+    await page.goto("/admin/registrations");
+    await expect(
+      page.getByRole("row", { name: /Reggie.*Paid/ }),
+    ).toBeVisible();
+
+    // The owner sees the new state — no staff notes, no internals.
+    // Sign-in itself navigates to /portal; clearing cookies first drops
+    // the admin session (the cookie is the server-side authority).
+    await page.context().clearCookies();
+    await page.goto("/login");
+    await page.getByLabel("Email").fill(E2E_OWNER_EMAIL);
+    await page.getByLabel("Password").fill(E2E_OWNER_PASSWORD);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await expect(page).toHaveURL("/portal");
+    const reggieCard = page
+      .locator("[class*=bg-card]")
+      .filter({ has: page.getByRole("heading", { name: "Reggie" }) });
+    await expect(
+      reggieCard.getByText(`${year} registration:`),
+    ).toBeVisible();
+    await expect(reggieCard.getByText(/Paid/)).toBeVisible();
+    await expect(reggieCard.getByText(/Registered:/)).toContainText(
+      String(year - 1),
+    );
   });
 });

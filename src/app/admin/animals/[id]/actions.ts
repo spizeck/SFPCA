@@ -76,6 +76,16 @@ import {
   type ChipConflictInfo,
   type MicrochipWriteInput,
 } from "@/lib/registry/microchips";
+import {
+  cancelRegistration,
+  correctRegistrationAmount,
+  createRegistration,
+  recordRegistrationPayment,
+  resolveRegistrationFee,
+  updateRegistrationNotes,
+  type ManualPaymentMethod,
+} from "@/lib/registry/registrations";
+import type { RegistrationCancellationReason } from "@/lib/registrations";
 import { logError, type LogSubsystem } from "@/lib/logger";
 
 export interface AnimalMedicalRecord {
@@ -466,6 +476,106 @@ export async function resolveChipConflictAction(
     const result = await resolveChipConflict(
       conflictId,
       { resolutionNote },
+      actor,
+    );
+    return result.ok ? { ok: true } : result;
+  });
+}
+
+// --- Registrations (#169) ------------------------------------------------------
+// Every registration write is staff-only and audited. Payment truth
+// comes from the payments ledger — 'record payment' writes a confirmed
+// manual row (money that actually arrived); waivers/complimentary are
+// resolutions ON the registration, never a fake $0 payment.
+
+export async function createRegistrationAction(
+  animalId: string,
+  input: {
+    year?: number;
+    submissionId?: string | null;
+    amountDueCents?: number;
+    notes?: string | null;
+  } = {},
+): Promise<SaveResult> {
+  return save("registration", async (actor) => {
+    const result = await createRegistration({ ...input, animalId }, actor);
+    return result.ok ? { ok: true } : result;
+  });
+}
+
+export async function cancelRegistrationAction(
+  registrationId: string,
+  reason: RegistrationCancellationReason,
+  note?: string | null,
+): Promise<SaveResult> {
+  return save("registration", async (actor) => {
+    const result = await cancelRegistration(
+      registrationId,
+      { reason, note },
+      actor,
+    );
+    return result.ok ? { ok: true } : result;
+  });
+}
+
+export async function resolveRegistrationFeeAction(
+  registrationId: string,
+  resolution: "waived" | "complimentary",
+  note?: string | null,
+): Promise<SaveResult> {
+  return save("registration", async (actor) => {
+    const result = await resolveRegistrationFee(
+      registrationId,
+      { resolution, note },
+      actor,
+    );
+    return result.ok ? { ok: true } : result;
+  });
+}
+
+export async function correctRegistrationAmountAction(
+  registrationId: string,
+  amountDueCents: number,
+  note?: string | null,
+): Promise<SaveResult> {
+  return save("registration", async (actor) => {
+    const result = await correctRegistrationAmount(
+      registrationId,
+      amountDueCents,
+      note,
+      actor,
+    );
+    return result.ok ? { ok: true } : result;
+  });
+}
+
+export async function updateRegistrationNotesAction(
+  registrationId: string,
+  notes: string | null,
+): Promise<SaveResult> {
+  return save("registration", async (actor) => {
+    const result = await updateRegistrationNotes(
+      registrationId,
+      notes,
+      actor,
+    );
+    return result.ok ? { ok: true } : result;
+  });
+}
+
+export async function recordRegistrationPaymentAction(
+  registrationId: string,
+  input: {
+    amountCents: number;
+    method: ManualPaymentMethod;
+    occurredOn?: string;
+    note?: string | null;
+  },
+): Promise<SaveResult> {
+  return save("registration", async (actor) => {
+    const result = await recordRegistrationPayment(
+      registrationId,
+      input,
       actor,
     );
     return result.ok ? { ok: true } : result;

@@ -24,6 +24,7 @@ import {
   microchipRecords,
   ownerships,
   persons,
+  registrations,
 } from "../../src/lib/db/schema";
 import { runMigrationsOnPglite } from "../../src/lib/db/migrate";
 
@@ -238,6 +239,45 @@ export default async function globalSetup() {
     existingAnimalId: householdAnimal.id,
     source: "staff",
     detail: "Scanner read the same chip on Claimdog at intake.",
+  });
+
+  // --- Annual registration fixtures (#169) -------------------------------
+  // Reggie is a dedicated #169 animal — owned by the portal owner, with a
+  // PRIOR-year registration as history and no current-year record so he
+  // lands in the unregistered queue. (Rexley is deliberately NOT reused:
+  // the owner-portal spec reports him deceased mid-suite.) A deceased
+  // animal proves the queue is lifecycle-gated.
+  const currentYear = new Date().getFullYear();
+  const [registrationAnimal] = await pgliteDb
+    .insert(animals)
+    .values({
+      name: "Reggie",
+      species: "dog",
+      sex: "male",
+      lifecycleStatus: "active",
+      photoUrls: [],
+    })
+    .returning();
+  await pgliteDb.insert(ownerships).values({
+    animalId: registrationAnimal.id,
+    personId: ownerPerson.id,
+    validFrom: "2024-01-01",
+  });
+  await pgliteDb.insert(registrations).values({
+    animalId: registrationAnimal.id,
+    year: currentYear - 1,
+    status: "active",
+    personId: ownerPerson.id,
+    ownerLabel: "E2E Owner",
+    amountDueCents: 10000,
+    currency: "USD",
+  });
+  await pgliteDb.insert(animals).values({
+    name: "Oldbones",
+    species: "dog",
+    sex: "male",
+    lifecycleStatus: "deceased",
+    photoUrls: [],
   });
 
   // FAQs so the public accordion renders real items.

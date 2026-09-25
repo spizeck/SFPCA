@@ -75,6 +75,8 @@ import { MarkSeenDialog } from "@/components/admin/medical/mark-seen-dialog";
 import { CommunicationsPanel } from "@/components/admin/medical/communications-panel";
 import { OwnershipPanel } from "@/components/admin/medical/ownership-panel";
 import { MicrochipPanel } from "@/components/admin/microchip-panel";
+import { RegistrationPanel } from "@/components/admin/registration-panel";
+import { currentRegistrationYear } from "@/lib/registrations";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -353,20 +355,11 @@ export default function AnimalMedicalPage() {
             </div>
             <div>
               <h3 className="font-medium mb-1">Registrations</h3>
-              {registry.registrations.length === 0 ? (
-                <p className="text-muted-foreground">
-                  No registrations — the animal stays in the registry
-                  regardless.
-                </p>
-              ) : (
-                <ul className="space-y-1">
-                  {registry.registrations.map((r) => (
-                    <li key={r.id}>
-                      {r.year} — <span className="capitalize">{r.status}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <p className="text-muted-foreground">
+                {registry.registrations.length === 0
+                  ? "None — see the Registrations panel below."
+                  : `${registry.registrations.length} on record — latest ${registry.registrations[0].year}. Details below.`}
+              </p>
             </div>
             <div>
               <h3 className="font-medium mb-1">Payments</h3>
@@ -444,6 +437,14 @@ export default function AnimalMedicalPage() {
         microchips={registry.microchips}
         chipConflicts={registry.chipConflicts}
         foundReports={registry.foundReports}
+        today={today}
+        onChanged={loadRecord}
+      />
+
+      <RegistrationPanel
+        animalId={animal.id}
+        registrations={registry.registrations}
+        currentYear={currentRegistrationYear(today)}
         today={today}
         onChanged={loadRecord}
       />

@@ -116,7 +116,9 @@ export default function AdminDashboard() {
               <CardTitle>Registrations</CardTitle>
             </div>
             <CardDescription>
-              View and verify animal registrations, manage payment receipts
+              Current-period registration queues — unregistered animals,
+              pending submissions, outstanding balances — plus intake
+              review and receipts
             </CardDescription>
           </CardHeader>
           <CardContent>
