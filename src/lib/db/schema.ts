@@ -28,6 +28,7 @@ import {
   index,
   check,
   primaryKey,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -610,32 +611,224 @@ export const payments = pgTable(
 
 // --- Animal health ----------------------------------------------------------
 
-// Normalized chip identity with assignment history — one ACTIVE
-// assignment per chip number is enforced by the partial unique index;
-// reassignment closes the previous row's assignedTo.
+// Normalized chip identity with assignment history (#168) — one ACTIVE
+// assignment per chip number AND per animal is enforced by the two
+// partial unique indexes; a chip leaving use closes the row's
+// assignedTo + closedReason rather than being deleted, so a scan of a
+// replaced/removed chip still finds the animal and its history.
+//
+// chip_number is normalized by THE canonical normalizeChipNumber
+// (src/lib/microchips.ts — uppercase, non-alphanumerics stripped);
+// every writer and reader goes through it. chip_display keeps the
+// as-entered representation ("AVID*123*456*789", grouped digits) that
+// normalization cannot reproduce; null on pre-#168 rows means "display
+// the normalized form".
+//
+// Implantation provenance (manufacturer/implanted_on/implanted_by) is
+// optional by design: a chip is often known without knowing who put it
+// in or when — none of it may be forced mandatory for historical chips.
+// assigned_from/assigned_to describe when this record was the animal's
+// CURRENT chip, which is a registry fact, not the implantation date.
+//
+// Closure semantics — assigned_to is set exactly when the chip stops
+// being the animal's current chip, and closed_reason says why:
+//   'replaced'  — a successor chip was implanted (replaced_by_id links it)
+//   'removed'   — chip no longer in use, no successor
+//   'corrected' — the record itself was wrong (chip never belonged to
+//                 this animal); the fix for a mistaken assignment
+// A same-row metadata/number fix goes through the service's correction
+// path — it edits in place and never manufactures a fake replacement.
 export const microchipRecords = pgTable(
   "microchip_records",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     // Normalized app-side before write: uppercase, non-alphanumerics stripped.
     chipNumber: text("chip_number").notNull(),
+    // As-entered display form (grouped digits, manufacturer separators).
+    chipDisplay: text("chip_display"),
     animalId: uuid("animal_id")
       .notNull()
-      .references(() => animals.id),
+      .references(() => animals.id), // restrictive — registry history
+    manufacturer: text("manufacturer"),
+    implantedOn: date("implanted_on", { mode: "string" }),
+    implantedBy: text("implanted_by"),
+    notes: text("notes"),
     assignedFrom: date("assigned_from", { mode: "string" })
       .notNull()
       .defaultNow(),
     assignedTo: date("assigned_to", { mode: "string" }),
+    closedReason: text("closed_reason"),
+    // Successor for 'replaced' closures — set after the replacement row
+    // is inserted, in the same transaction as the close.
+    replacedById: uuid("replaced_by_id").references(
+      (): AnyPgColumn => microchipRecords.id,
+      { onDelete: "set null" },
+    ),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex("microchip_active_chip_key")
       .on(t.chipNumber)
       .where(sql`${t.assignedTo} IS NULL`),
+    // One CURRENT chip per animal — history is unlimited, currency is not.
+    uniqueIndex("microchip_active_animal_key")
+      .on(t.animalId)
+      .where(sql`${t.assignedTo} IS NULL`),
+    // Exact chip-number lookup across active AND historical rows — the
+    // scan/found-animal hot read (the partial unique index only serves
+    // the active-row predicate).
+    index("microchip_chip_number_idx").on(t.chipNumber),
     index("microchip_animal_idx").on(t.animalId),
     check(
       "microchip_assignment_range_check",
       sql`${t.assignedTo} IS NULL OR ${t.assignedTo} >= ${t.assignedFrom}`,
+    ),
+    check(
+      "microchip_closed_reason_check",
+      sql`${t.closedReason} IS NULL OR ${t.closedReason} IN ('replaced','removed','corrected')`,
+    ),
+    // A closure always says why; an open row never claims one.
+    check(
+      "microchip_closure_consistency_check",
+      sql`(${t.assignedTo} IS NULL) = (${t.closedReason} IS NULL)`,
+    ),
+    check(
+      "microchip_replaced_by_check",
+      sql`${t.replacedById} IS NULL OR (${t.replacedById} <> ${t.id} AND ${t.assignedTo} IS NOT NULL)`,
+    ),
+  ],
+);
+
+// Duplicate/conflicting chip claims flagged for human resolution (#168).
+// Strict normalized uniqueness lives on microchip_records itself — a
+// second ACTIVE row for a chip number can never be written — so this
+// table is the EVIDENCE trail for attempts that were rejected: "staff
+// tried to record chip X on animal A while animal B holds it", or an
+// import found the same number on two animals. Resolution is human:
+// staff inspect both animals and correct/close the wrong side — nothing
+// here auto-moves a chip. #178 owns the broader duplicate/merge engine;
+// this stays scoped to chip identity.
+export const microchipConflicts = pgTable(
+  "microchip_conflicts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Normalized chip number the claim collided on.
+    chipNumber: text("chip_number").notNull(),
+    // The animal the duplicate was claimed for.
+    claimedAnimalId: uuid("claimed_animal_id")
+      .notNull()
+      .references(() => animals.id), // restrictive — conflict evidence
+    // What the claim collided with — snapshot references; the holder's
+    // record/animal may legitimately change during resolution.
+    existingRecordId: uuid("existing_record_id").references(
+      () => microchipRecords.id,
+      { onDelete: "set null" },
+    ),
+    existingAnimalId: uuid("existing_animal_id").references(
+      () => animals.id,
+      { onDelete: "set null" },
+    ),
+    // Where the collision was observed.
+    source: text("source").notNull(),
+    detail: text("detail"),
+    status: text("status").notNull().default("open"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true, mode: "date" }),
+    resolvedBy: text("resolved_by"),
+    resolutionNote: text("resolution_note"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("microchip_conflicts_chip_idx").on(t.chipNumber),
+    index("microchip_conflicts_animal_idx").on(t.claimedAnimalId),
+    // One open conflict per (chip, claimant) — repeated attempts at the
+    // same bad assignment re-flag the SAME work item, not a new row.
+    uniqueIndex("microchip_conflicts_open_dedup")
+      .on(t.chipNumber, t.claimedAnimalId)
+      .where(sql`${t.status} = 'open'`),
+    check(
+      "microchip_conflicts_source_check",
+      sql`${t.source} IN ('staff','import')`,
+    ),
+    check(
+      "microchip_conflicts_status_check",
+      sql`${t.status} IN ('open','resolved')`,
+    ),
+    check(
+      "microchip_conflicts_resolved_consistency_check",
+      sql`(${t.status} = 'open') = (${t.resolvedAt} IS NULL)`,
+    ),
+  ],
+);
+
+// Found-animal resolution history (#168) — the deliberately small record
+// of "a chipped animal was scanned/reported, and what came of it". This
+// is NOT #176's lost/found case management: no public reports, no
+// sightings, no workflow states — just durable evidence that a lookup
+// happened and how staff resolved it. animal_id is null when the scanned
+// chip matched nothing (an unidentified found animal is still worth
+// flagging for follow-up); chip_number is a denormalized snapshot of
+// what was scanned so the row stays meaningful if chip records change.
+export const foundReports = pgTable(
+  "found_reports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    animalId: uuid("animal_id").references(() => animals.id),
+    // The chip record the lookup matched — set null keeps the report if
+    // chip history is ever repaired; chip_number below is the snapshot.
+    microchipRecordId: uuid("microchip_record_id").references(
+      () => microchipRecords.id,
+      { onDelete: "set null" },
+    ),
+    chipNumber: text("chip_number").notNull(),
+    chipDisplay: text("chip_display"),
+    reportedOn: date("reported_on", { mode: "string" })
+      .notNull()
+      .defaultNow(),
+    status: text("status").notNull().default("open"),
+    resolvedOn: date("resolved_on", { mode: "string" }),
+    // Bounded outcome vocabulary; notes carry the detail.
+    outcome: text("outcome"),
+    notes: text("notes"),
+    actorIdentityId: uuid("actor_identity_id").references(
+      () => authIdentities.id,
+      { onDelete: "set null" },
+    ),
+    actorLabel: text("actor_label"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("found_reports_animal_idx").on(t.animalId),
+    index("found_reports_chip_idx").on(t.chipNumber),
+    // The follow-up read: unresolved found animals, oldest first.
+    index("found_reports_open_idx")
+      .on(t.reportedOn)
+      .where(sql`${t.status} = 'open'`),
+    // Re-scanning the same animal (or the same unidentified chip)
+    // re-flags the SAME open report, not a new work item.
+    uniqueIndex("found_reports_open_dedup")
+      .on(
+        t.chipNumber,
+        sql`coalesce(${t.animalId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
+      )
+      .where(sql`${t.status} = 'open'`),
+    check(
+      "found_reports_status_check",
+      sql`${t.status} IN ('open','resolved')`,
+    ),
+    check(
+      "found_reports_outcome_check",
+      sql`${t.outcome} IS NULL OR ${t.outcome} IN ('reunited','in-care','other')`,
+    ),
+    check(
+      "found_reports_resolved_consistency_check",
+      sql`(${t.status} = 'open') = (${t.resolvedOn} IS NULL)`,
+    ),
+    check(
+      "found_reports_resolved_range_check",
+      sql`${t.resolvedOn} IS NULL OR ${t.resolvedOn} >= ${t.reportedOn}`,
     ),
   ],
 );

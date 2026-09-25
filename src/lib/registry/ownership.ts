@@ -43,6 +43,7 @@ import {
   auditEvents,
   householdMembers,
   households,
+  microchipRecords,
   ownershipConfirmations,
   ownerships,
   persons,
@@ -386,6 +387,10 @@ export interface PortalAnimal {
   basis: "person" | "household";
   householdName: string | null;
   validFrom: string;
+  // The animal's CURRENT chip, display-formatted as recorded (#168) —
+  // read-only for owners; chip changes stay staff-controlled. Only the
+  // owner's own animals ever reach this projection.
+  chipNumber: string | null;
   // Annual-confirmation state (#166): the latest deliberate
   // confirmation on this relationship and the date the next one falls
   // due. Never derived from updated_at or profile edits.
@@ -466,6 +471,29 @@ export async function listPortalAnimals(
     )
     .orderBy(asc(animals.name), asc(ownerships.id));
 
+  // Current chip per animal — one batch query; the partial unique
+  // index guarantees at most one open record per animal.
+  const animalIds = [...new Set(rows.map((r) => r.animalId))];
+  const chipRows =
+    animalIds.length > 0
+      ? await db
+          .select({
+            animalId: microchipRecords.animalId,
+            chipNumber: microchipRecords.chipNumber,
+            chipDisplay: microchipRecords.chipDisplay,
+          })
+          .from(microchipRecords)
+          .where(
+            and(
+              inArray(microchipRecords.animalId, animalIds),
+              isNull(microchipRecords.assignedTo),
+            ),
+          )
+      : [];
+  const chipByAnimal = new Map(
+    chipRows.map((c) => [c.animalId, c.chipDisplay ?? c.chipNumber]),
+  );
+
   // One card per animal: when a person reaches the same animal through
   // both a direct and a household ownership, the direct relationship
   // wins — the household row is still real history, just redundant for
@@ -495,6 +523,7 @@ export async function listPortalAnimals(
       basis: row.personId === personId ? "person" : "household",
       householdName: row.personId === personId ? null : row.householdName,
       validFrom: row.validFrom,
+      chipNumber: chipByAnimal.get(row.animalId) ?? null,
       lastConfirmedOn: row.lastConfirmedOn,
       confirmationDueOn: dueOn,
       confirmationDue: dueOn <= asOf,

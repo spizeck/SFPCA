@@ -67,6 +67,15 @@ import {
   type HouseholdRecord,
   type PersonRecord,
 } from "@/lib/registry/persons";
+import {
+  assignMicrochip,
+  closeMicrochip,
+  correctMicrochip,
+  replaceMicrochip,
+  resolveChipConflict,
+  type ChipConflictInfo,
+  type MicrochipWriteInput,
+} from "@/lib/registry/microchips";
 import { logError, type LogSubsystem } from "@/lib/logger";
 
 export interface AnimalMedicalRecord {
@@ -155,6 +164,8 @@ export async function getAnimalMedicalAction(
     },
     registry: registry ?? {
       microchips: [],
+      chipConflicts: [],
+      foundReports: [],
       registrations: [],
       payments: [],
       documents: [],
@@ -187,8 +198,19 @@ export async function transitionLifecycleAction(
 
 export interface SaveResult {
   ok: boolean;
-  reason?: "invalid" | "not-found" | "conflict" | "overlap" | "not-owner" | "not-current";
+  reason?:
+    | "invalid"
+    | "not-found"
+    | "conflict"
+    | "overlap"
+    | "not-owner"
+    | "not-current"
+    | "has-current"
+    | "chip-conflict";
   field?: string;
+  // When reason is 'chip-conflict': the flagged conflict + the animal
+  // currently holding the number, so the UI can show both sides.
+  chipConflict?: ChipConflictInfo;
 }
 
 // Both service result shapes narrow to this — the action layer only
@@ -203,8 +225,11 @@ type MutationOutcome =
         | "invalid"
         | "overlap"
         | "not-owner"
-        | "not-current";
+        | "not-current"
+        | "has-current"
+        | "chip-conflict";
       field?: string;
+      chipConflict?: ChipConflictInfo;
     };
 
 function toSaveResult(result: MutationOutcome): SaveResult {
@@ -213,6 +238,9 @@ function toSaveResult(result: MutationOutcome): SaveResult {
     ok: false,
     reason: result.reason,
     ...("field" in result ? { field: result.field } : {}),
+    ...("chipConflict" in result && result.chipConflict
+      ? { chipConflict: result.chipConflict }
+      : {}),
   };
 }
 
@@ -371,6 +399,75 @@ export async function recordOwnershipConfirmationAction(
       actorLabel: actor,
       notes,
     });
+    return result.ok ? { ok: true } : result;
+  });
+}
+
+// --- Microchips (#168) -------------------------------------------------------------
+// Chip identity changes are staff-only and audited; a rejected duplicate
+// claim surfaces the conflict + holder animal rather than overwriting.
+
+export async function assignMicrochipAction(
+  animalId: string,
+  input: MicrochipWriteInput & { assignedFrom?: string },
+): Promise<SaveResult> {
+  return save("microchips", async (actor) => {
+    const result = await assignMicrochip({ ...input, animalId }, actor);
+    return result.ok ? { ok: true } : result;
+  });
+}
+
+export async function replaceMicrochipAction(
+  currentRecordId: string,
+  input: MicrochipWriteInput & { effectiveOn?: string },
+): Promise<SaveResult> {
+  return save("microchips", async (actor) => {
+    const result = await replaceMicrochip(currentRecordId, input, actor);
+    return result.ok ? { ok: true } : result;
+  });
+}
+
+export async function closeMicrochipAction(
+  recordId: string,
+  assignedTo: string | null,
+  reason: "removed" | "corrected",
+): Promise<SaveResult> {
+  return save("microchips", async (actor) => {
+    const result = await closeMicrochip(
+      recordId,
+      { assignedTo: assignedTo ?? undefined, reason },
+      actor,
+    );
+    return result.ok ? { ok: true } : result;
+  });
+}
+
+export async function correctMicrochipAction(
+  recordId: string,
+  input: MicrochipWriteInput & { assignedFrom?: string },
+  expectedCreatedAt: string,
+): Promise<SaveResult> {
+  return save("microchips", async (actor) => {
+    const result = await correctMicrochip(
+      recordId,
+      input,
+      expectedCreatedAt,
+      actor,
+    );
+    return result.ok ? { ok: true } : result;
+  });
+}
+
+export async function resolveChipConflictAction(
+  conflictId: string,
+  resolutionNote?: string | null,
+): Promise<SaveResult> {
+  return save("microchips", async (actor) => {
+    const result = await resolveChipConflict(
+      conflictId,
+      { resolutionNote },
+      actor,
+    );
     return result.ok ? { ok: true } : result;
   });
 }

@@ -2,7 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { Suspense } from "react";
-import { FileText, PawPrint, Settings, ClipboardList, CircleQuestionMark, CalendarClock, Mail } from "lucide-react";
+import { FileText, PawPrint, Settings, ClipboardList, CircleQuestionMark, CalendarClock, Mail, ScanLine } from "lucide-react";
 import { VetQueueCard } from "@/components/admin/vet-queue-card";
 import { CommunicationsCard } from "@/components/admin/communications-card";
 
@@ -70,6 +70,24 @@ export default function AdminDashboard() {
           <CardContent>
             <Button asChild className="w-full">
               <Link href="/admin/homepage">Edit Homepage</Link>
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-3 mb-2">
+              <ScanLine className="h-8 w-8 text-primary" />
+              <CardTitle>Chip Lookup</CardTitle>
+            </div>
+            <CardDescription>
+              Found an animal? Scan or type a microchip to find the animal
+              and its owner&apos;s contact details
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild className="w-full">
+              <Link href="/admin/chip-lookup">Look up a chip</Link>
             </Button>
           </CardContent>
         </Card>
