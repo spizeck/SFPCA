@@ -12,16 +12,17 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   lookupChipAction,
-  recordFoundReportAction,
-  resolveFoundReportAction,
-  type FoundReportActionResult,
+  recordFoundScanAction,
+  resolveOpenCaseAction,
+  type FoundScanActionResult,
 } from "./actions";
 import type {
   ChipLookupOwner,
   ChipLookupResult,
-  FoundReportRecord,
   MicrochipRecord,
 } from "@/lib/registry/microchips";
+import type { LostFoundCaseRecord } from "@/lib/registry/lost-found";
+import type { LostFoundOutcome } from "@/lib/lost-found";
 import { normalizeChipNumber, isValidChipNumber } from "@/lib/microchips";
 import { formatAnimalAge } from "@/lib/animal-lifecycle";
 import { AnimalLifecycleBadge } from "@/components/admin/animal-status-badge";
@@ -55,9 +56,11 @@ import {
 
 type MatchResult = Extract<ChipLookupResult, { status: "match" }>;
 
-const OUTCOME_LABELS: Record<string, string> = {
+const OUTCOME_LABELS: Record<LostFoundOutcome, string> = {
   reunited: "Reunited with owner",
+  "owner-located": "Owner located",
   "in-care": "Taken into care",
+  deceased: "Deceased",
   other: "Other resolution",
 };
 
@@ -122,9 +125,11 @@ function OwnerBlock({ owner }: { owner: ChipLookupOwner }) {
   );
 }
 
-// Record or resolve the found report — the small operational log, NOT
-// #176 case management.
-function FoundReportForm({
+// Record the scan as a lost/found case event (#176): an open missing
+// case surfaces as the reunion signal and the scan lands on it as
+// evidence; an open found case gets a rescan note; otherwise a new
+// found case opens — or resolves immediately when an outcome is chosen.
+function FoundScanForm({
   match,
   onSaved,
 }: {
@@ -140,7 +145,7 @@ function FoundReportForm({
   const saveNew = async () => {
     setBusy(true);
     try {
-      const result: FoundReportActionResult = await recordFoundReportAction({
+      const result: FoundScanActionResult = await recordFoundScanAction({
         animalId: match.animal.id,
         microchipRecordId: match.chip.id,
         chipNumber: match.normalized,
@@ -151,20 +156,28 @@ function FoundReportForm({
       if (!result.ok) {
         toast({
           title: "Couldn't record",
-          description: "The found report was not saved. Try again.",
+          description: "The scan was not saved. Try again.",
           variant: "destructive",
         });
         return;
       }
       setOutcome("");
       setNotes("");
-      toast({ title: "Found report recorded" });
+      toast({
+        title: result.matchedMissing
+          ? "Added to the missing case"
+          : result.existing
+            ? "Added to the open case"
+            : outcome && outcome !== "open"
+              ? "Found case resolved"
+              : "Found case opened",
+      });
       onSaved();
     } catch (error) {
-      logError("microchips", "found-report-save-ui", error);
+      logError("microchips", "found-scan-save-ui", error);
       toast({
         title: "Couldn't record",
-        description: "The found report was not saved. Try again.",
+        description: "The scan was not saved. Try again.",
         variant: "destructive",
       });
     } finally {
@@ -172,31 +185,31 @@ function FoundReportForm({
     }
   };
 
-  const resolve = async (report: FoundReportRecord) => {
-    const chosen = resolving[report.id];
+  const resolve = async (openCase: LostFoundCaseRecord) => {
+    const chosen = resolving[openCase.id];
     if (!chosen) return;
     setBusy(true);
     try {
-      const result = await resolveFoundReportAction(
-        report.id,
-        chosen,
+      const result = await resolveOpenCaseAction(
+        openCase.id,
+        chosen as LostFoundOutcome,
         notes || null,
       );
       if (!result.ok) {
         toast({
           title: "Couldn't resolve",
-          description: "The found report was not updated. Try again.",
+          description: "The case was not updated. Try again.",
           variant: "destructive",
         });
         return;
       }
-      toast({ title: "Found report resolved" });
+      toast({ title: "Case resolved" });
       onSaved();
     } catch (error) {
-      logError("microchips", "found-report-resolve-ui", error);
+      logError("microchips", "case-resolve-ui", error);
       toast({
         title: "Couldn't resolve",
-        description: "The found report was not updated. Try again.",
+        description: "The case was not updated. Try again.",
         variant: "destructive",
       });
     } finally {
@@ -206,19 +219,42 @@ function FoundReportForm({
 
   return (
     <div className="space-y-3">
-      {match.openFoundReports.length > 0 && (
+      {match.openCases.length > 0 && (
         <div>
-          <p className="text-sm font-medium mb-1">Open found reports</p>
+          <p className="text-sm font-medium mb-1">Open cases</p>
           <ul className="space-y-2">
-            {match.openFoundReports.map((r) => (
+            {match.openCases.map((r) => (
               <li
                 key={r.id}
-                className="border rounded-md p-2 text-sm space-y-2"
+                className={`rounded-md p-2 text-sm space-y-2 border ${
+                  r.caseType === "missing"
+                    ? "border-amber-500/60 bg-amber-50 dark:bg-amber-950/30"
+                    : ""
+                }`}
               >
                 <p>
-                  Reported {r.reportedOn}
-                  {r.actorLabel ? ` by ${r.actorLabel}` : ""}
+                  {r.caseType === "missing" ? (
+                    <>
+                      <strong>Reported missing</strong> {r.reportedAt.slice(0, 10)}
+                      {r.lastSeenOn
+                        ? ` — last seen ${r.lastSeenOn}${r.lastSeenLocation ? ` at ${r.lastSeenLocation}` : ""}`
+                        : ""}
+                    </>
+                  ) : (
+                    <>
+                      Found case open since {r.reportedAt.slice(0, 10)}
+                      {r.foundLocation ? ` — ${r.foundLocation}` : ""}
+                    </>
+                  )}
+                  {r.actorLabel ? ` (${r.actorLabel})` : ""}
                   {r.notes ? ` — ${r.notes}` : ""}
+                  {" · "}
+                  <Link
+                    href={`/admin/lost-found/${r.id}`}
+                    className="underline"
+                  >
+                    case
+                  </Link>
                 </p>
                 <div className="flex items-center gap-2">
                   <Select
@@ -434,7 +470,7 @@ function MatchCard({
           )}
         </div>
 
-        <FoundReportForm match={match} onSaved={onRefresh} />
+        <FoundScanForm match={match} onSaved={onRefresh} />
       </CardContent>
     </Card>
   );
@@ -580,6 +616,30 @@ export default function ChipLookupPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            {result.openCases.length > 0 && (
+              <div
+                role="alert"
+                className="rounded-md border border-amber-500/50 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm"
+              >
+                <p className="font-medium">
+                  This chip is already on the lost/found board:
+                </p>
+                <ul className="mt-1 space-y-1">
+                  {result.openCases.map((c) => (
+                    <li key={c.id}>
+                      Found case open since {c.reportedAt.slice(0, 10)}
+                      {c.foundLocation ? ` — ${c.foundLocation}` : ""} ·{" "}
+                      <Link
+                        href={`/admin/lost-found/${c.id}`}
+                        className="underline"
+                      >
+                        open case
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <div className="flex flex-wrap gap-2">
               <Button
                 variant="outline"
@@ -612,15 +672,18 @@ export default function ChipLookupPage() {
                 onClick={async () => {
                   setBusy(true);
                   try {
-                    const r = await recordFoundReportAction({
+                    const r = await recordFoundScanAction({
                       chipNumber: result.normalized,
                     });
                     toast(
                       r.ok
                         ? {
-                            title: "Flagged for follow-up",
-                            description:
-                              "An open found report was logged for this unknown chip.",
+                            title: r.existing
+                              ? "Added to the open case"
+                              : "Flagged for follow-up",
+                            description: r.existing
+                              ? "This chip already has an open found case — the scan was added to it."
+                              : "An open found case was logged for this unknown chip.",
                           }
                         : {
                             title: "Couldn't record",
@@ -629,7 +692,7 @@ export default function ChipLookupPage() {
                           },
                     );
                   } catch (error) {
-                    logError("microchips", "found-report-flag-ui", error);
+                    logError("microchips", "found-scan-flag-ui", error);
                     toast({
                       title: "Couldn't record",
                       description: "Try again.",

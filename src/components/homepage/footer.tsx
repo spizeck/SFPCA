@@ -60,6 +60,15 @@ export function Footer({ social }: FooterProps) {
           </div>
           <div className="flex items-center gap-4 text-sm">
             <Link
+              href="/lost-pets"
+              className="hover:text-primary transition-colors underline-offset-4 hover:underline"
+            >
+              Lost pets
+            </Link>
+            <span aria-hidden="true" className="text-background/40">
+              ·
+            </span>
+            <Link
               href="/privacy"
               className="hover:text-primary transition-colors underline-offset-4 hover:underline"
             >

@@ -21,6 +21,7 @@ export type LogSubsystem =
   | "medical"
   | "microchips"
   | "communications"
+  | "lost-found"
   | "content"
   | "portal"
   | "owners"

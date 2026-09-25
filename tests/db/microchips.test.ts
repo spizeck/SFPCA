@@ -24,14 +24,19 @@ import {
   correctMicrochip,
   getCurrentMicrochip,
   listChipConflicts,
-  listFoundReportsForAnimal,
   listMicrochipsForAnimal,
   lookupChip,
-  recordFoundReport,
   replaceMicrochip,
   resolveChipConflict,
-  resolveFoundReport,
 } from "@/lib/registry/microchips";
+import {
+  linkCaseToAnimal,
+  listCasesForAnimal,
+  listUpdatesForCase,
+  openFoundCase,
+  openMissingCase,
+  resolveCase,
+} from "@/lib/registry/lost-found";
 import { searchAnimals } from "@/lib/registry/animals";
 import { createOwnership } from "@/lib/registry/ownership";
 import { setHouseholdMember } from "@/lib/registry/persons";
@@ -51,7 +56,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await db.execute(
-    sql`TRUNCATE found_reports, microchip_conflicts, microchip_records, ownerships, household_members, households, persons, animals, audit_events CASCADE`,
+    sql`TRUNCATE lost_found_updates, lost_found_cases, communications, microchip_conflicts, microchip_records, ownerships, household_members, households, persons, animals, audit_events CASCADE`,
   );
 });
 
@@ -613,20 +618,24 @@ describe("lookupChip — the found-animal read", () => {
   });
 });
 
-describe("found reports", () => {
-  test("open report records the scan; re-scan dedupes", async () => {
+// Lost/found cases (#176) — the chip-scan workflow's case semantics.
+// Full case-model coverage lives in lost-found.test.ts; these tests pin
+// the scan-side contract that used to live on found_reports.
+describe("found cases", () => {
+  test("open case records the scan; re-scan folds into it", async () => {
     const animal = await seedAnimal();
-    const r1 = await recordFoundReport(
+    const r1 = await openFoundCase(
       { animalId: animal.id, chipNumber: "985 112 345" },
       STAFF,
       db,
     );
     expect(r1.ok).toBe(true);
     if (!r1.ok) return;
-    expect(r1.report.status).toBe("open");
-    expect(r1.report.chipNumber).toBe("985112345");
+    expect(r1.case.status).toBe("open");
+    expect(r1.case.caseType).toBe("found");
+    expect(r1.case.chipNumber).toBe("985112345");
 
-    const r2 = await recordFoundReport(
+    const r2 = await openFoundCase(
       { animalId: animal.id, chipNumber: "985112345" },
       STAFF,
       db,
@@ -634,25 +643,44 @@ describe("found reports", () => {
     expect(r2.ok).toBe(true);
     if (!r2.ok) return;
     expect(r2.existing).toBe(true);
-    expect(r2.report.id).toBe(r1.report.id);
-    expect(await auditActions("found_report")).toContain("create");
+    expect(r2.case.id).toBe(r1.case.id);
+    // The rescan is chronology, not a second case.
+    const updates = await listUpdatesForCase(r1.case.id, db);
+    expect(updates.some((u) => u.kind === "scan")).toBe(true);
+    expect(await auditActions("lost_found_case")).toContain("create");
   });
 
-  test("a scan of an unknown chip can still be flagged", async () => {
-    const r = await recordFoundReport(
-      { chipNumber: "555000" },
+  test("an unknown chip scan creates an unmatched case — no animal", async () => {
+    const r = await openFoundCase({ chipNumber: "555000" }, STAFF, db);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.case.animalId).toBeNull();
+    expect(r.case.status).toBe("open");
+    expect(r.case.caseType).toBe("found");
+  });
+
+  test("a scan of a MISSING animal lands on the missing case", async () => {
+    const animal = await seedAnimal();
+    const missing = await openMissingCase({ animalId: animal.id }, STAFF, db);
+    if (!missing.ok) throw new Error("setup");
+
+    const scan = await openFoundCase(
+      { animalId: animal.id, chipNumber: "7777" },
       STAFF,
       db,
     );
-    expect(r.ok).toBe(true);
-    if (!r.ok) return;
-    expect(r.report.animalId).toBeNull();
-    expect(r.report.status).toBe("open");
+    expect(scan.ok).toBe(true);
+    if (!scan.ok) return;
+    expect(scan.matchedMissing).toBe(true);
+    // No second case — the scan is evidence on the missing case.
+    expect(scan.case.id).toBe(missing.case.id);
+    const updates = await listUpdatesForCase(missing.case.id, db);
+    expect(updates.some((u) => u.kind === "scan")).toBe(true);
   });
 
-  test("record with outcome writes an immediately-resolved row", async () => {
+  test("record with outcome writes an immediately-resolved case", async () => {
     const animal = await seedAnimal();
-    const r = await recordFoundReport(
+    const r = await openFoundCase(
       {
         animalId: animal.id,
         chipNumber: "4444",
@@ -664,75 +692,78 @@ describe("found reports", () => {
     );
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.report.status).toBe("resolved");
-    expect(r.report.outcome).toBe("reunited");
-    expect(r.report.resolvedOn).not.toBeNull();
+    expect(r.case.status).toBe("resolved");
+    expect(r.case.outcome).toBe("reunited");
+    expect(r.case.resolvedAt).not.toBeNull();
   });
 
-  test("resolve closes an open report once", async () => {
+  test("resolve closes an open case once", async () => {
     const animal = await seedAnimal();
-    const r = await recordFoundReport(
+    const r = await openFoundCase(
       { animalId: animal.id, chipNumber: "3333" },
       STAFF,
       db,
     );
     if (!r.ok) throw new Error("setup");
-    const resolved = await resolveFoundReport(
-      r.report.id,
-      { outcome: "in-care", notes: "At the vet clinic overnight." },
+    const resolved = await resolveCase(
+      r.case.id,
+      { outcome: "in-care", resolutionNote: "At the vet clinic overnight." },
       STAFF,
       db,
     );
     expect(resolved.ok).toBe(true);
     if (!resolved.ok) return;
-    expect(resolved.report.status).toBe("resolved");
-    expect(resolved.report.outcome).toBe("in-care");
+    expect(resolved.case.status).toBe("resolved");
+    expect(resolved.case.outcome).toBe("in-care");
 
-    // Resolving twice is a conflict — the record is history now.
+    // Resolving twice is rejected — the record is history now.
     expect(
-      await resolveFoundReport(r.report.id, { outcome: "reunited" }, STAFF, db),
-    ).toMatchObject({ ok: false, reason: "conflict" });
-    expect(await auditActions("found_report")).toContain("resolve");
+      await resolveCase(r.case.id, { outcome: "reunited" }, STAFF, db),
+    ).toMatchObject({ ok: false });
+    expect(await auditActions("lost_found_case")).toContain("resolve");
   });
 
-  test("animal profile history lists reports", async () => {
+  test("an unmatched case links to a registry animal, preserving origin", async () => {
     const animal = await seedAnimal();
-    await recordFoundReport({ animalId: animal.id, chipNumber: "1212" }, STAFF, db);
-    await recordFoundReport(
-      { animalId: animal.id, chipNumber: "1213", outcome: "reunited" },
+    const r = await openFoundCase({ chipNumber: "8080" }, STAFF, db);
+    if (!r.ok) throw new Error("setup");
+
+    const linked = await linkCaseToAnimal(r.case.id, animal.id, STAFF, db);
+    expect(linked.ok).toBe(true);
+    if (!linked.ok) return;
+    expect(linked.case.animalId).toBe(animal.id);
+    // linked_at is the durable "began unmatched" evidence.
+    expect(linked.case.linkedAt).not.toBeNull();
+    expect(linked.case.linkedBy).toBe(STAFF);
+  });
+
+  test("animal profile history lists cases, open first", async () => {
+    const animal = await seedAnimal();
+    // An open found case on the animal swallows the next scan (that's
+    // the dedupe) — so a second distinct case needs the first closed.
+    const first = await openFoundCase(
+      { animalId: animal.id, chipNumber: "121212" },
       STAFF,
       db,
     );
-    const reports = await listFoundReportsForAnimal(animal.id, db);
-    expect(reports).toHaveLength(2);
-    // Open items sort first for the profile.
-    expect(reports[0].status).toBe("open");
+    if (!first.ok) throw new Error("setup");
+    await resolveCase(first.case.id, { outcome: "reunited" }, STAFF, db);
+    await openFoundCase({ animalId: animal.id, chipNumber: "131313" }, STAFF, db);
+    const cases = await listCasesForAnimal(animal.id, db);
+    expect(cases).toHaveLength(2);
+    expect(cases[0].status).toBe("open");
+    expect(cases[1].status).toBe("resolved");
   });
 
-  test("invalid outcome and inverted dates are rejected", async () => {
+  test("invalid outcome is rejected", async () => {
     const animal = await seedAnimal();
     expect(
-      await recordFoundReport(
+      await openFoundCase(
         { animalId: animal.id, chipNumber: "6666", outcome: "vanished" },
         STAFF,
         db,
       ),
     ).toMatchObject({ ok: false, field: "outcome" });
-
-    const r = await recordFoundReport(
-      { animalId: animal.id, chipNumber: "6666", reportedOn: "2026-05-10" },
-      STAFF,
-      db,
-    );
-    if (!r.ok) throw new Error("setup");
-    expect(
-      await resolveFoundReport(
-        r.report.id,
-        { outcome: "reunited", resolvedOn: "2026-05-01" },
-        STAFF,
-        db,
-      ),
-    ).toMatchObject({ ok: false, field: "resolvedOn" });
   });
 });
 

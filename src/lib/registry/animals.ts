@@ -57,12 +57,14 @@ import { isIsoDateString, todayIsoDate } from "../vaccinations";
 import { normalizeChipNumber } from "../microchips";
 import {
   listChipConflicts,
-  listFoundReportsForAnimal,
   listMicrochipsForAnimal,
   type ChipConflictRecord,
-  type FoundReportRecord,
   type MicrochipRecord,
 } from "./microchips";
+import {
+  listCasesForAnimal,
+  type LostFoundCaseRecord,
+} from "./lost-found";
 import {
   listRegistrationsForAnimal,
   type RegistrationRecord,
@@ -754,8 +756,10 @@ export interface AnimalRegistryContext {
   microchips: MicrochipRecord[];
   // Open chip-identity conflicts this animal is a party to (#168).
   chipConflicts: ChipConflictRecord[];
-  // Found-animal scan/resolution history for this animal (#168).
-  foundReports: FoundReportRecord[];
+  // Lost/found case history for this animal (#176) — open cases first;
+  // resolved/cancelled cases are retained history, never deleted. This
+  // evolved from #168's found_reports scan log.
+  lostFoundCases: LostFoundCaseRecord[];
   // Full registration history (#169) — every period's authoritative
   // record with owner snapshot, assessed amount, derived payment state,
   // and resolution/cancellation lineage.
@@ -794,7 +798,7 @@ export async function getAnimalRegistryContext(
   const [
     chipRows,
     chipConflictRows,
-    foundReportRows,
+    lostFoundRows,
     registrationRows,
     paymentRows,
     documentRows,
@@ -802,7 +806,7 @@ export async function getAnimalRegistryContext(
   ] = await Promise.all([
     listMicrochipsForAnimal(animalId, db),
     listChipConflicts({ animalId }, db),
-    listFoundReportsForAnimal(animalId, db),
+    listCasesForAnimal(animalId, db),
     listRegistrationsForAnimal(animalId, db),
       // Payments reach the animal only through a registration — there is
       // deliberately no payments.animal_id.
@@ -843,7 +847,7 @@ export async function getAnimalRegistryContext(
   return {
     microchips: chipRows,
     chipConflicts: chipConflictRows,
-    foundReports: foundReportRows,
+    lostFoundCases: lostFoundRows,
     registrations: registrationRows,
     payments: paymentRows,
     paymentEvents,
