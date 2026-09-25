@@ -280,6 +280,25 @@ export default async function globalSetup() {
     photoUrls: [],
   });
 
+  // Penny is the #170 ledger animal — owned by the portal owner, never
+  // registered, so the full money journey (pending → confirm → paid →
+  // refund → outstanding again) exercises real queue/portal movement.
+  const [ledgerAnimal] = await pgliteDb
+    .insert(animals)
+    .values({
+      name: "Penny",
+      species: "dog",
+      sex: "female",
+      lifecycleStatus: "active",
+      photoUrls: [],
+    })
+    .returning();
+  await pgliteDb.insert(ownerships).values({
+    animalId: ledgerAnimal.id,
+    personId: ownerPerson.id,
+    validFrom: "2024-01-01",
+  });
+
   // FAQs so the public accordion renders real items.
   const faqs = [
     {

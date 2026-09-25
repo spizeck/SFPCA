@@ -85,6 +85,12 @@ import {
   updateRegistrationNotes,
   type ManualPaymentMethod,
 } from "@/lib/registry/registrations";
+import {
+  confirmPayment,
+  recordAdjustment,
+  refundPayment,
+  voidPayment,
+} from "@/lib/registry/payments";
 import type { RegistrationCancellationReason } from "@/lib/registrations";
 import { logError, type LogSubsystem } from "@/lib/logger";
 
@@ -178,6 +184,7 @@ export async function getAnimalMedicalAction(
       foundReports: [],
       registrations: [],
       payments: [],
+      paymentEvents: [],
       documents: [],
       auditTrail: [],
     },
@@ -216,7 +223,8 @@ export interface SaveResult {
     | "not-owner"
     | "not-current"
     | "has-current"
-    | "chip-conflict";
+    | "chip-conflict"
+    | "exceeds-refundable";
   field?: string;
   // When reason is 'chip-conflict': the flagged conflict + the animal
   // currently holding the number, so the UI can show both sides.
@@ -237,7 +245,8 @@ type MutationOutcome =
         | "not-owner"
         | "not-current"
         | "has-current"
-        | "chip-conflict";
+        | "chip-conflict"
+        | "exceeds-refundable";
       field?: string;
       chipConflict?: ChipConflictInfo;
     };
@@ -569,7 +578,12 @@ export async function recordRegistrationPaymentAction(
     amountCents: number;
     method: ManualPaymentMethod;
     occurredOn?: string;
+    reference?: string | null;
     note?: string | null;
+    // A claimed-but-unconfirmed bank transfer records 'pending' —
+    // it NEVER settles the balance until confirmPaymentAction runs.
+    pending?: boolean;
+    idempotencyKey?: string | null;
   },
 ): Promise<SaveResult> {
   return save("registration", async (actor) => {
@@ -578,6 +592,73 @@ export async function recordRegistrationPaymentAction(
       input,
       actor,
     );
+    return result.ok ? { ok: true } : result;
+  });
+}
+
+// --- Ledger reconciliation (#170) ---------------------------------------------
+// Every mutation below is staff-driven, requires requireAdmin, and
+// writes BOTH the append-only payment_events row and the audit_events
+// row inside the ledger service's transaction. Confirmed money is never
+// edited — refunds and adjustments are new rows.
+
+// Turn a pending record (a bank transfer that arrived) into money
+// truth. This is the ONLY staff path to 'confirmed' for a pending row.
+export async function confirmPaymentAction(
+  paymentId: string,
+  input: { note?: string | null; reference?: string | null } = {},
+): Promise<SaveResult> {
+  return save("registration", async (actor) => {
+    const result = await confirmPayment(paymentId, input, actor);
+    return result.ok ? { ok: true } : result;
+  });
+}
+
+// Void a pending record entered in error or cancelled. Confirmed money
+// cannot be voided — it leaves only through refund/adjustment.
+export async function voidPaymentAction(
+  paymentId: string,
+  reason: string,
+): Promise<SaveResult> {
+  return save("registration", async (actor) => {
+    const result = await voidPayment(paymentId, { reason }, actor);
+    return result.ok ? { ok: true } : result;
+  });
+}
+
+// Return confirmed money — a NEW 'refund' row linked to the original
+// payment, never a deletion. Partial refunds supported; the service
+// enforces the per-payment refundable cap under a row lock.
+export async function refundPaymentAction(
+  paymentId: string,
+  input: {
+    amountCents: number;
+    reason: string;
+    occurredOn?: string;
+    reference?: string | null;
+    note?: string | null;
+  },
+): Promise<SaveResult> {
+  return save("registration", async (actor) => {
+    const result = await refundPayment(paymentId, input, actor);
+    return result.ok ? { ok: true } : result;
+  });
+}
+
+// Bookkeeping correction of confirmed money where no real money moved —
+// a signed 'adjustment' row with a mandatory reason. Positive adds
+// settled money, negative subtracts.
+export async function recordPaymentAdjustmentAction(
+  registrationId: string,
+  input: {
+    amountCents: number;
+    reason: string;
+    relatedPaymentId?: string | null;
+    occurredOn?: string;
+  },
+): Promise<SaveResult> {
+  return save("registration", async (actor) => {
+    const result = await recordAdjustment(registrationId, input, actor);
     return result.ok ? { ok: true } : result;
   });
 }

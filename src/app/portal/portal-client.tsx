@@ -151,9 +151,10 @@ function AnimalCard({ animal }: { animal: PortalAnimal }) {
                 {animal.registration.paymentState === "unpaid" ||
                 animal.registration.paymentState === "partial" ? (
                   <span className="text-destructive font-medium">
-                    payment outstanding —{" "}
-                    {(animal.registration.amountDueCents / 100).toFixed(2)}{" "}
-                    {animal.registration.currency} due
+                    {(animal.registration.outstandingCents / 100).toFixed(2)}{" "}
+                    {animal.registration.currency} outstanding
+                    {animal.registration.paidCents > 0 &&
+                      ` (${(animal.registration.paidCents / 100).toFixed(2)} of ${(animal.registration.amountDueCents / 100).toFixed(2)} paid)`}
                   </span>
                 ) : (
                   REGISTRATION_PAYMENT_STATE_LABELS[

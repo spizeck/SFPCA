@@ -8,15 +8,6 @@
 // src/lib/registry/reminders.ts — a kind with no evaluator is dormant
 // configuration, never an implicit send.
 //
-// Deferred kinds — documented here so their intended cadence is
-// reviewable, but intentionally NOT registered because their
-// authoritative eligibility sources do not exist yet:
-//   'registration-payment-reminder'  — needs #170 (payment ledger +
-//                                      authoritative outstanding balance)
-//   ('annual-confirmation-reminder' left this list in #166,
-//    'registration-due-reminder' left it in #169 — their eligibility
-//    sources exist now)
-//
 // The reminder classes that exist today. 'vaccination-reminder' reads
 // #173's listDueVaccinations; 'annual-confirmation-reminder' (#166)
 // reads the canonical listOwnershipsRequiringConfirmation — an
@@ -24,11 +15,15 @@
 // exists within the period (never derived from updated_at);
 // 'registration-due-reminder' (#169) reads the canonical
 // listUnregisteredAnimals — an 'active' animal with no active
-// registration row for the current period.
+// registration row for the current period;
+// 'registration-payment-reminder' (#170) reads the canonical
+// listUnpaidRegistrations — an active registration whose ledger
+// balance projection shows a positive outstanding amount.
 export const REMINDER_KINDS = [
   "vaccination-reminder",
   "annual-confirmation-reminder",
   "registration-due-reminder",
+  "registration-payment-reminder",
 ] as const;
 export type ReminderKind = (typeof REMINDER_KINDS)[number];
 
@@ -58,6 +53,10 @@ export interface ReminderPolicy {
   // consume touches. After the cap, the case belongs to staff — the vet
   // queue / exception surface still shows the underlying condition.
   maxTouches: number;
+  // Optional: minimum age of the anchor record before it is eligible.
+  // The payment reminder uses this — a registration completed days ago
+  // with a payment possibly still in transit is not reminder-worthy.
+  graceDays?: number;
 }
 
 export const REMINDER_POLICIES: Record<ReminderKind, ReminderPolicy> = {
@@ -93,6 +92,21 @@ export const REMINDER_POLICIES: Record<ReminderKind, ReminderPolicy> = {
     optional: false,
     cooldownDays: 30,
     maxTouches: 2,
+  },
+  // An active registration's authoritative ledger balance (#170) is
+  // still outstanding. Operational like the other registration
+  // obligations — a debt, not a preference. Same cadence as the
+  // registration-due reminder: at most monthly, twice per period, then
+  // staff follow-up. The 14-day grace keeps a freshly recorded
+  // registration (payment in the mail) from generating mail.
+  "registration-payment-reminder": {
+    kind: "registration-payment-reminder",
+    keyPrefix: "reg-pay",
+    channel: "email",
+    optional: false,
+    cooldownDays: 30,
+    maxTouches: 2,
+    graceDays: 14,
   },
 };
 

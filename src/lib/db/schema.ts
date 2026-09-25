@@ -649,9 +649,33 @@ export const registrations = pgTable(
   ],
 );
 
-// Provider-neutral ledger. Sentoo is one future provider value — nothing
-// Sentoo-specific is foundational here. Deletes are never cascaded:
-// financial history is append-only.
+// Provider-neutral authoritative ledger (#170). Sentoo is one future
+// provider value — nothing Sentoo-specific is foundational here.
+// Deletes are never cascaded: financial history is append-only, so a
+// confirmed row is never edited — corrections, refunds, and voids are
+// new rows or status transitions recorded in payment_events.
+//
+// Payment initiation is not payment truth: 'pending' rows represent a
+// declared intent or in-flight provider transaction and NEVER count
+// toward a balance; only 'confirmed' rows move money. 'failed'/'void'
+// are terminal non-events. Status transitions are one-way:
+//   pending → confirmed | failed | void
+// A confirmed payment's money leaves the balance only through a new
+// 'refund' or 'adjustment' row — the original event stays intact.
+//
+// Vocabularies (src/lib/payments.ts is the shared definition):
+//   kind     'payment' | 'refund' | 'adjustment'
+//   status   'pending' | 'confirmed' | 'failed' | 'void'
+//   method   'cash' | 'bank-transfer' | 'other' | 'online'
+//   source   'staff' | 'provider'
+// method='online' is reserved for provider-mediated money and requires
+// provider + provider_ref identity; (provider, provider_ref) is unique
+// so one authoritative external transaction can never be applied twice.
+// idempotency_key is a caller-supplied dedupe handle (e.g. a staff form
+// token) — a retry resolves to the existing row rather than double-
+// counting money. `reference` is the staff-visible external reference
+// (bank confirmation, receipt-book number). related_payment_id links a
+// refund/adjustment to the confirmed payment it acts on.
 export const payments = pgTable(
   "payments",
   {
@@ -667,8 +691,25 @@ export const payments = pgTable(
     currency: text("currency").notNull().default("USD"),
     kind: text("kind").notNull().default("payment"),
     status: text("status").notNull().default("pending"),
+    method: text("method").notNull().default("other"),
+    source: text("source").notNull().default("staff"),
     provider: text("provider"),
     providerRef: text("provider_ref"),
+    // Staff-visible external reference — bank confirmation number,
+    // receipt-book entry — distinct from the machine provider_ref.
+    reference: text("reference"),
+    // A refund/adjustment's link to the confirmed payment it acts on.
+    // Restrictive: financial history never chains-deletes.
+    relatedPaymentId: uuid("related_payment_id").references(
+      (): AnyPgColumn => payments.id,
+    ),
+    // Caller-supplied dedupe handle — unique when present.
+    idempotencyKey: text("idempotency_key"),
+    // Who recorded the row (staff label or system actor such as a
+    // webhook worker). Free text like vet provider attribution — never
+    // a gate.
+    recordedBy: text("recorded_by"),
+    note: text("note"),
     occurredAt: timestamp("occurred_at", {
       withTimezone: true,
       mode: "date",
@@ -677,14 +718,76 @@ export const payments = pgTable(
       .defaultNow(),
     metadata: jsonb("metadata"),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
   (t) => [
     index("payments_registration_idx").on(t.registrationId),
     index("payments_person_idx").on(t.personId),
+    index("payments_related_idx").on(t.relatedPaymentId),
+    // Duplicate external-transaction protection: the same provider-side
+    // transaction can only ever be applied once, scoped per provider.
+    uniqueIndex("payments_provider_ref_key")
+      .on(t.provider, t.providerRef)
+      .where(sql`${t.providerRef} IS NOT NULL`),
+    uniqueIndex("payments_idempotency_key")
+      .on(t.idempotencyKey)
+      .where(sql`${t.idempotencyKey} IS NOT NULL`),
     check("payments_kind_check", sql`${t.kind} IN ('payment','refund','adjustment')`),
     check(
       "payments_status_check",
       sql`${t.status} IN ('pending','confirmed','failed','void')`,
+    ),
+    check(
+      "payments_method_check",
+      sql`${t.method} IN ('cash','bank-transfer','other','online')`,
+    ),
+    check("payments_source_check", sql`${t.source} IN ('staff','provider')`),
+    // Payments and refunds are positive amounts (refunds subtract in the
+    // projection); adjustments carry a signed correction — never zero.
+    check(
+      "payments_amount_check",
+      sql`(${t.kind} IN ('payment','refund') AND ${t.amountCents} > 0) OR (${t.kind} = 'adjustment' AND ${t.amountCents} <> 0)`,
+    ),
+    // 'online' is the provider-mediated method: it always carries a
+    // provider identity, and a provider_ref can only exist with one.
+    check(
+      "payments_provider_consistency_check",
+      sql`(${t.method} = 'online') = (${t.provider} IS NOT NULL) AND (${t.providerRef} IS NULL OR ${t.provider} IS NOT NULL)`,
+    ),
+  ],
+);
+
+// Append-only reconciliation history (#170). Every mutation of the
+// ledger — creation, confirmation, failure, void, refund, adjustment —
+// writes one row here in the same transaction, preserving who/what
+// performed the reconciliation and when. This is the domain record
+// staff audit a balance from; audit_events still records the privileged
+// staff-mutation trail on top of it.
+export const paymentEvents = pgTable(
+  "payment_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    paymentId: uuid("payment_id")
+      .notNull()
+      .references(() => payments.id),
+    event: text("event").notNull(),
+    actorLabel: text("actor_label"),
+    source: text("source").notNull().default("staff"),
+    // Bounded machine-readable context (e.g. {from,to,reason}) — never
+    // free-text PII or provider secrets.
+    detail: jsonb("detail"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("payment_events_payment_idx").on(t.paymentId),
+    index("payment_events_created_idx").on(t.createdAt),
+    check(
+      "payment_events_event_check",
+      sql`${t.event} IN ('recorded','confirmed','failed','voided','refunded','adjusted')`,
+    ),
+    check(
+      "payment_events_source_check",
+      sql`${t.source} IN ('staff','provider')`,
     ),
   ],
 );

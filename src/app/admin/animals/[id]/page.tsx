@@ -370,6 +370,7 @@ export default function AnimalMedicalPage() {
                   {registry.payments.map((p) => (
                     <li key={p.id}>
                       {(p.amountCents / 100).toFixed(2)} {p.currency} —{" "}
+                      <span className="capitalize">{p.kind}</span>{" "}
                       <span className="capitalize">{p.status}</span>{" "}
                       <span className="text-muted-foreground">
                         {p.occurredAt.slice(0, 10)}
@@ -444,6 +445,8 @@ export default function AnimalMedicalPage() {
       <RegistrationPanel
         animalId={animal.id}
         registrations={registry.registrations}
+        payments={registry.payments}
+        paymentEvents={registry.paymentEvents}
         currentYear={currentRegistrationYear(today)}
         today={today}
         onChanged={loadRecord}

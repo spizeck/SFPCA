@@ -27,7 +27,6 @@ import {
   auditEvents,
   households,
   ownerships,
-  payments,
   persons,
   registrationSubmissions,
   registrations,
@@ -47,7 +46,6 @@ import {
 } from "../animal-registration";
 import {
   currentRegistrationYear,
-  derivePaymentState,
   isRegistrationResolution,
   isRegistrationYear,
   OUTSTANDING_PAYMENT_STATES,
@@ -56,8 +54,14 @@ import {
   type RegistrationResolution,
 } from "../registrations";
 import { isIsoDateString, todayIsoDate } from "../vaccinations";
+import {
+  deriveRegistrationBalance,
+  emptyLedgerAggregate,
+  type LedgerAggregate,
+  type ManualPaymentMethod,
+} from "../payments";
 import { currentOwnershipSq } from "./ownership";
-import { confirmedPaidByRegistration } from "./payments";
+import { moneyByRegistration, recordManualPayment } from "./payments";
 import type { RegistryDb } from "./public-animals";
 
 export interface AdminRegistrationSubmission {
@@ -299,9 +303,14 @@ export interface RegistrationRecord {
   cancellationNote: string | null;
   createdAt: string;
   updatedAt: string;
-  // Derived — paidCents summed from confirmed payments; paymentState
-  // from derivePaymentState(). Never stored.
+  // Derived from the canonical balance projection (#170) — never
+  // stored. paidCents is net CONFIRMED settled money (payments -
+  // refunds + adjustments); outstandingCents what is still owed;
+  // pendingCents in-flight money that does NOT count.
   paidCents: number;
+  outstandingCents: number;
+  overpaidCents: number;
+  pendingCents: number;
   paymentState: RegistrationPaymentState;
 }
 
@@ -338,8 +347,17 @@ type RegistrationRow = Pick<
 
 function toRegistrationDto(
   row: RegistrationRow,
-  paidCents: number,
+  agg: LedgerAggregate,
 ): RegistrationRecord {
+  const balance = deriveRegistrationBalance(
+    {
+      amountDueCents: row.amountDueCents,
+      resolution: isRegistrationResolution(row.resolution)
+        ? row.resolution
+        : null,
+    },
+    agg,
+  );
   return {
     ...row,
     submittedAt: row.submittedAt.toISOString(),
@@ -348,12 +366,11 @@ function toRegistrationDto(
     cancelledAt: row.cancelledAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
-    paidCents,
-    paymentState: derivePaymentState(
-      row.amountDueCents,
-      paidCents,
-      isRegistrationResolution(row.resolution) ? row.resolution : null,
-    ),
+    paidCents: balance.settledCents,
+    outstandingCents: balance.outstandingCents,
+    overpaidCents: balance.overpaidCents,
+    pendingCents: balance.pendingCents,
+    paymentState: balance.paymentState,
   };
 }
 
@@ -370,11 +387,13 @@ export async function listRegistrationsForAnimal(
     .from(registrations)
     .where(eq(registrations.animalId, animalId))
     .orderBy(desc(registrations.year), desc(registrations.createdAt));
-  const paid = await confirmedPaidByRegistration(
+  const money = await moneyByRegistration(
     db,
     rows.map((r) => r.id),
   );
-  return rows.map((r) => toRegistrationDto(r, paid.get(r.id) ?? 0));
+  return rows.map((r) =>
+    toRegistrationDto(r, money.get(r.id) ?? emptyLedgerAggregate()),
+  );
 }
 
 // --- Creation ---------------------------------------------------------------
@@ -528,7 +547,10 @@ export async function createRegistration(
         submissionId: input.submissionId ?? null,
       },
     });
-    return { ok: true, registration: toRegistrationDto(row, 0) };
+    return {
+      ok: true,
+      registration: toRegistrationDto(row, emptyLedgerAggregate()),
+    };
   });
 }
 
@@ -586,7 +608,7 @@ export async function cancelRegistration(
       .returning();
     if (!row) return { ok: false as const, reason: "not-found" as const };
 
-    const paid = await confirmedPaidByRegistration(tx, [registrationId]);
+    const money = await moneyByRegistration(tx, [registrationId]);
     await tx.insert(auditEvents).values({
       actorLabel,
       entityType: "registration",
@@ -601,7 +623,10 @@ export async function cancelRegistration(
     });
     return {
       ok: true,
-      registration: toRegistrationDto(row, paid.get(registrationId) ?? 0),
+      registration: toRegistrationDto(
+        row,
+        money.get(registrationId) ?? emptyLedgerAggregate(),
+      ),
     };
   });
 }
@@ -649,7 +674,7 @@ export async function resolveRegistrationFee(
       .returning();
     if (!row) return { ok: false as const, reason: "not-found" as const };
 
-    const paid = await confirmedPaidByRegistration(tx, [registrationId]);
+    const money = await moneyByRegistration(tx, [registrationId]);
     await tx.insert(auditEvents).values({
       actorLabel,
       entityType: "registration",
@@ -663,7 +688,10 @@ export async function resolveRegistrationFee(
     });
     return {
       ok: true,
-      registration: toRegistrationDto(row, paid.get(registrationId) ?? 0),
+      registration: toRegistrationDto(
+        row,
+        money.get(registrationId) ?? emptyLedgerAggregate(),
+      ),
     };
   });
 }
@@ -709,7 +737,7 @@ export async function correctRegistrationAmount(
       .returning();
     if (!row) return { ok: false as const, reason: "not-found" as const };
 
-    const paid = await confirmedPaidByRegistration(tx, [registrationId]);
+    const money = await moneyByRegistration(tx, [registrationId]);
     await tx.insert(auditEvents).values({
       actorLabel,
       entityType: "registration",
@@ -720,7 +748,10 @@ export async function correctRegistrationAmount(
     });
     return {
       ok: true,
-      registration: toRegistrationDto(row, paid.get(registrationId) ?? 0),
+      registration: toRegistrationDto(
+        row,
+        money.get(registrationId) ?? emptyLedgerAggregate(),
+      ),
     };
   });
 }
@@ -749,7 +780,7 @@ export async function updateRegistrationNotes(
       .returning();
     if (!row) return { ok: false as const, reason: "not-found" as const };
 
-    const paid = await confirmedPaidByRegistration(tx, [registrationId]);
+    const money = await moneyByRegistration(tx, [registrationId]);
     await tx.insert(auditEvents).values({
       actorLabel,
       entityType: "registration",
@@ -762,19 +793,24 @@ export async function updateRegistrationNotes(
     });
     return {
       ok: true,
-      registration: toRegistrationDto(row, paid.get(registrationId) ?? 0),
+      registration: toRegistrationDto(
+        row,
+        money.get(registrationId) ?? emptyLedgerAggregate(),
+      ),
     };
   });
 }
 
 // --- Manual payment recording -----------------------------------------------------
-// The registration-side seam into the #170 ledger: staff recording money
-// that ACTUALLY arrived (cash, bank transfer) writes a confirmed payment
-// row — provider 'manual', no initiation state. #170 owns refunds,
-// adjustments, reconciliation, and provider flows; this only records the
-// receive event an authoritative ledger entry already supports.
-export const MANUAL_PAYMENT_METHODS = ["cash", "bank-transfer", "other"] as const;
-export type ManualPaymentMethod = (typeof MANUAL_PAYMENT_METHODS)[number];
+// The registration-side seam into the #170 ledger. The write itself is
+// recordManualPayment in ./payments — the authoritative ledger service
+// owns every money mutation (idempotency, events, locking); this
+// wrapper only adapts the result back to the RegistrationRecord shape
+// callers already consume.
+export {
+  MANUAL_PAYMENT_METHODS,
+  type ManualPaymentMethod,
+} from "../payments";
 
 export type RecordPaymentResult =
   | { ok: true; paymentId: string; registration: RegistrationRecord }
@@ -786,72 +822,41 @@ export async function recordRegistrationPayment(
     amountCents: number;
     method: ManualPaymentMethod;
     occurredOn?: string;
+    reference?: string | null;
     note?: string | null;
+    pending?: boolean;
+    idempotencyKey?: string | null;
   },
   actorLabel: string,
   db: RegistryDb = getRegistryDb(),
 ): Promise<RecordPaymentResult> {
-  if (!UUID_RE.test(registrationId)) return { ok: false, reason: "invalid" };
-  if (
-    !Number.isInteger(options.amountCents) ||
-    options.amountCents <= 0 ||
-    !MANUAL_PAYMENT_METHODS.includes(options.method) ||
-    (options.occurredOn !== undefined &&
-      !isIsoDateString(options.occurredOn))
-  ) {
-    return { ok: false, reason: "invalid" };
-  }
-
-  return db.transaction(async (tx) => {
-    const [reg] = await tx
-      .select(REGISTRATION_COLUMNS)
-      .from(registrations)
-      .where(eq(registrations.id, registrationId))
-      .for("update");
-    if (!reg) return { ok: false as const, reason: "not-found" as const };
-    if (reg.status !== "active") {
-      return { ok: false as const, reason: "conflict" as const };
-    }
-
-    const [payment] = await tx
-      .insert(payments)
-      .values({
-        registrationId,
-        submissionId: reg.submissionId,
-        personId: reg.personId,
-        amountCents: options.amountCents,
-        currency: reg.currency,
-        kind: "payment",
-        status: "confirmed",
-        provider: `manual:${options.method}`,
-        occurredAt: options.occurredOn
-          ? new Date(`${options.occurredOn}T00:00:00Z`)
-          : new Date(),
-        metadata: options.note?.trim()
-          ? { note: options.note.trim() }
-          : null,
-      })
-      .returning();
-    if (!payment) return { ok: false as const, reason: "invalid" as const };
-
-    const paid = await confirmedPaidByRegistration(tx, [registrationId]);
-    await tx.insert(auditEvents).values({
-      actorLabel,
-      entityType: "registration",
-      entityId: registrationId,
-      action: "record-payment",
-      after: {
-        paymentId: payment.id,
-        amountCents: options.amountCents,
-        method: options.method,
-      },
-    });
+  const result = await recordManualPayment(
+    registrationId,
+    options,
+    actorLabel,
+    db,
+  );
+  if (!result.ok) {
     return {
-      ok: true,
-      paymentId: payment.id,
-      registration: toRegistrationDto(reg, paid.get(registrationId) ?? 0),
+      ok: false,
+      reason:
+        result.reason === "exceeds-refundable" ? "invalid" : result.reason,
     };
-  });
+  }
+  const [reg] = await db
+    .select(REGISTRATION_COLUMNS)
+    .from(registrations)
+    .where(eq(registrations.id, registrationId));
+  if (!reg) return { ok: false, reason: "not-found" };
+  const money = await moneyByRegistration(db, [registrationId]);
+  return {
+    ok: true,
+    paymentId: result.paymentId,
+    registration: toRegistrationDto(
+      reg,
+      money.get(registrationId) ?? emptyLedgerAggregate(),
+    ),
+  };
 }
 
 // --- Current-period eligibility --------------------------------------------------
@@ -936,6 +941,111 @@ export async function listUnregisteredAnimals(
   }));
 }
 
+// --- Unpaid-balance candidates (#170) -----------------------------------------
+
+export interface UnpaidRegistrationItem {
+  registrationId: string;
+  animalId: string;
+  name: string;
+  registryRef: string;
+  lifecycleStatus: string;
+  year: number;
+  amountDueCents: number;
+  outstandingCents: number;
+  currency: string;
+  registeredAt: string | null;
+  ownerLabel: string | null;
+}
+
+// Active registrations whose canonical ledger balance is still
+// outstanding — THE eligibility source for the unpaid-balance reminder
+// (#172 activation) and the staff payment-follow-up view. Waived /
+// complimentary / no-fee / cancelled rows never appear: resolution is
+// filtered in SQL, zero-due is filtered in SQL, and the balance
+// projection does the settled/unpaid arithmetic. `registeredBefore`
+// (ISO date) applies the reminder's grace window — a registration
+// recorded days ago with money possibly in transit is not eligible yet.
+export async function listUnpaidRegistrations(
+  {
+    year = currentRegistrationYear(),
+    asOf = todayIsoDate(),
+    registeredBefore = null,
+    lifecycleStatuses = ["active"],
+  }: {
+    year?: number;
+    asOf?: string;
+    registeredBefore?: string | null;
+    lifecycleStatuses?: string[];
+  } = {},
+  db: RegistryDb = getRegistryDb(),
+): Promise<UnpaidRegistrationItem[]> {
+  if (!isRegistrationYear(year) || !isIsoDateString(asOf)) return [];
+  if (registeredBefore !== null && !isIsoDateString(registeredBefore)) {
+    return [];
+  }
+  const currentOwner = currentOwnershipSq(db, asOf, "reg_owner");
+  const rows = await db
+    .select({
+      registrationId: registrations.id,
+      animalId: registrations.animalId,
+      name: animals.name,
+      registryRef: animals.registryRef,
+      lifecycleStatus: animals.lifecycleStatus,
+      year: registrations.year,
+      amountDueCents: registrations.amountDueCents,
+      currency: registrations.currency,
+      resolution: registrations.resolution,
+      registeredAt: registrations.registeredAt,
+      personName: persons.fullName,
+      householdName: households.name,
+    })
+    .from(registrations)
+    .innerJoin(animals, eq(registrations.animalId, animals.id))
+    .leftJoin(currentOwner, eq(currentOwner.animalId, animals.id))
+    .leftJoin(persons, eq(currentOwner.personId, persons.id))
+    .leftJoin(households, eq(currentOwner.householdId, households.id))
+    .where(
+      and(
+        eq(registrations.year, year),
+        eq(registrations.status, "active"),
+        isNull(registrations.resolution),
+        gt(registrations.amountDueCents, 0),
+        inArray(animals.lifecycleStatus, lifecycleStatuses),
+        registeredBefore !== null
+          ? lte(registrations.registeredAt, sql`${registeredBefore}::date`)
+          : undefined,
+      ),
+    )
+    .orderBy(asc(animals.name), asc(registrations.id));
+  if (rows.length === 0) return [];
+  const money = await moneyByRegistration(
+    db,
+    rows.map((r) => r.registrationId),
+  );
+  const items: UnpaidRegistrationItem[] = [];
+  for (const r of rows) {
+    const balance = deriveRegistrationBalance(
+      { amountDueCents: r.amountDueCents, resolution: null },
+      money.get(r.registrationId) ?? emptyLedgerAggregate(),
+    );
+    if (balance.outstandingCents <= 0) continue;
+    items.push({
+      registrationId: r.registrationId,
+      animalId: r.animalId,
+      name: r.name,
+      registryRef: r.registryRef,
+      lifecycleStatus: r.lifecycleStatus,
+      year: r.year,
+      amountDueCents: r.amountDueCents,
+      outstandingCents: balance.outstandingCents,
+      currency: r.currency,
+      registeredAt: r.registeredAt?.toISOString() ?? null,
+      ownerLabel: r.personName ?? r.householdName ?? null,
+    });
+  }
+  return items;
+}
+
 // --- Staff queues ------------------------------------------------------------
 
 export interface RegistrationQueueItem {
@@ -948,7 +1058,11 @@ export interface RegistrationQueueItem {
   ownerLabel: string | null;
   amountDueCents: number;
   currency: string;
+  // Canonical balance projection (#170): paidCents is net settled
+  // money, outstandingCents what is still owed. Partial payments and
+  // refunds are real arithmetic, never flags.
   paidCents: number;
+  outstandingCents: number;
   paymentState: RegistrationPaymentState;
   registeredAt: string | null;
 }
@@ -1001,12 +1115,20 @@ export async function getRegistrationQueues(
       .orderBy(asc(animals.name), asc(registrations.id)),
   ]);
 
-  const paid = await confirmedPaidByRegistration(
+  const money = await moneyByRegistration(
     db,
     regRows.map((r) => r.id),
   );
   const items = regRows.map((r) => {
-    const paidCents = paid.get(r.id) ?? 0;
+    const balance = deriveRegistrationBalance(
+      {
+        amountDueCents: r.amountDueCents,
+        resolution: isRegistrationResolution(r.resolution)
+          ? r.resolution
+          : null,
+      },
+      money.get(r.id) ?? emptyLedgerAggregate(),
+    );
     return {
       registrationId: r.id,
       animalId: r.animalId,
@@ -1017,12 +1139,9 @@ export async function getRegistrationQueues(
       ownerLabel: r.ownerLabel,
       amountDueCents: r.amountDueCents,
       currency: r.currency,
-      paidCents,
-      paymentState: derivePaymentState(
-        r.amountDueCents,
-        paidCents,
-        isRegistrationResolution(r.resolution) ? r.resolution : null,
-      ),
+      paidCents: balance.settledCents,
+      outstandingCents: balance.outstandingCents,
+      paymentState: balance.paymentState,
       registeredAt: r.registeredAt?.toISOString() ?? null,
     } satisfies RegistrationQueueItem;
   });
