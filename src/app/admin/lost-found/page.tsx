@@ -85,18 +85,21 @@ function CaseRow({ c }: { c: LostFoundCaseRecord }) {
 }
 
 function QueueSection({
+  id,
   title,
   description,
   cases,
   empty,
 }: {
+  // Anchor for dashboard deep links — keep ids stable.
+  id?: string;
   title: string;
   description: string;
   cases: LostFoundCaseRecord[];
   empty: string;
 }) {
   return (
-    <Card>
+    <Card id={id} className="scroll-mt-6 target:ring-2 target:ring-primary/40">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           {title}
@@ -320,24 +323,28 @@ export default function LostFoundWorkspacePage() {
       )}
 
       <QueueSection
+        id="missing"
         title="Missing animals"
         description="Registered animals reported missing — work the case, publish if approved, resolve when reunited."
         cases={data.missing}
         empty="No animals reported missing right now."
       />
       <QueueSection
+        id="unmatched"
         title="Found — needs matching"
         description="Found animals with no registry animal attached yet. Match by chip lookup or manual registry search on the case."
         cases={data.foundUnmatched}
         empty="No unmatched found animals."
       />
       <QueueSection
+        id="matched"
         title="Found — matched"
         description="Found animals linked to a registry record, awaiting reunion or resolution."
         cases={data.foundMatched}
         empty="No matched found cases waiting."
       />
       <QueueSection
+        id="closed"
         title="Recently closed"
         description="Resolved and cancelled cases — history, never deleted."
         cases={data.recentlyClosed}

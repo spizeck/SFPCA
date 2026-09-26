@@ -31,6 +31,7 @@ import "server-only";
 
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import {
+  animals,
   auditEvents,
   paymentEvents,
   payments,
@@ -223,6 +224,58 @@ export async function listPaymentsForAnimal(
     .where(eq(registrations.animalId, animalId))
     .orderBy(desc(payments.occurredAt), desc(payments.createdAt));
   return rows.map(toPaymentDto);
+}
+
+// --- Reconciliation queue (#177) ---------------------------------------------------
+// Pending rows are declared intent that never settles a balance — a
+// claimed bank transfer or in-flight provider checkout sits here until
+// staff confirm it arrived or void it. This is THE canonical "payments
+// requiring reconciliation" read: the registrations page's
+// awaiting-confirmation section and the #177 dashboard compose it.
+// Newest first; bounded — a reconciliation backlog should never be
+// huge, but a runaway provider loop shouldn't page the whole ledger.
+export interface PendingPaymentItem {
+  paymentId: string;
+  registrationId: string | null;
+  animalId: string | null;
+  animalName: string | null;
+  registryRef: string | null;
+  amountCents: number;
+  currency: string;
+  method: string;
+  reference: string | null;
+  recordedBy: string | null;
+  occurredAt: string;
+}
+
+export async function listPendingPayments(
+  { limit = 100 }: { limit?: number } = {},
+  db: RegistryDb = getRegistryDb(),
+): Promise<PendingPaymentItem[]> {
+  const rows = await db
+    .select({
+      paymentId: payments.id,
+      registrationId: payments.registrationId,
+      animalId: registrations.animalId,
+      animalName: animals.name,
+      registryRef: animals.registryRef,
+      amountCents: payments.amountCents,
+      currency: payments.currency,
+      method: payments.method,
+      reference: payments.reference,
+      recordedBy: payments.recordedBy,
+      occurredAt: payments.occurredAt,
+    })
+    .from(payments)
+    .leftJoin(registrations, eq(payments.registrationId, registrations.id))
+    .leftJoin(animals, eq(registrations.animalId, animals.id))
+    .where(and(eq(payments.status, "pending"), eq(payments.kind, "payment")))
+    .orderBy(asc(payments.occurredAt), asc(payments.id))
+    .limit(Math.min(Math.max(limit, 1), 500));
+  return rows.map((r) => ({
+    ...r,
+    occurredAt: r.occurredAt.toISOString(),
+  }));
 }
 
 export interface PaymentEventRecord {

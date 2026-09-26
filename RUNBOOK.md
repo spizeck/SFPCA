@@ -1727,3 +1727,58 @@ case can be reopened if closed by mistake.
 - Public page shows an animal that was found: resolution should have
   de-listed it — check the case status; if it resolved, the listing is
   gone (a cached page refresh may be all that's stale).
+
+## 26. The exception dashboard (#177)
+
+`/admin` is the first thing a volunteer sees after sign-in. It answers
+one question — **"what actually needs my attention?"** — by composing
+the canonical domain services into a small number of actionable queues.
+It is NOT a reporting dashboard: every row it shows is work a volunteer
+can do something about, and every count is a link to the filtered list
+that resolves it.
+
+### 26a. When I log in, what should I look at first?
+
+1. **Needs attention** — work that is overdue, failed, or waiting on
+   you: overdue vet rechecks and vaccinations, animals still missing
+   this year's registration, registrations with a balance, overdue
+   ownership confirmations, delivery failures, pending owner requests,
+   open chip conflicts, open lost/found cases. Click a row — it lands
+   on the exact filtered queue (e.g. `/admin/vet?window=overdue`) where
+   the work is done. When you finish, the dashboard count drops on its
+   own — there is nothing to check off by hand.
+2. **Coming up** — work due soon but not overdue (next week's vet
+   work). It will migrate to Needs attention when the domain's own
+   rules say it's overdue — the dashboard never invents deadlines.
+3. **Running normally** — one quiet line naming every domain whose
+   queue is genuinely empty, so a calm day reads as *calm*, not broken.
+4. **A red "couldn't load" row** means ONE domain's query failed — the
+   rest of the dashboard still works. Click the row to open that
+   domain's page directly, and check Sentry (`dashboard` subsystem).
+
+### 26b. What the queues mean
+
+| Row | Source | Destination | Do this |
+|---|---|---|---|
+| Animals missing {year} registration | #169 `getRegistrationQueues` | `/admin/registrations#unregistered` | Register from the queue, or confirm the animal shouldn't be active |
+| Registrations awaiting payment | #169/#170 balance projection | `/admin/registrations#outstanding` | Record payment on the profile — partial payments stay here until settled; waived/no-fee never appear |
+| Payments awaiting confirmation | #170 `listPendingPayments` | `/admin/registrations#awaiting-confirmation` | Verify the bank transfer arrived, then confirm or void on the profile |
+| Ownership confirmations overdue | #166 `listOwnershipsRequiringConfirmation` | `/admin/registrations#confirmations` | Record confirmation on the animal profile (owners can self-confirm in `/portal`) |
+| Delivery needs attention | #172 `communicationSummary` | `/admin/communications#exceptions` | Inspect the failure — bounced address, fixable recipient, etc. Opted-out "skipped" rows are NOT failures and never appear |
+| Overdue vet work / due today / alerts | #175 `vetQueueSummary` | `/admin/vet?window=overdue\|today\|?kind=alert` | Work the filtered queue — complete rechecks, confirm arrivals, resolve alerts |
+| Vet work due soon | same | `/admin/vet?window=week` | Look ahead — nothing owed yet |
+| Owner requests | #166 `countPendingOwnerRequests` | `/admin/requests#pending` | Approve/deny account claims, transfers, lifecycle reports |
+| Microchip conflicts | #168 `countOpenChipConflicts` | `/admin/chip-lookup#conflicts` | Resolve on the conflicting animal's profile |
+| Missing / unmatched / matched cases | #176 `getOpenCaseCounts` | `/admin/lost-found#missing\|#unmatched\|#matched` | Work the case — add updates, link, resolve |
+
+### 26c. Failure modes
+
+- A red row under "Needs attention" labelled "couldn't load": that
+  domain's summary query failed. The dashboard deliberately shows an
+  error row — never a misleading `0`. Click through to the domain page
+  and check Sentry (`dashboard` subsystem logs the original error).
+- A count looks stale: the dashboard composes live on every request
+  (no cache) — a hard refresh re-reads the real state.
+- A queue row leads to a page that shows nothing: the filter params
+  are bookmarkable URL state (`?window=`, `#anchor`) — confirm the URL
+  still carries them.

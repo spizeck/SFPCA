@@ -827,3 +827,66 @@ Dependency findings are filed as follow-up issues. #166 (owner
 registry, portal, annual confirmation) is implemented — see §5.
 The schema already contains the tables the remaining issues need, so
 they can proceed once the phase they depend on lands.
+
+## 16. Exception dashboard composition (post-#177)
+
+`/admin` is an operational exception dashboard, not a reporting
+surface. One server-side composition layer —
+`src/lib/registry/dashboard.ts` — answers "what actually needs my
+attention?" by aggregating **canonical domain summaries**. No domain
+rule lives in the composition or the page: each service decides what
+constitutes an exception; the composition only normalizes presentation.
+
+### Composition model
+
+```
+getDashboardWork(role, db)
+  ├── gatherDashboardSummaries — one Promise.all of per-domain
+  │   `attempt()` wrappers (concurrent, independently isolated)
+  │     registrations      → getRegistrationQueues        (#169)
+  │     pendingPayments    → listPendingPayments (count)  (#170)
+  │     confirmations      → listOwnershipsRequiringConfirmation (#166)
+  │     communications     → communicationSummary         (#172)
+  │     vetQueue           → vetQueueSummary              (#175/#173)
+  │     lostFound          → getOpenCaseCounts            (#176)
+  │     ownerRequests      → countPendingOwnerRequests    (#166)
+  │     chipConflicts      → countOpenChipConflicts       (#168)
+  └── composeDashboard(summaries, role)  ← pure, unit-tested
+        → { needsAttention, comingUp, allClear, failures }
+```
+
+`DomainResult<T>` is the isolation contract: a thrown domain query is
+caught, logged under the `dashboard` subsystem, and rendered as a
+failure row (each source's manual-check destination lives in
+`FAILURE_DESTINATIONS`) — **a failure is never reported as a zero
+count** (that would be a false all-clear). Other domains still render.
+`allClear` lists only domains that loaded AND produced no work — a
+failed domain is never listed as clear.
+
+### Urgency & actionability
+
+Urgency is a presentation enum (`overdue | action | soon`), never a
+recomputed deadline — the domain's own rules decide (vet `dueOn`,
+registration `outstandingCents`, confirmation `dueOn`). The
+actionability rule: an item renders ONLY when its count is non-zero
+AND a destination exists where the volunteer can act. Items carry
+`{key, label, count, urgency, href, domain}` and nothing else — counts
+and destinations only, no PII. Destinations are bookmarkable URL state
+(`/admin/vet?window=overdue`, `/admin/registrations#unregistered`,
+`/admin/chip-lookup#conflicts`) so links survive reloads.
+
+### Roles
+
+`admin_users.role` (`admin|editor`) is threaded through composition,
+but every admin surface currently authorizes the two roles identically
+(`requireAdmin`), so `composeDashboard` deliberately applies no
+per-role filtering — a real distinction lands with the workflow that
+introduces it, not here.
+
+### #178 extension seam
+
+A new domain joins by adding one `attempt()` call to
+`gatherDashboardSummaries`, one key to `DashboardSummaries` +
+`FAILURE_DESTINATIONS`, and one block in `composeDashboard` — the page
+and plumbing don't change. Generic duplicate/data-quality detection is
+#178's scope — the composition only consumes its eventual summary seam.

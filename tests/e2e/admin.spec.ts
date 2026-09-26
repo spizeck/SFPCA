@@ -35,7 +35,7 @@ test.describe("admin journeys", () => {
     // session cookie, then client-navigates to /admin.
     await expect(page).toHaveURL("/admin");
     await expect(
-      page.getByRole("heading", { name: "Admin Dashboard" }),
+      page.getByRole("heading", { name: "Operations dashboard" }),
     ).toBeVisible();
   });
 
@@ -48,7 +48,11 @@ test.describe("admin journeys", () => {
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page).toHaveURL("/admin");
 
-    await page.getByRole("link", { name: "Manage Animals" }).click();
+    await page
+      .getByRole("navigation")
+      .getByRole("link", { name: "Animals" })
+      .first()
+      .click();
 
     await expect(page).toHaveURL("/admin/animals");
     await expect(

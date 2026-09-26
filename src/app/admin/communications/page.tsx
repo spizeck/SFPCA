@@ -319,7 +319,10 @@ export default function CommunicationsPage() {
         </CardContent>
       </Card>
 
-      <Card className="mb-6">
+      <Card
+        id="exceptions"
+        className="mb-6 scroll-mt-6 target:ring-2 target:ring-primary/40"
+      >
         <CardHeader>
           <CardTitle>Exceptions</CardTitle>
           <CardDescription>
