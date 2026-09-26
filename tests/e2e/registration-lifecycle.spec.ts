@@ -96,13 +96,16 @@ test.describe("annual registrations (#169)", () => {
 
     // Exception queue: Reggie is an active unregistered gap; the
     // deceased Oldbones is lifecycle-excluded, not merely absent.
+    // Scope to the unregistered section — Reggie's overdue ownership
+    // confirmation also lists him under #confirmations.
+    const unregistered = page.locator("#unregistered");
     await expect(
-      page.getByRole("row", { name: /Reggie/ }),
+      unregistered.getByRole("row", { name: /Reggie/ }),
     ).toBeVisible();
-    await expect(page.getByText("Oldbones")).not.toBeVisible();
+    await expect(unregistered.getByText("Oldbones")).not.toBeVisible();
 
     // Register straight from the queue — one authoritative row.
-    await page
+    await unregistered
       .getByRole("row", { name: /Reggie/ })
       .getByRole("button", { name: "Register" })
       .click();
@@ -177,7 +180,10 @@ test.describe("registration payment ledger (#170)", () => {
     await page.goto("/admin/registrations");
 
     // Penny is an active unregistered gap — register from the queue.
+    // Scope to the unregistered section — her overdue confirmation
+    // also lists her under #confirmations.
     await page
+      .locator("#unregistered")
       .getByRole("row", { name: /Penny/ })
       .getByRole("button", { name: "Register" })
       .click();

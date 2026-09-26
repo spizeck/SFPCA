@@ -332,7 +332,10 @@ export default function OwnerRequestsPage() {
         </p>
       </div>
 
-      <Card>
+      <Card
+        id="pending"
+        className="scroll-mt-6 target:ring-2 target:ring-primary/40"
+      >
         <CardHeader>
           <CardTitle>Pending</CardTitle>
           <CardDescription>

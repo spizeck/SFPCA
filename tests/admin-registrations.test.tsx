@@ -13,6 +13,8 @@ const {
   mockCreateFromSubmission,
   mockSearchAnimals,
   mockCreateRegistration,
+  mockListPendingPayments,
+  mockListConfirmationsDue,
   mockToast,
 } = vi.hoisted(() => ({
   mockListRegistrations: vi.fn(),
@@ -22,6 +24,8 @@ const {
   mockCreateFromSubmission: vi.fn(),
   mockSearchAnimals: vi.fn(),
   mockCreateRegistration: vi.fn(),
+  mockListPendingPayments: vi.fn(),
+  mockListConfirmationsDue: vi.fn(),
   mockToast: vi.fn(),
 }));
 
@@ -32,6 +36,9 @@ vi.mock("@/app/admin/registrations/actions", () => ({
   getRegistrationQueuesAction: mockGetQueues,
   createRegistrationFromSubmissionAction: mockCreateFromSubmission,
   searchAnimalsForLinkAction: mockSearchAnimals,
+  // #177 reconciliation/confirmation queue feeds.
+  listPendingPaymentsAction: mockListPendingPayments,
+  listConfirmationsDueAction: mockListConfirmationsDue,
 }));
 
 vi.mock("@/app/admin/animals/[id]/actions", () => ({
@@ -78,6 +85,8 @@ beforeEach(() => {
   mockCreateFromSubmission.mockResolvedValue({ ok: true });
   mockSearchAnimals.mockResolvedValue([]);
   mockCreateRegistration.mockResolvedValue({ ok: true });
+  mockListPendingPayments.mockResolvedValue([]);
+  mockListConfirmationsDue.mockResolvedValue([]);
 });
 
 describe("admin registrations", () => {

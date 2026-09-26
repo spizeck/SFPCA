@@ -16,12 +16,14 @@ async function signInAsAdmin(page: Page) {
 }
 
 test.describe("communications admin surface", () => {
-  test("the dashboard card links to a working exceptions page", async ({
+  test("the nav links to a working exceptions page", async ({
     page,
   }) => {
     await signInAsAdmin(page);
     await page
-      .getByRole("link", { name: "Open communications" })
+      .getByRole("navigation")
+      .getByRole("link", { name: "Comms" })
+      .first()
       .click();
     await expect(page).toHaveURL("/admin/communications");
     await expect(

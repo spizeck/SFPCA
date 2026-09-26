@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { getVetQueueAction } from "./actions";
 import type { VetQueueItem } from "@/lib/registry/vet-queue";
 import { addDaysToIsoDate, todayIsoDate } from "@/lib/vaccinations";
@@ -67,6 +68,19 @@ const WINDOW_FILTERS: { value: WindowFilter; label: string }[] = [
   { value: "today", label: "Due today" },
   { value: "week", label: "Next 7 days" },
 ];
+
+const KIND_VALUES = new Set<string>(KIND_FILTERS.map((f) => f.value));
+const WINDOW_VALUES = new Set<string>(WINDOW_FILTERS.map((f) => f.value));
+
+// URL params are the dashboard's deep links (/admin/vet?window=overdue)
+// and must be bookmarkable — validate strictly against the allowlists;
+// anything else falls back to the full list.
+function parseKind(raw: string | null): KindFilter {
+  return raw && KIND_VALUES.has(raw) ? (raw as KindFilter) : "all";
+}
+function parseWindow(raw: string | null): WindowFilter {
+  return raw && WINDOW_VALUES.has(raw) ? (raw as WindowFilter) : "all";
+}
 
 function itemDate(item: VetQueueItem): string {
   switch (item.kind) {
@@ -175,8 +189,33 @@ export default function VetQueuePage() {
   const [items, setItems] = useState<VetQueueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [kindFilter, setKindFilter] = useState<KindFilter>("all");
-  const [windowFilter, setWindowFilter] = useState<WindowFilter>("all");
+  // Filters live in the URL (useSearchParams) so dashboard links and
+  // bookmarks land on the filtered queue; clicks rewrite the params.
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const router = useRouter();
+  // The URL is the entry point (dashboard deep links, bookmarks) — it
+  // initializes and stays in sync with local filter state, which drives
+  // the render. Buttons write both.
+  const [kindFilter, setKindFilter] = useState<KindFilter>(() =>
+    parseKind(searchParams.get("kind")),
+  );
+  const [windowFilter, setWindowFilter] = useState<WindowFilter>(() =>
+    parseWindow(searchParams.get("window")),
+  );
+  useEffect(() => {
+    setKindFilter(parseKind(searchParams.get("kind")));
+    setWindowFilter(parseWindow(searchParams.get("window")));
+  }, [searchParams]);
+  const setFilters = (kind: KindFilter, window: WindowFilter) => {
+    setKindFilter(kind);
+    setWindowFilter(window);
+    const params = new URLSearchParams();
+    if (kind !== "all") params.set("kind", kind);
+    if (window !== "all") params.set("window", window);
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  };
   // Derived states are date-relative; fix "today" at load so rows don't
   // shift mid-session.
   const [today] = useState(() => todayIsoDate());
@@ -239,7 +278,7 @@ export default function VetQueuePage() {
               size="sm"
               variant={kindFilter === f.value ? "default" : "outline"}
               aria-pressed={kindFilter === f.value}
-              onClick={() => setKindFilter(f.value)}
+              onClick={() => setFilters(f.value, windowFilter)}
             >
               {f.label}
             </Button>
@@ -257,7 +296,7 @@ export default function VetQueuePage() {
               size="sm"
               variant={windowFilter === f.value ? "default" : "outline"}
               aria-pressed={windowFilter === f.value}
-              onClick={() => setWindowFilter(f.value)}
+              onClick={() => setFilters(kindFilter, f.value)}
             >
               {f.label}
             </Button>
