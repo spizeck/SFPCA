@@ -55,14 +55,14 @@ test.describe("chip lookup", () => {
     await expect(page.getByText("E2E Owner").first()).toBeVisible();
     await expect(page.getByText(/\+599 416 0001/)).toBeVisible();
 
-    // Record what happened — the small found-resolution record.
+    // Record what happened — the scan resolves a found case directly
+    // (#176 case model; was a found-report row under #168).
     await page.getByLabel("Record outcome").click();
     await page.getByRole("option", { name: "Reunited with owner" }).click();
     await page.getByRole("button", { name: "Record" }).click();
-    // exact: the aria-live toast reads "Notification Found report
-    // recorded" — without it this intermittently resolves to 2 elements.
+    // exact: the aria-live toast resolves to one element this way.
     await expect(
-      page.getByText("Found report recorded", { exact: true }),
+      page.getByText("Found case resolved", { exact: true }),
     ).toBeVisible();
 
     // Second scan, no mouse: the field is focused and cleared again.
@@ -72,8 +72,8 @@ test.describe("chip lookup", () => {
     await expect(
       page.getByRole("link", { name: "Rexley" }),
     ).toBeVisible();
-    // The previously-resolved report no longer shows as open.
-    await expect(page.getByText("Open found reports")).toHaveCount(0);
+    // The previously-resolved case no longer shows as open.
+    await expect(page.getByText("Open cases")).toHaveCount(0);
   });
 
   test("unknown chip shows a clear no-match state with next steps", async ({

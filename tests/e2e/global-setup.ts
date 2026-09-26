@@ -299,6 +299,33 @@ export default async function globalSetup() {
     validFrom: "2024-01-01",
   });
 
+  // Daisy is the #176 lost/found animal — a dedicated record so case
+  // workflows (missing case, publish, scan-match, reunion) can't
+  // collide with the other suites' animal lifecycle. She carries a
+  // chip so the found-scan path can match her, and the portal owner
+  // owns her so owner-reported missing is exercisable.
+  const [lostAnimal] = await pgliteDb
+    .insert(animals)
+    .values({
+      name: "Daisy",
+      species: "dog",
+      sex: "female",
+      lifecycleStatus: "active",
+      photoUrls: [],
+    })
+    .returning();
+  await pgliteDb.insert(ownerships).values({
+    animalId: lostAnimal.id,
+    personId: ownerPerson.id,
+    validFrom: "2024-01-01",
+  });
+  await pgliteDb.insert(microchipRecords).values({
+    animalId: lostAnimal.id,
+    chipNumber: "985222000333444",
+    chipDisplay: "985-222-000-333-444",
+    assignedFrom: "2024-01-01",
+  });
+
   // FAQs so the public accordion renders real items.
   const faqs = [
     {

@@ -945,34 +945,81 @@ export const microchipConflicts = pgTable(
   ],
 );
 
-// Found-animal resolution history (#168) — the deliberately small record
-// of "a chipped animal was scanned/reported, and what came of it". This
-// is NOT #176's lost/found case management: no public reports, no
-// sightings, no workflow states — just durable evidence that a lookup
-// happened and how staff resolved it. animal_id is null when the scanned
-// chip matched nothing (an unidentified found animal is still worth
-// flagging for follow-up); chip_number is a denormalized snapshot of
-// what was scanned so the row stays meaningful if chip records change.
-export const foundReports = pgTable(
-  "found_reports",
+// Lost/found cases (#176) — the durable workflow record for "an animal
+// is missing" or "an animal was found". This table EVOLVED from #168's
+// found_reports scan log: those rows migrated here as 'found' cases and
+// the old table was dropped, so there is ONE representation of a
+// found-animal event — there is intentionally no second found-report
+// table. A case is deliberately NOT permanent animal lifecycle state:
+// a 'missing' case opens and resolves while the animal stays lifecycle
+// 'active'. The single deliberate intersection is outcome 'deceased' on
+// a linked case, which drives the canonical lifecycle transition
+// instead of encoding death only in case notes.
+//
+// animal_id is NULL for unmatched found animals — an unknown chip or an
+// unregistered stray is a case with description/photo/found details but
+// no fabricated registry animal. linked_at/linked_by record when staff
+// later matched it, preserving the fact the case began unmatched.
+//
+// chip_number/chip_display/microchip_record_id are the denormalized
+// snapshot of what a scanner saw — the row stays meaningful even if
+// chip records are later corrected.
+//
+// published_at is the explicit staff opt-in to public listing: only an
+// open 'missing' case with published_at set appears on the public
+// lost-pets page, and only the dedicated public DTO's allowlisted
+// fields leave the server — owner/reporter contact, staff notes, and
+// chip data never do.
+export const lostFoundCases = pgTable(
+  "lost_found_cases",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    caseType: text("case_type").notNull(),
+    status: text("status").notNull().default("open"),
     animalId: uuid("animal_id").references(() => animals.id),
-    // The chip record the lookup matched — set null keeps the report if
-    // chip history is ever repaired; chip_number below is the snapshot.
+    reportedAt: timestamp("reported_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    // 'staff' — entered from an admin surface; 'owner-portal' — reported
+    // by the authenticated current owner (server-side authorized).
+    reportedVia: text("reported_via").notNull().default("staff"),
+    // Who reported it — PRIVATE, staff-only, never on any public DTO.
+    reporterName: text("reporter_name"),
+    reporterContact: text("reporter_contact"),
+    // Missing-case fields: what the reporter said about the loss.
+    lastSeenOn: date("last_seen_on", { mode: "string" }),
+    lastSeenLocation: text("last_seen_location"),
+    // Found-case fields: where/when the animal turned up.
+    foundOn: date("found_on", { mode: "string" }),
+    foundLocation: text("found_location"),
+    // Staff-facing description — especially the identity of an
+    // UNMATCHED found animal (species guess, colours, collar).
+    description: text("description"),
+    // Case-level photos as validated URL strings — same convention as
+    // animals.photo_urls; used by unmatched found animals that have no
+    // animal record to borrow photos from.
+    photoUrls: text("photo_urls").array().notNull().default(sql`'{}'::text[]`),
+    chipNumber: text("chip_number"),
+    chipDisplay: text("chip_display"),
     microchipRecordId: uuid("microchip_record_id").references(
       () => microchipRecords.id,
       { onDelete: "set null" },
     ),
-    chipNumber: text("chip_number").notNull(),
-    chipDisplay: text("chip_display"),
-    reportedOn: date("reported_on", { mode: "string" })
-      .notNull()
-      .defaultNow(),
-    status: text("status").notNull().default("open"),
-    resolvedOn: date("resolved_on", { mode: "string" }),
-    // Bounded outcome vocabulary; notes carry the detail.
+    // Set when an unmatched case is linked to a registry animal — the
+    // pair's presence is the durable "this case began unmatched" fact.
+    linkedAt: timestamp("linked_at", { withTimezone: true }),
+    linkedBy: text("linked_by"),
+    // Public-listing opt-in (missing cases only, enforced by CHECK).
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    publishedBy: text("published_by"),
+    // Staff-approved PUBLIC text — the only free text that may appear on
+    // the public page.
+    publicNote: text("public_note"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedBy: text("resolved_by"),
     outcome: text("outcome"),
+    resolutionNote: text("resolution_note"),
+    // Staff-only working notes — never public.
     notes: text("notes"),
     actorIdentityId: uuid("actor_identity_id").references(
       () => authIdentities.id,
@@ -983,35 +1030,117 @@ export const foundReports = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [
-    index("found_reports_animal_idx").on(t.animalId),
-    index("found_reports_chip_idx").on(t.chipNumber),
-    // The follow-up read: unresolved found animals, oldest first.
-    index("found_reports_open_idx")
-      .on(t.reportedOn)
+    index("lost_found_cases_animal_idx").on(t.animalId),
+    index("lost_found_cases_chip_idx").on(t.chipNumber),
+    // The queue reads: open cases by type, oldest first.
+    index("lost_found_cases_open_idx")
+      .on(t.caseType, t.reportedAt)
       .where(sql`${t.status} = 'open'`),
-    // Re-scanning the same animal (or the same unidentified chip)
-    // re-flags the SAME open report, not a new work item.
-    uniqueIndex("found_reports_open_dedup")
-      .on(
-        t.chipNumber,
-        sql`coalesce(${t.animalId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
-      )
-      .where(sql`${t.status} = 'open'`),
+    // The public page read: published open missing cases.
+    index("lost_found_cases_public_idx")
+      .on(t.reportedAt)
+      .where(
+        sql`${t.status} = 'open' AND ${t.publishedAt} IS NOT NULL AND ${t.caseType} = 'missing'`,
+      ),
+    // At most ONE open missing case and ONE open found case per animal.
+    // Both may legitimately coexist ("Fluffy is missing" + "a found tabby
+    // was matched to Fluffy") — resolving either resolves the other.
+    uniqueIndex("lost_found_cases_open_missing_key")
+      .on(t.animalId)
+      .where(sql`${t.status} = 'open' AND ${t.caseType} = 'missing'`),
+    uniqueIndex("lost_found_cases_open_found_key")
+      .on(t.animalId)
+      .where(
+        sql`${t.status} = 'open' AND ${t.caseType} = 'found' AND ${t.animalId} IS NOT NULL`,
+      ),
+    // Re-scanning the same unidentified chip re-flags the SAME open
+    // unmatched case, not a new work item.
+    uniqueIndex("lost_found_cases_open_chip_key")
+      .on(t.chipNumber)
+      .where(
+        sql`${t.status} = 'open' AND ${t.animalId} IS NULL AND ${t.chipNumber} IS NOT NULL`,
+      ),
     check(
-      "found_reports_status_check",
-      sql`${t.status} IN ('open','resolved')`,
+      "lost_found_cases_type_check",
+      sql`${t.caseType} IN ('missing','found')`,
     ),
     check(
-      "found_reports_outcome_check",
-      sql`${t.outcome} IS NULL OR ${t.outcome} IN ('reunited','in-care','other')`,
+      "lost_found_cases_status_check",
+      sql`${t.status} IN ('open','resolved','cancelled')`,
     ),
     check(
-      "found_reports_resolved_consistency_check",
-      sql`(${t.status} = 'open') = (${t.resolvedOn} IS NULL)`,
+      "lost_found_cases_outcome_check",
+      sql`${t.outcome} IS NULL OR ${t.outcome} IN ('reunited','owner-located','in-care','deceased','other')`,
     ),
     check(
-      "found_reports_resolved_range_check",
-      sql`${t.resolvedOn} IS NULL OR ${t.resolvedOn} >= ${t.reportedOn}`,
+      "lost_found_cases_reported_via_check",
+      sql`${t.reportedVia} IN ('staff','owner-portal')`,
+    ),
+    // A missing report is always about a known registry animal.
+    check(
+      "lost_found_cases_missing_animal_check",
+      sql`${t.caseType} = 'found' OR ${t.animalId} IS NOT NULL`,
+    ),
+    check(
+      "lost_found_cases_resolved_consistency_check",
+      sql`(${t.status} = 'open') = (${t.resolvedAt} IS NULL)`,
+    ),
+    check(
+      "lost_found_cases_outcome_consistency_check",
+      sql`(${t.status} = 'resolved') = (${t.outcome} IS NOT NULL)`,
+    ),
+    // Public listing is only ever a missing-animal notice for a real
+    // registry animal.
+    check(
+      "lost_found_cases_publish_check",
+      sql`${t.publishedAt} IS NULL OR (${t.caseType} = 'missing' AND ${t.animalId} IS NOT NULL)`,
+    ),
+    check(
+      "lost_found_cases_linked_check",
+      sql`${t.linkedAt} IS NULL OR (${t.linkedBy} IS NOT NULL AND ${t.animalId} IS NOT NULL)`,
+    ),
+  ],
+);
+
+// Case chronology (#176) — append-only sightings, scans and notes in
+// order. Case-level facts (linkage, publication, resolution) also write
+// rows so the timeline reads as the complete story of the case.
+// reporter fields are PRIVATE: they may carry a member of the public's
+// contact details and must never appear on a public DTO.
+export const lostFoundUpdates = pgTable(
+  "lost_found_updates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    caseId: uuid("case_id")
+      .notNull()
+      .references(() => lostFoundCases.id),
+    kind: text("kind").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    location: text("location"),
+    note: text("note"),
+    reporterName: text("reporter_name"),
+    reporterContact: text("reporter_contact"),
+    // 'public' rows came in through the public sighting form; the rest
+    // are staff/owner-portal provenance.
+    source: text("source").notNull().default("staff"),
+    actorIdentityId: uuid("actor_identity_id").references(
+      () => authIdentities.id,
+      { onDelete: "set null" },
+    ),
+    actorLabel: text("actor_label"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("lost_found_updates_case_idx").on(t.caseId, t.occurredAt),
+    check(
+      "lost_found_updates_kind_check",
+      sql`${t.kind} IN ('sighting','scan','update')`,
+    ),
+    check(
+      "lost_found_updates_source_check",
+      sql`${t.source} IN ('staff','owner-portal','public')`,
     ),
   ],
 );

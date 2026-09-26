@@ -297,6 +297,108 @@ export async function resolveAnimalOwner(
   };
 }
 
+// Full owner-contact projection for STAFF surfaces (chip lookup,
+// lost/found case detail). Deliberately different from
+// resolveAnimalOwner: that one picks the single sendable recipient for
+// the communication pipeline, while this shows EVERY currently-valid
+// ownership with all reachable contacts — staff verifying a reunion
+// need to see ambiguity, not have it hidden. WHO is current comes from
+// listCurrentOwnerships; HOW to reach them resolves person-side owners
+// directly and household ownerships through members (primary first,
+// same deterministic order as householdContactFor).
+export interface OwnerContact {
+  personId: string;
+  name: string;
+  role: string | null;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  preferredChannel: string | null;
+}
+
+export interface AnimalOwnerContacts {
+  ownershipId: string;
+  kind: "person" | "household";
+  // Display name of the owning party (person fullName / household name).
+  name: string;
+  householdAddress: string | null;
+  contacts: OwnerContact[];
+}
+
+export async function resolveAnimalOwnerContacts(
+  animalId: string,
+  db: RegistryDb = getRegistryDb(),
+): Promise<{ owners: AnimalOwnerContacts[]; ambiguous: boolean }> {
+  const current = await listCurrentOwnerships(animalId, undefined, db);
+  const owners: AnimalOwnerContacts[] = [];
+  for (const o of current) {
+    if (o.personId) {
+      const [person] = await db
+        .select()
+        .from(persons)
+        .where(eq(persons.id, o.personId));
+      owners.push({
+        ownershipId: o.id,
+        kind: "person",
+        name: o.ownerName,
+        householdAddress: null,
+        contacts: person
+          ? [
+              {
+                personId: person.id,
+                name: person.fullName,
+                role: null,
+                phone: person.phone,
+                email: person.email,
+                address: person.address,
+                preferredChannel: person.preferredChannel,
+              },
+            ]
+          : [],
+      });
+    } else if (o.householdId) {
+      const [household] = await db
+        .select()
+        .from(households)
+        .where(eq(households.id, o.householdId));
+      const memberRows = await db
+        .select({
+          personId: persons.id,
+          name: persons.fullName,
+          phone: persons.phone,
+          email: persons.email,
+          address: persons.address,
+          preferredChannel: persons.preferredChannel,
+          role: householdMembers.role,
+          memberSince: householdMembers.createdAt,
+        })
+        .from(householdMembers)
+        .innerJoin(persons, eq(householdMembers.personId, persons.id))
+        .where(eq(householdMembers.householdId, o.householdId));
+      memberRows.sort((a, b) => {
+        if (a.role !== b.role) return a.role === "primary" ? -1 : 1;
+        return a.memberSince.getTime() - b.memberSince.getTime();
+      });
+      owners.push({
+        ownershipId: o.id,
+        kind: "household",
+        name: o.ownerName,
+        householdAddress: household?.address ?? null,
+        contacts: memberRows.map((m) => ({
+          personId: m.personId,
+          name: m.name,
+          role: m.role,
+          phone: m.phone,
+          email: m.email,
+          address: m.address,
+          preferredChannel: m.preferredChannel,
+        })),
+      });
+    }
+  }
+  return { owners, ambiguous: current.length > 1 };
+}
+
 // --- Ownership reads ------------------------------------------------------------
 
 const OWNERSHIP_COLUMNS = {

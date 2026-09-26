@@ -27,6 +27,7 @@ import { PortalSignOut } from "./portal-sign-out";
 import {
   cancelOwnerRequestAction,
   confirmAnimalAction,
+  reportMissingAction,
   submitOwnerReportAction,
   updateOwnerProfileAction,
 } from "./actions";
@@ -54,6 +55,10 @@ function AnimalCard({ animal }: { animal: PortalAnimal }) {
   const [targetName, setTargetName] = useState("");
   const [targetContact, setTargetContact] = useState("");
   const [effectiveOn, setEffectiveOn] = useState("");
+  const [missingOpen, setMissingOpen] = useState(false);
+  const [missingReported, setMissingReported] = useState(false);
+  const [missingLocation, setMissingLocation] = useState("");
+  const [missingDetail, setMissingDetail] = useState("");
 
   const confirm = () => {
     startTransition(async () => {
@@ -92,6 +97,31 @@ function AnimalCard({ animal }: { animal: PortalAnimal }) {
         setTargetName("");
         setTargetContact("");
         setEffectiveOn("");
+      }
+    });
+  };
+
+  const reportMissing = () => {
+    startTransition(async () => {
+      const result = await reportMissingAction({
+        ownershipId: animal.ownershipId,
+        lastSeenLocation: missingLocation || undefined,
+        detail: missingDetail || undefined,
+      });
+      if (result.ok) {
+        setMissingReported(true);
+        setMissingOpen(false);
+        toast({
+          title: "Missing report sent",
+          description:
+            "SFPCA staff have been notified and will start looking. We'll contact you if the animal is found.",
+        });
+      } else {
+        toast({
+          title: "Couldn't send the report",
+          description: result.error,
+          variant: "destructive",
+        });
       }
     });
   };
@@ -181,6 +211,21 @@ function AnimalCard({ animal }: { animal: PortalAnimal }) {
               ? "Confirm still living on Saba with me"
               : "Confirmed for this year"}
           </Button>
+          {/* Missing is a direct lost/found case (#176), not a
+              staff-reviewed change request — no ambiguity to
+              adjudicate, and speed matters when an animal is lost. */}
+          {missingReported ? (
+            <Badge variant="secondary">Reported missing</Badge>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setMissingOpen((v) => !v)}
+              disabled={pending}
+            >
+              {animal.name} is missing
+            </Button>
+          )}
           <Select
             value={reportKind}
             onValueChange={(v) => setReportKind(v as OwnerRequestKind)}
@@ -197,6 +242,52 @@ function AnimalCard({ animal }: { animal: PortalAnimal }) {
             </SelectContent>
           </Select>
         </div>
+
+        {missingOpen && (
+          <div className="border rounded-md p-3 space-y-3 text-sm">
+            <p className="font-medium">Report {animal.name} missing</p>
+            <div className="space-y-1">
+              <Label htmlFor={`missing-where-${animal.ownershipId}`}>
+                Where last seen (optional)
+              </Label>
+              <Input
+                id={`missing-where-${animal.ownershipId}`}
+                value={missingLocation}
+                onChange={(e) => setMissingLocation(e.target.value)}
+                placeholder="e.g. Windwardside, near home"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor={`missing-detail-${animal.ownershipId}`}>
+                Anything else (optional)
+              </Label>
+              <Textarea
+                id={`missing-detail-${animal.ownershipId}`}
+                value={missingDetail}
+                onChange={(e) => setMissingDetail(e.target.value)}
+                rows={2}
+                placeholder="When it went missing, collar colour…"
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={reportMissing} disabled={pending}>
+                Send missing report
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setMissingOpen(false)}
+                disabled={pending}
+              >
+                Cancel
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Staff will see this immediately. If {animal.name} is found
+              or scanned, we&apos;ll contact you.
+            </p>
+          </div>
+        )}
 
         {reportKind && (
           <div className="border rounded-md p-3 space-y-3 text-sm">

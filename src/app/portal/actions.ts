@@ -19,6 +19,7 @@ import {
   OWNER_SUBMITTABLE_KINDS,
   type OwnerRequestKind,
 } from "@/lib/registry/owner-request-kinds";
+import { reportMissingByOwner } from "@/lib/registry/lost-found";
 import { logError } from "@/lib/logger";
 
 export interface PortalActionResult {
@@ -154,6 +155,49 @@ export async function submitOwnerReportAction(
     return { ok: true };
   } catch (error) {
     logError("portal", "submit-owner-report", error);
+    return { ok: false, error: "Something went wrong. Please try again." };
+  }
+}
+
+// "My animal is missing" (#176). Unlike the staff-reviewed change
+// requests above, a missing report is low-risk information — it
+// creates a staff-visible lost/found case directly, never mutating
+// ownership or lifecycle. The same getOwnedOwnership check gates it,
+// so historical/former owners are denied.
+export async function reportMissingAction(input: {
+  ownershipId: string;
+  lastSeenOn?: string;
+  lastSeenLocation?: string;
+  detail?: string;
+}): Promise<PortalActionResult> {
+  const ctx = await requireLinkedOwner();
+  if (!ctx.ok) return { ok: false, error: ctx.error };
+
+  try {
+    const result = await reportMissingByOwner({
+      ownershipId: input.ownershipId,
+      personId: ctx.person.id,
+      reporterEmail: ctx.identity.email ?? null,
+      actorIdentity: ctx.identity.id,
+      lastSeenOn: input.lastSeenOn?.trim() || null,
+      lastSeenLocation: input.lastSeenLocation?.trim() || null,
+      notes: input.detail?.trim() || null,
+    });
+    if (!result.ok) {
+      return {
+        ok: false,
+        error:
+          result.reason === "not-owner"
+            ? "That animal is not associated with you."
+            : result.reason === "invalid"
+              ? `Invalid ${result.field}.`
+              : "Unable to file the report. Please contact SFPCA.",
+      };
+    }
+    revalidatePath("/portal");
+    return { ok: true };
+  } catch (error) {
+    logError("portal", "report-missing", error);
     return { ok: false, error: "Something went wrong. Please try again." };
   }
 }

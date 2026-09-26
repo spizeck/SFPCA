@@ -75,6 +75,7 @@ import { MarkSeenDialog } from "@/components/admin/medical/mark-seen-dialog";
 import { CommunicationsPanel } from "@/components/admin/medical/communications-panel";
 import { OwnershipPanel } from "@/components/admin/medical/ownership-panel";
 import { MicrochipPanel } from "@/components/admin/microchip-panel";
+import { LostFoundPanel } from "@/components/admin/lost-found-panel";
 import { RegistrationPanel } from "@/components/admin/registration-panel";
 import { currentRegistrationYear } from "@/lib/registrations";
 import { Button } from "@/components/ui/button";
@@ -437,7 +438,13 @@ export default function AnimalMedicalPage() {
         animalId={animal.id}
         microchips={registry.microchips}
         chipConflicts={registry.chipConflicts}
-        foundReports={registry.foundReports}
+        today={today}
+        onChanged={loadRecord}
+      />
+
+      <LostFoundPanel
+        animalId={animal.id}
+        cases={registry.lostFoundCases}
         today={today}
         onChanged={loadRecord}
       />

@@ -19,9 +19,10 @@
 //   - Duplicate chip claims never overwrite: the attempt is rejected
 //     AND recorded as a microchip_conflicts row for human resolution
 //     (#178 owns the generic merge engine; this stays chip-scoped).
-//   - found_reports is the small found-animal resolution log — durable
-//     evidence that a scan happened and how staff resolved it. It is
-//     deliberately not #176's lost/found case management.
+//   - found-animal scans and follow-ups are lost/found CASES (#176) —
+//     found_reports evolved into lost_found_cases, and lookupChip
+//     surfaces open cases on the match so "this animal was reported
+//     missing" is impossible to miss at scan time.
 //
 // Every mutation commits with its audit_events row in one transaction,
 // same as the other registry services.
@@ -32,12 +33,8 @@ import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   animals,
   auditEvents,
-  foundReports,
-  householdMembers,
-  households,
   microchipConflicts,
   microchipRecords,
-  persons,
 } from "../db/schema";
 import { getRegistryDb } from "../db/client";
 import {
@@ -47,7 +44,10 @@ import {
   normalizeChipNumber,
 } from "../microchips";
 import { isIsoDateString, todayIsoDate } from "../vaccinations";
-import { listCurrentOwnerships } from "./ownership";
+import { resolveAnimalOwnerContacts } from "./ownership";
+import type { AnimalOwnerContacts, OwnerContact } from "./ownership";
+import { listOpenCasesForChipOrAnimal } from "./lost-found";
+import type { LostFoundCaseRecord } from "./lost-found";
 import type { RegistryDb } from "./public-animals";
 
 const UUID_RE =
@@ -100,23 +100,13 @@ export interface ChipConflictRecord {
   createdAt: string;
 }
 
-export interface FoundReportRecord {
-  id: string;
-  animalId: string | null;
-  microchipRecordId: string | null;
-  chipNumber: string;
-  chipDisplay: string | null;
-  reportedOn: string;
-  status: string;
-  resolvedOn: string | null;
-  outcome: string | null;
-  notes: string | null;
-  actorLabel: string | null;
-  createdAt: string;
-}
+// Owner-contact DTO aliases — the canonical owner-contact projection
+// moved to ownership.ts (#176) so lost/found case detail shares it;
+// these names stay so existing consumers keep working.
+export type FoundOwnerContact = OwnerContact;
+export type ChipLookupOwner = AnimalOwnerContacts;
 
 export const CHIP_CLOSE_REASONS = ["replaced", "removed", "corrected"] as const;
-export const FOUND_OUTCOMES = ["reunited", "in-care", "other"] as const;
 
 const CHIP_COLUMNS = {
   id: microchipRecords.id,
@@ -165,23 +155,6 @@ function toConflictDto(row: {
   return {
     ...row,
     resolvedAt: row.resolvedAt?.toISOString() ?? null,
-    createdAt: row.createdAt.toISOString(),
-  };
-}
-
-function toFoundReportDto(row: typeof foundReports.$inferSelect): FoundReportRecord {
-  return {
-    id: row.id,
-    animalId: row.animalId,
-    microchipRecordId: row.microchipRecordId,
-    chipNumber: row.chipNumber,
-    chipDisplay: row.chipDisplay,
-    reportedOn: row.reportedOn,
-    status: row.status,
-    resolvedOn: row.resolvedOn,
-    outcome: row.outcome,
-    notes: row.notes,
-    actorLabel: row.actorLabel,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -836,31 +809,6 @@ export async function resolveChipConflict(
 
 // --- Fast staff lookup ----------------------------------------------------------
 
-// The owner/contact block of a found-animal result. owners comes from
-// the CANONICAL current-ownership projection (listCurrentOwnerships —
-// the same "current owner" every other surface uses); this module only
-// resolves the contact details staff need to reach them.
-export interface FoundOwnerContact {
-  personId: string;
-  name: string;
-  // Household member role when the contact is reached through a
-  // household ownership ('primary' shown first).
-  role: string | null;
-  phone: string | null;
-  email: string | null;
-  address: string | null;
-  preferredChannel: string | null;
-}
-
-export interface ChipLookupOwner {
-  ownershipId: string;
-  kind: "person" | "household";
-  // Display name of the owning party (person fullName / household name).
-  name: string;
-  householdAddress: string | null;
-  contacts: FoundOwnerContact[];
-}
-
 export interface ChipLookupAnimal {
   id: string;
   name: string;
@@ -886,7 +834,14 @@ export interface ChipLookupMatch {
 
 export type ChipLookupResult =
   | { status: "invalid"; normalized: string }
-  | { status: "not-found"; normalized: string; display: string }
+  | {
+      status: "not-found";
+      normalized: string;
+      display: string;
+      // Open unmatched cases already filed for this chip — a second
+      // scan of a flagged stray re-surfaces the SAME case (#176).
+      openCases: LostFoundCaseRecord[];
+    }
   // Transient failure (e.g. database unreachable) — retryable, and
   // distinct from 'invalid' so the UI doesn't blame the scan.
   | { status: "error" }
@@ -906,7 +861,10 @@ export type ChipLookupResult =
       // rather than guess who to call (canonical ambiguity rule).
       ownershipAmbiguous: boolean;
       openConflicts: ChipConflictRecord[];
-      openFoundReports: FoundReportRecord[];
+      // Open lost/found cases on this animal — an open 'missing' case
+      // here means the found animal was reported missing and the scan
+      // is the reunion signal (#176).
+      openCases: LostFoundCaseRecord[];
     };
 
 // THE found-animal lookup: exact normalized match against active AND
@@ -947,6 +905,10 @@ export async function lookupChip(
       status: "not-found",
       normalized,
       display: chipDisplayValue(rawInput, normalized),
+      openCases: await listOpenCasesForChipOrAnimal(
+        { chipNumber: normalized },
+        db,
+      ),
     };
   }
 
@@ -968,8 +930,7 @@ export async function lookupChip(
     .from(animals)
     .where(eq(animals.id, primary.record.animalId));
 
-  const today = todayIsoDate();
-  const [currentChipRow, ownerInfo, conflicts, openReports] = await Promise.all([
+  const [currentChipRow, ownerInfo, conflicts, openCases] = await Promise.all([
     db
       .select(CHIP_COLUMNS)
       .from(microchipRecords)
@@ -982,9 +943,7 @@ export async function lookupChip(
       .limit(1),
     // Owners resolve through the canonical projection — never a
     // second definition of "current owner".
-    listCurrentOwnerships(primary.record.animalId, today, db).then(
-      (current) => foundAnimalOwners(db, current),
-    ),
+    resolveAnimalOwnerContacts(primary.record.animalId, db),
     db
       .select(CONFLICT_COLUMNS)
       .from(microchipConflicts)
@@ -996,16 +955,12 @@ export async function lookupChip(
         ),
       )
       .orderBy(desc(microchipConflicts.createdAt)),
-    db
-      .select()
-      .from(foundReports)
-      .where(
-        and(
-          eq(foundReports.status, "open"),
-          sql`(${foundReports.animalId} = ${primary.record.animalId} OR ${foundReports.chipNumber} = ${normalized})`,
-        ),
-      )
-      .orderBy(asc(foundReports.reportedOn)),
+    // Open lost/found cases ride the match: the animal's own cases plus
+    // any unmatched case already filed for this chip number.
+    listOpenCasesForChipOrAnimal(
+      { animalId: primary.record.animalId, chipNumber: normalized },
+      db,
+    ),
   ]);
 
   const holderNames = new Map<string, string>();
@@ -1054,280 +1009,6 @@ export async function lookupChip(
           : null,
       }),
     ),
-    openFoundReports: openReports.map(toFoundReportDto),
+    openCases,
   };
-}
-
-// Owner contacts for the found-animal result. WHO is current comes
-// from the canonical listCurrentOwnerships projection; this resolves
-// HOW to reach them — person-side owners directly, household ownerships
-// through their members (primary first, same deterministic order as
-// householdContactFor).
-async function foundAnimalOwners(
-  db: RegistryDb,
-  current: Awaited<ReturnType<typeof listCurrentOwnerships>>,
-): Promise<{ owners: ChipLookupOwner[]; ambiguous: boolean }> {
-  const owners: ChipLookupOwner[] = [];
-  for (const o of current) {
-    if (o.personId) {
-      const [person] = await db
-        .select()
-        .from(persons)
-        .where(eq(persons.id, o.personId));
-      owners.push({
-        ownershipId: o.id,
-        kind: "person",
-        name: o.ownerName,
-        householdAddress: null,
-        contacts: person
-          ? [
-              {
-                personId: person.id,
-                name: person.fullName,
-                role: null,
-                phone: person.phone,
-                email: person.email,
-                address: person.address,
-                preferredChannel: person.preferredChannel,
-              },
-            ]
-          : [],
-      });
-    } else if (o.householdId) {
-      const [household] = await db
-        .select()
-        .from(households)
-        .where(eq(households.id, o.householdId));
-      const memberRows = await db
-        .select({
-          personId: persons.id,
-          name: persons.fullName,
-          phone: persons.phone,
-          email: persons.email,
-          address: persons.address,
-          preferredChannel: persons.preferredChannel,
-          role: householdMembers.role,
-          memberSince: householdMembers.createdAt,
-        })
-        .from(householdMembers)
-        .innerJoin(persons, eq(householdMembers.personId, persons.id))
-        .where(eq(householdMembers.householdId, o.householdId));
-      memberRows.sort((a, b) => {
-        if (a.role !== b.role) return a.role === "primary" ? -1 : 1;
-        return a.memberSince.getTime() - b.memberSince.getTime();
-      });
-      owners.push({
-        ownershipId: o.id,
-        kind: "household",
-        name: o.ownerName,
-        householdAddress: household?.address ?? null,
-        contacts: memberRows.map((m) => ({
-          personId: m.personId,
-          name: m.name,
-          role: m.role,
-          phone: m.phone,
-          email: m.email,
-          address: m.address,
-          preferredChannel: m.preferredChannel,
-        })),
-      });
-    }
-  }
-  return { owners, ambiguous: current.length > 1 };
-}
-
-// --- Found reports ---------------------------------------------------------------
-
-export type FoundReportResult =
-  | { ok: true; report: FoundReportRecord; existing?: boolean }
-  | { ok: false; reason: "not-found" | "invalid" | "conflict"; field?: string };
-
-// Log that an animal was found via a chip scan. Open rows dedupe per
-// (chip, animal) — a second scan of the same animal re-flags the same
-// work item instead of stacking duplicates. outcome may be supplied to
-// write an already-resolved row ("scanned, called owner, going home").
-export async function recordFoundReport(
-  {
-    animalId,
-    microchipRecordId,
-    chipNumber,
-    notes,
-    outcome,
-    reportedOn,
-    actorIdentityId,
-  }: {
-    animalId?: string | null;
-    microchipRecordId?: string | null;
-    chipNumber: string;
-    notes?: string | null;
-    outcome?: string | null;
-    reportedOn?: string;
-    actorIdentityId?: string | null;
-  },
-  actorLabel: string,
-  db: RegistryDb = getRegistryDb(),
-): Promise<FoundReportResult> {
-  const normalized = normalizeChipNumber(chipNumber);
-  if (chipNumberProblem(normalized)) {
-    return { ok: false, reason: "invalid", field: "chipNumber" };
-  }
-  if (animalId != null && !UUID_RE.test(animalId)) {
-    return { ok: false, reason: "invalid", field: "animalId" };
-  }
-  if (microchipRecordId != null && !UUID_RE.test(microchipRecordId)) {
-    return { ok: false, reason: "invalid", field: "microchipRecordId" };
-  }
-  const resolved = outcome != null && outcome !== "";
-  if (resolved && !(FOUND_OUTCOMES as readonly string[]).includes(outcome!)) {
-    return { ok: false, reason: "invalid", field: "outcome" };
-  }
-  const on = reportedOn?.trim() || todayIsoDate();
-  if (!isIsoDateString(on)) {
-    return { ok: false, reason: "invalid", field: "reportedOn" };
-  }
-  if (notes != null && notes.length > MAX_NOTE) {
-    return { ok: false, reason: "invalid", field: "notes" };
-  }
-
-  return db.transaction(async (tx) => {
-    if (animalId) {
-      const [animal] = await tx
-        .select({ id: animals.id })
-        .from(animals)
-        .where(eq(animals.id, animalId));
-      if (!animal) return { ok: false as const, reason: "not-found" as const };
-    }
-
-    if (!resolved) {
-      // Reuse the open report for the same chip+animal if one exists —
-      // re-scanning is a bump of the same work item, not a duplicate.
-      const [existing] = await tx
-        .select()
-        .from(foundReports)
-        .where(
-          and(
-            eq(foundReports.status, "open"),
-            eq(foundReports.chipNumber, normalized),
-            animalId
-              ? eq(foundReports.animalId, animalId)
-              : isNull(foundReports.animalId),
-          ),
-        )
-        .limit(1);
-      if (existing) {
-        return {
-          ok: true as const,
-          report: toFoundReportDto(existing),
-          existing: true as const,
-        };
-      }
-    }
-
-    const [row] = await tx
-      .insert(foundReports)
-      .values({
-        animalId: animalId ?? null,
-        microchipRecordId: microchipRecordId ?? null,
-        chipNumber: normalized,
-        chipDisplay: chipDisplayValue(chipNumber, normalized),
-        reportedOn: on,
-        status: resolved ? "resolved" : "open",
-        resolvedOn: resolved ? on : null,
-        outcome: resolved ? outcome! : null,
-        notes: notes?.trim() || null,
-        actorIdentityId: actorIdentityId ?? null,
-        actorLabel,
-      })
-      .returning();
-    await tx.insert(auditEvents).values({
-      actorLabel,
-      entityType: "found_report",
-      entityId: row.id,
-      action: "create",
-      after: {
-        animalId: row.animalId,
-        chipNumber: row.chipNumber,
-        status: row.status,
-        outcome: row.outcome,
-      },
-    });
-    return { ok: true, report: toFoundReportDto(row) };
-  });
-}
-
-// Resolve an open found report — staff record how the animal's story
-// ended. The row is updated in place exactly once; it is never deleted.
-export async function resolveFoundReport(
-  reportId: string,
-  {
-    outcome,
-    resolvedOn,
-    notes,
-  }: { outcome: string; resolvedOn?: string; notes?: string | null },
-  actorLabel: string,
-  db: RegistryDb = getRegistryDb(),
-): Promise<FoundReportResult> {
-  if (!UUID_RE.test(reportId)) return { ok: false, reason: "not-found" };
-  if (!(FOUND_OUTCOMES as readonly string[]).includes(outcome)) {
-    return { ok: false, reason: "invalid", field: "outcome" };
-  }
-  const on = resolvedOn?.trim() || todayIsoDate();
-  if (!isIsoDateString(on)) {
-    return { ok: false, reason: "invalid", field: "resolvedOn" };
-  }
-
-  return db.transaction(async (tx) => {
-    const [before] = await tx
-      .select()
-      .from(foundReports)
-      .where(eq(foundReports.id, reportId))
-      .for("update");
-    if (!before) return { ok: false as const, reason: "not-found" as const };
-    if (before.status !== "open") {
-      return { ok: false as const, reason: "conflict" as const };
-    }
-    if (on < before.reportedOn) {
-      return { ok: false as const, reason: "invalid" as const, field: "resolvedOn" };
-    }
-
-    const [row] = await tx
-      .update(foundReports)
-      .set({
-        status: "resolved",
-        resolvedOn: on,
-        outcome,
-        notes: notes?.trim() || before.notes,
-        updatedAt: new Date(),
-      })
-      .where(eq(foundReports.id, reportId))
-      .returning();
-    await tx.insert(auditEvents).values({
-      actorLabel,
-      entityType: "found_report",
-      entityId: reportId,
-      action: "resolve",
-      before: { status: before.status },
-      after: { status: "resolved", outcome, resolvedOn: on },
-    });
-    return { ok: true, report: toFoundReportDto(row) };
-  });
-}
-
-// Found-report history for one animal — the profile's record of "was
-// this animal ever scanned/found". Open items first, then newest.
-export async function listFoundReportsForAnimal(
-  animalId: string,
-  db: RegistryDb = getRegistryDb(),
-): Promise<FoundReportRecord[]> {
-  if (!UUID_RE.test(animalId)) return [];
-  const rows = await db
-    .select()
-    .from(foundReports)
-    .where(eq(foundReports.animalId, animalId))
-    .orderBy(
-      desc(sql`(${foundReports.status} = 'open')`),
-      desc(foundReports.reportedOn),
-      desc(foundReports.createdAt),
-    );
-  return rows.map(toFoundReportDto);
 }

@@ -163,7 +163,8 @@ plain SQL.
 | `payment_events` | Append-only reconciliation history (#170) | one row per ledger event (`recorded`/`confirmed`/`failed`/`voided`/`refunded`/`adjusted`) with actor label, source, and bounded `detail` JSON — who/what changed each transaction and when; restrictive payment FK |
 | `microchip_records` | Chip assignments w/ history (#168) | `chip_number` stored normalized; `chip_display` keeps as-entered formatting; optional implantation metadata (manufacturer/implanted_on/implanted_by/notes); partial `unique(chip_number)` AND `unique(animal_id)` `WHERE assigned_to IS NULL` — one active assignment per chip AND one current chip per animal; `closed_reason` CHECK `replaced\|removed\|corrected` + closure-consistency CHECK; `replaced_by_id` links a replaced row to its successor; restrictive animal FK |
 | `microchip_conflicts` | Rejected duplicate chip claims (#168) | evidence rows, one open per (chip, claimant) via partial unique; `source` CHECK `staff\|import`; resolution is human — never auto-moves a chip |
-| `found_reports` | Found-animal scan/resolution log (#168) | `status` CHECK `open\|resolved` with `resolved_on` consistency + range CHECKs; `outcome` CHECK `reunited\|in-care\|other`; open dedupe per (chip, animal); `animal_id` nullable (unidentified chip) |
+| `lost_found_cases` | Missing/found case workflow (#176) — evolved from #168's `found_reports`, whose rows migrated here as `found` cases | `case_type` CHECK `missing\|found`; `status` CHECK `open\|resolved\|cancelled`; `outcome` CHECK `reunited\|owner-located\|in-care\|deceased\|other` (resolved rows only); CHECKs enforce missing⟹animal linked, resolved⟹outcome+timestamp, publish⟹missing+linked; partial uniques — one open missing AND one open found per animal, one open unmatched case per chip; `linked_at`/`linked_by` preserve "began unmatched"; `published_at` is the public-listing opt-in; restrictive animal/microchip FKs |
+| `lost_found_updates` | Append-only case chronology (#176) — sightings, chip scans, staff beats; linkage/publish/resolve also write rows | `kind` CHECK `sighting\|scan\|update`; `source` CHECK `staff\|owner-portal\|public`; optional reporter fields stay private; restrictive case FK |
 | `vet_encounters` | One dated clinical record per row (#174) — `kind` CHECK `visit`/`history`/`note` absorbs structured visits AND the old `vet_events` roles (reported history, standalone notes) | concise optional text fields (reason/complaint/findings/assessment/plan/notes); `visit` requires `reason`; no SOAP machinery |
 | `vet_procedures` | Significant interventions incl. spay/neuter (#174) | kind CHECK; `performed_on` nullable (unknown historical dates); optional `encounter_id` |
 | `vet_medications` | Medication/course history — treatment record, not prescribing | `end_on ≥ start_on` or null (ongoing); "active" derived, never stored |
@@ -267,13 +268,16 @@ autofocused, Enter-submit field that stays focused between scans.
   states, not silence. This data is staff-only: it arrives via a
   `requireAdmin`-gated server action, never in public DTOs, public
   pages, or page source.
-- **Found reports.** `found_reports` is the deliberately small
-  "scanned, and what came of it" log — NOT #176 case management (no
-  public reports, sightings, or workflow states). Open rows dedupe
-  per (chip, animal); a resolution stamps `resolved_on` + a bounded
-  `outcome` (`reunited`/`in-care`/`other`). An unidentified scan can
-  be flagged with a null `animal_id` so unknown chips leave a
-  follow-up trail. Rows are never deleted.
+- **Found events.** #168's `found_reports` scan log evolved into
+  #176's `lost_found_cases` (migration rewrote the rows as `found`
+  cases and dropped the old table — one representation of a
+  found-animal event, not two). The scan workflow now routes through
+  `openFoundCase` with deterministic dedupe: a scan of an animal with
+  an open MISSING case lands as a 'scan' chronology row on THAT case
+  (no duplicate found case), a rescan of an already-open case folds
+  in, otherwise a new `found` case opens — or resolves immediately
+  when an outcome is supplied. An unidentified scan flags an
+  unmatched case keyed by chip number (one open per chip).
 - **Profile & audit.** The animal profile's MicrochipPanel shows the
   current chip, full closed history, open conflicts, and found
   reports, with staff mutations (add / replace / end use / correct /
@@ -284,7 +288,73 @@ autofocused, Enter-submit field that stays focused between scans.
   staff-controlled and no other animal's chip is ever exposed. A
   future public "I found an animal" flow would need a separate
   public-safe lookup result — owner contact must never flow through
-  it.
+  it. (The lost-pets sighting form below is exactly that: it writes a
+  case update to SFPCA and reveals nothing.)
+
+**Lost/found cases (#176):** `lost_found_cases` is the durable work item
+for "a registered animal is missing" or "an animal was found". It is
+deliberately NOT part of the animal's permanent lifecycle — an animal
+stays `lifecycle_status='active'` while a missing case is open and stays
+the same registry record when the case resolves; `missing` is not and
+never becomes a lifecycle status.
+
+- **Vocabulary.** `case_type` `missing|found`; `status`
+  `open|resolved|cancelled`; `outcome` on resolved rows only:
+  `reunited`, `owner-located` (owner found, animal not yet physically
+  home), `in-care`, `deceased`, `other`. Vocabulary lives in
+  `src/lib/lost-found.ts`; schema CHECKs keep `resolved ⟺ outcome +
+  resolved_at` consistent.
+- **Unmatched found animals.** A `found` case may carry `animal_id`
+  NULL — an unknown chip or an unregistered stray is a real case with
+  description/found details, never a fabricated `animals` row. Staff
+  link it to the registry explicitly (chip scan or manual search);
+  `linked_at`/`linked_by` permanently record that the case began
+  unmatched. `missing` cases always require the link (CHECK) — there
+  is no such thing as a missing unregistered animal.
+- **Invariants.** Partial unique indexes enforce at most one open
+  `missing` and one open `found` case per animal (both may coexist —
+  the pair IS the "missing animal was found" signal) and one open
+  unmatched case per chip number. Resolving either sibling resolves
+  the other with the same outcome in the same transaction;
+  cancelling never propagates (only the wrong case dies). `deceased`
+  is the one outcome that touches the registry: it drives the
+  canonical `transitionAnimalLifecycle` first — if the transition
+  can't land, the case stays open.
+- **Chronology.** `lost_found_updates` is the append-only timeline —
+  sightings, chip scans, staff beats; linkage, publication, and
+  sibling-resolutions write rows too, so the case tells its whole
+  story. Reporter name/contact on updates is private and never in
+  public DTOs.
+- **Publication.** `published_at`/`published_by`/`public_note` are the
+  explicit staff opt-in to the public `/lost-pets` page — open alone
+  never publishes. `listPublishedLostAnimals` is the ONLY public
+  read: it filters `published_at IS NOT NULL AND status='open'` (a
+  resolved case de-lists automatically) and returns an allowlist DTO
+  — name/photo/species/sex/approx age/date/location/approved note.
+  No owner or reporter contact, no staff notes, no chip data. The
+  public "I've seen this animal" form writes ONLY a `public`-source
+  sighting row onto a case the page currently lists — it confirms
+  nothing about private cases and opens no channel to the owner.
+- **Owner reporting.** `reportMissingByOwner` is the portal's "my
+  animal is missing" path — deliberately NOT an `owner_requests`
+  item (a missing report is low-risk, unambiguous information; the
+  case itself is the staff-visible work item). Authorization is the
+  same canonical `getOwnedOwnership` check every portal mutation
+  uses — currently-valid ownership held by this person, direct or
+  household — so former owners are denied. The case records
+  `reported_via='owner-portal'` and the actor identity.
+- **Notifications.** Resolution and found-matches queue a single
+  `lost-found-notice` row in the communications ledger (#172) for
+  the animal's strictly-resolved owner — idempotency-keyed, and
+  inserted post-commit so a ledger failure can never roll back the
+  case. Non-sendable resolutions record a `skipped` row so the
+  exception pipeline still sees them.
+- **Surfaces.** `/admin/lost-found` is the exception-first staff
+  workspace (missing / unmatched found / matched awaiting resolution /
+  recently closed) with per-case detail; the animal profile carries a
+  Lost & Found panel; chip-lookup is the scanner's entry point. The
+  dashboard card reads `getOpenCaseCounts` — the canonical queue
+  service #177's exception dashboard should compose, not re-query.
 
 **Annual registrations (#169):** `registrations` is the authoritative
 per-animal-per-year record — the durable history of "this animal was

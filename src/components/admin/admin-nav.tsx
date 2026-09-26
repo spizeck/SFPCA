@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Home, FileText, PawPrint, Settings, LogOut, Menu, ClipboardList, Stethoscope, Heart, CircleQuestionMark, CalendarClock, Mail, Users, Inbox, ScanLine } from "lucide-react";
+import { Home, FileText, PawPrint, Settings, LogOut, Menu, ClipboardList, Stethoscope, Heart, CircleQuestionMark, CalendarClock, Mail, Users, Inbox, ScanLine, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AdminThemeToggle } from "@/components/admin-theme-toggle";
 import { useState } from "react";
@@ -12,6 +12,8 @@ const navItems = [
   { href: "/admin", label: "Dashboard", icon: Home },
   // Found-animal workflow — the scanner tool, placed early in the nav.
   { href: "/admin/chip-lookup", label: "Chip Lookup", icon: ScanLine },
+  // Lost/found case workspace (#176) — missing + found queues.
+  { href: "/admin/lost-found", label: "Lost & Found", icon: Search },
   { href: "/admin/vet", label: "Vet Queue", icon: CalendarClock },
   { href: "/admin/communications", label: "Comms", icon: Mail },
   { href: "/admin/homepage", label: "Homepage", icon: FileText },

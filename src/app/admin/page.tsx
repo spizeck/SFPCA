@@ -2,9 +2,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { Suspense } from "react";
-import { FileText, PawPrint, Settings, ClipboardList, CircleQuestionMark, CalendarClock, Mail, ScanLine } from "lucide-react";
+import { FileText, PawPrint, Settings, ClipboardList, CircleQuestionMark, CalendarClock, Mail, ScanLine, Search } from "lucide-react";
 import { VetQueueCard } from "@/components/admin/vet-queue-card";
 import { CommunicationsCard } from "@/components/admin/communications-card";
+import { LostFoundCard } from "@/components/admin/lost-found-card";
 
 // The vet card hits Postgres — stream it so a slow registry never
 // blocks the rest of the dashboard.
@@ -45,6 +46,28 @@ function CommunicationsCardFallback() {
       <CardContent>
         <Button asChild className="w-full">
           <Link href="/admin/communications">Open communications</Link>
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function LostFoundCardFallback() {
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-3 mb-2">
+          <Search className="h-8 w-8 text-primary" />
+          <CardTitle>Lost &amp; Found</CardTitle>
+        </div>
+        <CardDescription>
+          Missing animals and found animals — open cases needing staff
+          work
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button asChild className="w-full">
+          <Link href="/admin/lost-found">Open lost &amp; found</Link>
         </Button>
       </CardContent>
     </Card>
@@ -130,6 +153,10 @@ export default function AdminDashboard() {
 
         <Suspense fallback={<VetQueueCardFallback />}>
           <VetQueueCard />
+        </Suspense>
+
+        <Suspense fallback={<LostFoundCardFallback />}>
+          <LostFoundCard />
         </Suspense>
 
         <Suspense fallback={<CommunicationsCardFallback />}>

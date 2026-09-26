@@ -92,6 +92,7 @@ import {
   voidPayment,
 } from "@/lib/registry/payments";
 import type { RegistrationCancellationReason } from "@/lib/registrations";
+import { openMissingCase } from "@/lib/registry/lost-found";
 import { logError, type LogSubsystem } from "@/lib/logger";
 
 export interface AnimalMedicalRecord {
@@ -181,7 +182,7 @@ export async function getAnimalMedicalAction(
     registry: registry ?? {
       microchips: [],
       chipConflicts: [],
-      foundReports: [],
+      lostFoundCases: [],
       registrations: [],
       payments: [],
       paymentEvents: [],
@@ -224,7 +225,10 @@ export interface SaveResult {
     | "not-current"
     | "has-current"
     | "chip-conflict"
-    | "exceeds-refundable";
+    | "exceeds-refundable"
+    | "not-open"
+    | "not-unmatched"
+    | "has-open-case";
   field?: string;
   // When reason is 'chip-conflict': the flagged conflict + the animal
   // currently holding the number, so the UI can show both sides.
@@ -246,7 +250,10 @@ type MutationOutcome =
         | "not-current"
         | "has-current"
         | "chip-conflict"
-        | "exceeds-refundable";
+        | "exceeds-refundable"
+        | "not-open"
+        | "not-unmatched"
+        | "has-open-case";
       field?: string;
       chipConflict?: ChipConflictInfo;
     };
@@ -485,6 +492,30 @@ export async function resolveChipConflictAction(
     const result = await resolveChipConflict(
       conflictId,
       { resolutionNote },
+      actor,
+    );
+    return result.ok ? { ok: true } : result;
+  });
+}
+
+// --- Lost/found cases (#176) -------------------------------------------------
+// Profile-level lost/found writes — open a missing case from the animal
+// record. Case detail work (sightings, linking, publish, resolve) lives
+// on the /admin/lost-found workspace actions.
+
+export async function reportMissingAction(
+  animalId: string,
+  input: {
+    lastSeenOn?: string | null;
+    lastSeenLocation?: string | null;
+    reporterName?: string | null;
+    reporterContact?: string | null;
+    notes?: string | null;
+  },
+): Promise<SaveResult> {
+  return save("lost-found", async (actor) => {
+    const result = await openMissingCase(
+      { ...input, animalId, reportedVia: "staff" },
       actor,
     );
     return result.ok ? { ok: true } : result;

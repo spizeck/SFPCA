@@ -1604,9 +1604,12 @@ app is hardware-specific.
 4. The Owner contact block is what you need to return the animal.
    Multiple current owners show an ambiguity warning — verify before
    releasing the animal. "No registered owner" is explicit, not an error.
-5. Optionally record the outcome in the result card (open / reunited /
-   in-care / other + a short note). This lands a `found_reports` row —
-   small durable history, not a case-management ticket.
+5. Open cases on the animal show on the result card — **a "Reported
+   missing" banner means the animal was already reported lost: this
+   scan is the reunion signal.** Record the outcome (reunited /
+   owner located / in-care / deceased / other + a short note) to open
+   or resolve a `lost_found_cases` row (#176). A plain scan with no
+   outcome still lands as a scan entry on the case timeline.
 6. Scan the next animal — the field is cleared and focused already.
 
 ### 24b. Unknown and conflict states
@@ -1614,8 +1617,9 @@ app is hardware-specific.
 - **No match** — the normalized number is shown so you can copy it. The
   obvious next steps are on the card: search the registry (the animal
   may be registered without a chip) or flag the chip for follow-up —
-  which logs an open `found_reports` row with no animal attached.
-  Nothing creates an animal automatically on an unknown scan.
+  which opens an unmatched `lost_found_cases` row keyed by chip (one
+  open case per unknown chip; re-scans fold into it). Nothing creates
+  an animal automatically on an unknown scan.
 - **Conflict warning** — the chip number was claimed for a second
   animal while already assigned. The match still shows the current
   holder, plus a warning banner. Resolve it on the animal profile's
@@ -1652,3 +1656,74 @@ app is hardware-specific.
 - A scan finds the animal but no owner appears even though one is
   expected: check ownership intervals on the profile — a closed
   interval means a transfer/report already ran; add a new owner there.
+
+## 25. Lost & found cases (#176)
+
+The lost/found workspace (`/admin/lost-found`, nav "Lost & Found") is
+where missing-animal and found-animal reports live. A CASE is a work
+item about a real-world event — deliberately separate from the animal's
+permanent registry status: an animal stays `active` while a missing
+case is open, and closing a case never rewrites the animal record,
+ownership, or registration.
+
+### 25a. The volunteer workflow
+
+**Report an animal missing.** From the animal's profile → Lost & found
+panel → "Report missing" → last-seen details → "Open missing case". At
+most one open missing case exists per animal — a duplicate click just
+returns the existing case. Owners can also report their own animal
+missing from `/portal` ("{name} is missing") — those arrive flagged
+"reported by owner"; former owners cannot file (authorization is
+current-ownership only).
+
+**Found animal intake.** Three doors, one model:
+
+1. **Chip scan** — `/admin/chip-lookup` (§24). A match attaches the
+   scan to the animal's open case (or opens a `found` case); an
+   unknown chip's "Flag for follow-up" opens an *unmatched* found case.
+2. **Unmatched found case** — workspace → "Report a found animal":
+   chip if scanned, found location, description, reporter. Nothing
+   here creates an animal record.
+3. **A missing animal turns up** — the scan lands on the open MISSING
+   case as a timeline entry; no duplicate found case is created. A
+   missing and a found case may coexist on one animal — resolving
+   either closes both with the same outcome ("the missing animal was
+   found" is one event).
+
+**Work the case.** Case detail shows what was reported, the linked
+animal + CURRENT owner contact (staff-only), and the append-only
+chronology. Add sightings/updates from the form (kind, location, note,
+reporter). An unmatched case links through registry search — never
+fuzzy auto-matching; `linked_at`/`linked_by` preserve that it began
+unmatched.
+
+**Publish (optional).** A *missing* case can be listed on the public
+`/lost-pets` page — explicitly, via "Publish to the lost-pets page"
+with an approved public note. The public page shows ONLY: name, photo,
+species/sex/age, missing-since date, last-seen location, and your
+approved note. Owner/reporter contact, staff notes, and chip numbers
+are never public. The public "I've seen this animal" button files a
+sighting TO SFPCA — it does not connect the reporter to the owner.
+Resolution or "Unpublish" removes the listing automatically.
+
+**Resolve.** "Resolve…" → outcome → done. History is never deleted:
+the case stays on the animal profile and under "Recently closed".
+`Deceased` additionally runs the canonical lifecycle transition (with
+the real-world date) — that is the ONLY outcome that changes the
+registry record. "Cancel case" is for reports that were wrong
+(duplicates, mistakes) and never touches a sibling case. A closed
+case can be reopened if closed by mistake.
+
+### 25b. Failure modes
+
+- "Couldn't open the case (has-open-case)": the animal already has an
+  open case of that type — work the existing one instead.
+- "Couldn't link (has-open-case)": the target animal already has an
+  open found case — reconcile those first.
+- Owner says they reported missing but nothing shows: check the case's
+  `reported_via` on detail — only `owner-portal` reports came from the
+  portal; also confirm their ownership interval is still current (a
+  closed interval can't file).
+- Public page shows an animal that was found: resolution should have
+  de-listed it — check the case status; if it resolved, the listing is
+  gone (a cached page refresh may be all that's stale).

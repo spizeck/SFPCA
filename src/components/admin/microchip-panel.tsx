@@ -1,8 +1,8 @@
 "use client";
 
 // Microchip panel (#168) — the staff view of an animal's chip identity:
-// the current chip, the closed/historical rows, open chip-number
-// conflicts, and found-report history. Rows are never deleted: a chip
+// the current chip, the closed/historical rows, and open chip-number
+// conflicts. Rows are never deleted: a chip
 // leaving use is CLOSED with a reason ('replaced' keeps a successor
 // link); wrong data is fixed in place by Correct — never by a fake
 // replacement event. A duplicate chip claim is rejected and flagged as
@@ -30,7 +30,6 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import type {
   ChipConflictRecord,
-  FoundReportRecord,
   MicrochipRecord,
 } from "@/lib/registry/microchips";
 import {
@@ -57,24 +56,16 @@ const CLOSED_REASON_LABELS: Record<string, string> = {
   corrected: "Corrected — recorded in error",
 };
 
-const FOUND_OUTCOME_LABELS: Record<string, string> = {
-  reunited: "Reunited",
-  "in-care": "In care",
-  other: "Other",
-};
-
 export function MicrochipPanel({
   animalId,
   microchips = [],
   chipConflicts = [],
-  foundReports = [],
   today,
   onChanged,
 }: {
   animalId: string;
   microchips?: MicrochipRecord[];
   chipConflicts?: ChipConflictRecord[];
-  foundReports?: FoundReportRecord[];
   today: string;
   onChanged: () => void;
 }) {
@@ -368,30 +359,6 @@ export function MicrochipPanel({
                   >
                     Resolve
                   </Button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {foundReports.length > 0 && (
-          <div>
-            <p className="text-sm font-medium mb-2">Found reports</p>
-            <ul className="space-y-1 text-sm text-muted-foreground">
-              {foundReports.slice(0, 8).map((r) => (
-                <li key={r.id}>
-                  {r.reportedOn} —{" "}
-                  {r.status === "open" ? (
-                    <Badge variant="secondary">open</Badge>
-                  ) : (
-                    <>
-                      resolved {r.resolvedOn}
-                      {r.outcome
-                        ? ` (${FOUND_OUTCOME_LABELS[r.outcome] ?? r.outcome})`
-                        : ""}
-                    </>
-                  )}
-                  {r.notes ? ` — ${r.notes}` : ""}
                 </li>
               ))}
             </ul>
