@@ -1234,21 +1234,25 @@ new child branch — clean it up after confirming recovery).
 
 ### 19f. Accepted interim posture & hard gates
 
-**Decision (recorded 2026-09):** the Neon **Free** plan is intentionally
-retained for now. Its instant-restore history window is **6 hours**
-(1 GB cap), with 1 manual snapshot and 10 branches per project. This
-is acceptable **only because**:
+**Decision (recorded 2026-09, revisited in the post-roadmap audit):**
+the Neon **Free** plan is intentionally retained for now. Its
+instant-restore history window is **6 hours** (1 GB cap), with 1 manual
+snapshot and 10 branches per project.
 
-- Firestore remains authoritative — Postgres currently contains
-  schema only, no imported registry data;
-- the verified rollback source during #181/#182 is Firestore itself;
-- no runtime path reads or writes Postgres yet.
+**Post-#183 update:** Postgres IS now the registry authority — runtime
+reads/writes hit it on every registry surface, and the retired
+Firestore collections are deny-all. The pre-#183 justification ("no
+runtime path reads or writes Postgres yet") no longer holds. The gap
+below is therefore live, not hypothetical.
 
-The 6-hour window does **not** meet the ≥7-day recovery target for
-eventual authoritative Postgres use (Firestore-side PITR is 7 days).
-That gap stays open on #180 and must be resolved **before #183** —
-see the hard gate below. Do not treat the current window as satisfying
-the original #180 recovery objective.
+The 6-hour window does **not** meet the ≥7-day recovery target set when
+Firestore was authoritative (Firestore-side PITR is 7 days + weekly
+backups). Today it is acceptable **only because** the site is not yet
+live and Postgres holds no real operational data requiring preservation.
+This gap stays open on #180 and must be resolved — or the risk
+explicitly accepted by the owner — **before real registrations,
+payments, or veterinary history are accepted**. Do not treat the
+current window as satisfying the recovery objective.
 
 **#181 precondition — snapshot before every production import.** A
 manual Neon snapshot of `main` is a hard operator precondition before
@@ -1266,14 +1270,14 @@ run, replace/delete the previous disposable import snapshot so a fresh
 one can be taken — the snapshot must always reflect the state
 immediately before *that* run, not an older import.
 
-**#183 hard gate.** #183 must not retire Firestore authority until the
-Postgres recovery posture is **at least equivalent to the current
-Firestore protection** (7-day PITR + weekly 8-week-retained backups +
-delete protection). Acceptable resolutions include a Neon tier with
-≥7-day PITR or another verified mechanism providing equivalent or
-better recoverability — the exact mechanism is deliberately not
-decided here. No independent backup system is built now; the
-re-evaluation trigger is the #183 cutover checklist.
+**#183 hard gate — now binding.** #183 merged with this gate open.
+Until the recovery posture reaches **at least the former Firestore
+protection** (7-day PITR + weekly 8-week-retained backups), treat the
+registry as recoverable only within the 6-hour window plus the last
+manual snapshot. Acceptable resolutions include a Neon tier with
+≥7-day PITR, scheduled logical dumps to durable storage, or another
+verified mechanism — the exact mechanism is deliberately not decided
+here. See POST-ROADMAP-AUDIT.md for the launch classification.
 
 ## 20. Firestore → Postgres import (#181)
 
