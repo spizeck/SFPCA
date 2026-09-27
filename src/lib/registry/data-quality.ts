@@ -387,6 +387,8 @@ async function detectDuplicateAnimals(db: RegistryDb): Promise<RawFinding[]> {
 // phone-only never qualify — household members legitimately share
 // contact channels.
 async function detectDuplicatePersons(db: RegistryDb): Promise<RawFinding[]> {
+  // Retired merge duplicates (#211) are resolved identities, not
+  // candidates — a person_merges row excludes the record here.
   const rows = await db
     .select({
       id: persons.id,
@@ -394,7 +396,12 @@ async function detectDuplicatePersons(db: RegistryDb): Promise<RawFinding[]> {
       email: persons.email,
       phone: persons.phone,
     })
-    .from(persons);
+    .from(persons)
+    .where(
+      sql`NOT EXISTS (
+        SELECT 1 FROM person_merges pm WHERE pm.retired_person_id = ${persons.id}
+      )`,
+    );
   const normName = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
   const normPhone = (s: string | null) => (s ?? "").replace(/\D+/g, "");
 
@@ -453,7 +460,7 @@ async function detectDuplicatePersons(db: RegistryDb): Promise<RawFinding[]> {
       detail:
         "These person records share identifying details. Check whether they are the same person — people are never merged automatically, and household members legitimately share contact details.",
       evidence: [...evidence].sort(),
-      href: "/admin/persons",
+      href: `/admin/data-quality/merge-person?a=${a}&b=${b}`,
     };
   });
 }
@@ -468,7 +475,12 @@ async function detectDuplicateHouseholds(
 ): Promise<RawFinding[]> {
   const houseRows = await db
     .select({ id: households.id, name: households.name, address: households.address })
-    .from(households);
+    .from(households)
+    .where(
+      sql`NOT EXISTS (
+        SELECT 1 FROM household_merges hm WHERE hm.retired_household_id = ${households.id}
+      )`,
+    );
   const memberRows = await db
     .select({
       householdId: householdMembers.householdId,
@@ -478,6 +490,9 @@ async function detectDuplicateHouseholds(
     .from(householdMembers)
     .innerJoin(persons, eq(householdMembers.personId, persons.id));
   const byId = new Map(houseRows.map((r) => [r.id, r]));
+  // Shared-member evidence only counts between live households — a
+  // retired household can't be a merge candidate.
+  const liveMemberRows = memberRows.filter((m) => byId.has(m.householdId));
 
   const pairEvidence = new Map<string, Set<string>>();
   const add = (a: string, b: string, evidence: string) => {
@@ -488,14 +503,14 @@ async function detectDuplicateHouseholds(
   };
 
   const byMember = new Map<string, string[]>();
-  for (const m of memberRows) {
+  for (const m of liveMemberRows) {
     const list = byMember.get(m.personId) ?? [];
     list.push(m.householdId);
     byMember.set(m.personId, list);
   }
   for (const [personId, houseIds] of byMember) {
     const name =
-      memberRows.find((m) => m.personId === personId)?.personName ??
+      liveMemberRows.find((m) => m.personId === personId)?.personName ??
       personId;
     for (let i = 0; i < houseIds.length; i++) {
       for (let j = i + 1; j < houseIds.length; j++) {
@@ -526,7 +541,7 @@ async function detectDuplicateHouseholds(
       detail:
         "These households may be the same household recorded twice. Review memberships before deciding — households are never merged automatically.",
       evidence: [...evidence].sort(),
-      href: "/admin/persons",
+      href: `/admin/data-quality/merge-household?a=${a}&b=${b}`,
     };
   });
 }

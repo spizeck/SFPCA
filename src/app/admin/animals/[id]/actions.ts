@@ -239,7 +239,8 @@ export interface SaveResult {
     | "exceeds-refundable"
     | "not-open"
     | "not-unmatched"
-    | "has-open-case";
+    | "has-open-case"
+    | "merged";
   field?: string;
   // When reason is 'chip-conflict': the flagged conflict + the animal
   // currently holding the number, so the UI can show both sides.
@@ -265,7 +266,8 @@ type MutationOutcome =
         | "exceeds-refundable"
         | "not-open"
         | "not-unmatched"
-        | "has-open-case";
+        | "has-open-case"
+        | "merged";
       field?: string;
       chipConflict?: ChipConflictInfo;
     };

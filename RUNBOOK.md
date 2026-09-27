@@ -1863,17 +1863,39 @@ never disappears. The retired page shows "merged into SFPCA-…" forever;
 hard delete refuses any record with history, so there is no path that
 bypasses this.
 
-### 27d. Person/household duplicates
+### 27d. "I think these are the same person. What do I do?"
 
 The workspace flags probable duplicate people (same email, or same
-name+phone) and households (shared member, identical address).
-**There is no merge button for people or households** — two login
-identities can never be casually combined. Open the records from the
-finding, confirm they're truly the same person, then reconcile
-manually: move ownerships to the correct person record and demote the
-duplicate's contact details. Mark the finding's decision when done.
+name+phone). Open the finding, click **Compare & merge**, and check the
+evidence side-by-side — contact details, households, animals,
+**sign-in accounts**. Pick the record to keep, press **Preview merge**,
+resolve any "the records disagree" field choices (email, phone, etc. —
+nothing is silently overwritten), then confirm the merge.
 
-### 27e. Failure modes
+**Never merge two records that both show "Sign-in account linked."**
+The system blocks it — those are two real logins and merging them
+would fuse two people's accounts. Leave the pair, talk to the people
+involved, or mark the finding "not duplicates" if they're genuinely
+different. If only the record you'd *retire* has a login, swap the
+direction so the account holder is the record you keep — a merge never
+moves anyone's sign-in.
+
+A merged person keeps all history: ownerships, confirmations,
+registrations, payments, messages, and requests move to the survivor;
+the retired row stays as "Merged into …" lineage on the directory and
+can never be edited, re-merged, or given a login.
+
+### 27e. "I think these are the same household. What do I do?"
+
+Duplicate households surface when they share a member or an identical
+address. **Compare & merge** shows members, roles, and ownerships
+side-by-side. Pick the household to keep and confirm — members move
+over (a person in both stays once, and a "primary" role beats
+"member"), ownership and registration history follows, and the retired
+household stays visible as lineage. Merging households never merges
+the people inside them — that's a separate person decision.
+
+### 27f. Failure modes
 
 - **Merge fails with "records changed since the preview"**: the data
   moved between preview and confirm (someone added an ownership, chip,
@@ -1884,6 +1906,10 @@ duplicate's contact details. Mark the finding's decision when done.
   refuses — the lineage table allows exactly one merge per record.
 - **A finding won't stay dismissed**: its evidence changed (new chip,
   new shared owner). That's intentional — re-review.
+- **Person merge blocked — "has a linked sign-in account"**: the record
+  you chose to retire holds a login. Swap the direction so the account
+  holder is kept; if both hold accounts, the pair can't be merged at
+  all — reconcile the people first, then revisit.
 - **Data-quality row shows "couldn't load" on the dashboard**: the
   detector query failed; the failure is a row, never a zero. Check
   Sentry (`dashboard` subsystem), then `/admin/data-quality` directly.

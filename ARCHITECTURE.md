@@ -1070,15 +1070,74 @@ than interleave. The preview fingerprint covers both rows'
 locking hazard: dismissal is a view-layer decision, never a write
 guard.
 
-### 17g. Person/household merge boundary
+### 17g. Person/household merge (#211)
 
-Duplicate *detection and human review* is implemented for people and
-households (`duplicate-person`, `duplicate-household` findings,
-dismissal/confirmation). **No person/household merge executor exists**:
-a person merge must reconcile `auth_identities` (two login identities
-can never be casually fused), ownership history, household membership,
-owner requests, and communications — materially larger than the animal
-case. Findings route staff to `/admin/persons` to reconcile manually
-(demote the duplicate record's contact details, move ownerships by
-hand). A dedicated safe person-merge is a follow-up; the workspace
-language says people/households are never merged automatically.
+Duplicate *detection and human review* was already live for people and
+households (`duplicate-person`, `duplicate-household` findings).
+#211 adds the merge executors — `person-merge.ts` and
+`household-merge.ts` — deliberately separate services, not a generic
+merge engine: persons carry authentication identity, households carry
+membership, and their invariants differ. Both reuse the animal-merge
+skeleton: server-generated preview → explicit direction → fingerprint →
+locked, re-checked transaction → lineage + audit + review update.
+
+**Person merge.** `/admin/data-quality/merge-person` renders both
+records side-by-side with contact fields, sign-in state, admin links,
+households, and current animals. `previewPersonMerge` classifies every
+`person_id` referencer into reparented rows (ownerships, confirmations,
+owner requests, submissions, registrations, payments, follow-ups,
+clinic expectations, communications, household memberships, admin
+bookkeeping link, communication preferences) and untouched history
+(`owner_label` snapshots, request/communication prose, audit events —
+loose text refs, never rewritten). `person_merges` (unique
+`retired_person_id`) is the lineage; `resolvePersonMergeTarget` is the
+internal alias resolver.
+
+**Auth identity is the safety boundary.** `auth_identities` rows are
+never reparented during a merge — a login is evidence of *who signed
+in*, not profile data:
+
+- neither side authenticated → allowed;
+- survivor authenticated, retired not → allowed (login stays put);
+- retired authenticated, survivor not → **blocked** (`auth-direction`):
+  staff must swap the direction so the kept record is the
+  authenticated one — a merge never transfers a login;
+- both authenticated → **blocked** (`dual-auth`): two independently
+  signed-in accounts require manual identity reconciliation. No record
+  is mutated.
+
+`admin_users` is email/role/`auth_identity_id`-based; its `person_id`
+is bookkeeping only and reparents without touching role or access —
+merge can neither grant nor revoke staff privileges.
+
+**Field conflicts** (full name, email, phone, address, preferred
+channel, notes) require an explicit staff choice per field; missing
+values fill from the other side automatically and every choice lands in
+the audit payload.
+
+**Collision handling.** Household memberships dedupe on
+`(household, person)` — `primary` wins. Communication preferences
+collide on `(person, channel, kind)` — opt-out union into the survivor
+row, retired row dropped. Duplicate *open* ownership intervals that
+would result for the same animal close annotated on the retired record
+(as `correction`-style lineage) rather than creating a double current
+owner; closed/historical intervals simply reparent.
+
+**Household merge.** Same shape minus the auth gate:
+`/admin/data-quality/merge-household` compares name, address, members,
+and ownership history. Members reparent and dedupe (`primary` wins);
+`ownerships.household_id` reparents with the same open-interval rule;
+`registrations.household_id` reparents while `owner_label` stays as the
+historical snapshot. `household_merges` provides the same one-retired→
+one-survivor lineage. Underlying person identities are never merged as
+a side effect of a household merge.
+
+**Retired behavior & delete policy.** `listPersons`/`listHouseholds`
+exclude retired records by default; `includeRetired: true` returns them
+annotated `mergedInto` for the directory UI. `updatePerson`,
+`updateHousehold`, `setHouseholdMember`, `linkIdentityToPerson`, and
+`createOwnership` all refuse retired ids (`reason: "merged"`) — a
+retired identity cannot be edited, gain a login, gain membership, or
+gain new ownership. There is no person/household hard-delete in the
+codebase at all, so no path bypasses merge for identity consolidation.
+

@@ -6,6 +6,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
+import { getRegistryDb } from "@/lib/db/client";
 import {
   createHousehold,
   createPerson,
@@ -32,9 +33,12 @@ export async function getPersonsDataAction(): Promise<{
 }> {
   const { authorized } = await requireAdmin();
   if (!authorized) throw new Error("Unauthorized");
+  // The staff list shows retired merge duplicates annotated ("merged
+  // into X") so old names still resolve — pickers elsewhere call the
+  // services with retired rows excluded.
   const [persons, households] = await Promise.all([
-    listPersons(),
-    listHouseholds(),
+    listPersons({ includeRetired: true }),
+    listHouseholds(getRegistryDb(), { includeRetired: true }),
   ]);
   return { persons, households };
 }
@@ -49,7 +53,7 @@ export async function getPersonDetailAction(
 
 export interface SaveResult {
   ok: boolean;
-  reason?: "invalid" | "not-found" | "conflict" | "overlap";
+  reason?: "invalid" | "not-found" | "conflict" | "overlap" | "merged";
   field?: string;
 }
 

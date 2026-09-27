@@ -160,6 +160,8 @@ function PersonDetailView({
 
   if (!detail) return <p className="text-sm text-muted-foreground">Loading…</p>;
 
+  const merged = detail.merge?.status === "merged";
+
   const act = async (run: () => Promise<{ ok: boolean; reason?: string }>) => {
     setBusy(true);
     try {
@@ -181,6 +183,17 @@ function PersonDetailView({
 
   return (
     <div className="border-t pt-3 mt-3 space-y-3 text-sm">
+      {merged && detail.merge?.survivor && (
+        <div className="rounded-md border border-amber-500/50 bg-amber-50 dark:bg-amber-950/30 p-3">
+          This record was merged into{" "}
+          <strong>{detail.merge.survivor.fullName}</strong>
+          {detail.merge.mergedAt
+            ? ` on ${detail.merge.mergedAt.slice(0, 10)}`
+            : ""}
+          . It is kept as merge lineage — its history moved to the
+          canonical record and it cannot be edited or merged again.
+        </div>
+      )}
       <div>
         <p className="font-medium mb-1">Linked accounts</p>
         {detail.identities.length === 0 ? (
@@ -342,10 +355,19 @@ export default function PersonsPage() {
                 <li key={p.id} className="py-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className="text-sm">
-                      <p className="font-medium">{p.fullName}</p>
+                      <div className="font-medium flex items-center">
+                        {p.fullName}
+                        {p.mergedInto && (
+                          <Badge variant="secondary" className="ml-2">
+                            Merged
+                          </Badge>
+                        )}
+                      </div>
                       <p className="text-muted-foreground">
-                        {[p.email, p.phone].filter(Boolean).join(" · ") ||
-                          "No contact details"}
+                        {p.mergedInto
+                          ? `Merged into ${p.mergedInto.fullName} — kept as lineage`
+                          : [p.email, p.phone].filter(Boolean).join(" · ") ||
+                            "No contact details"}
                       </p>
                     </div>
                     <div className="flex gap-2">
@@ -358,13 +380,15 @@ export default function PersonsPage() {
                       >
                         {expandedId === p.id ? "Hide" : "Details"}
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setEditing({ person: p, id: p.id })}
-                      >
-                        Edit
-                      </Button>
+                      {!p.mergedInto && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setEditing({ person: p, id: p.id })}
+                        >
+                          Edit
+                        </Button>
+                      )}
                     </div>
                   </div>
                   {expandedId === p.id && (
@@ -398,24 +422,39 @@ export default function PersonsPage() {
               {data.households.map((h) => (
                 <li key={h.id} className="py-3 space-y-2">
                   <div className="flex items-center justify-between">
-                    <p className="font-medium text-sm">
-                      {h.name}
+                    <div className="font-medium text-sm">
+                      <span className="inline-flex items-center">
+                        {h.name}
+                        {h.mergedInto && (
+                          <Badge variant="secondary" className="ml-2">
+                            Merged
+                          </Badge>
+                        )}
+                      </span>
                       {h.address && (
                         <span className="text-muted-foreground font-normal">
                           {" "}
                           · {h.address}
                         </span>
                       )}
-                    </p>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() =>
-                        setAddMember({ householdId: h.id, personId: "" })
-                      }
-                    >
-                      Add member
-                    </Button>
+                      {h.mergedInto && (
+                        <span className="text-muted-foreground font-normal">
+                          {" "}
+                          — merged into {h.mergedInto.name}
+                        </span>
+                      )}
+                    </div>
+                    {!h.mergedInto && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() =>
+                          setAddMember({ householdId: h.id, personId: "" })
+                        }
+                      >
+                        Add member
+                      </Button>
+                    )}
                   </div>
                   <ul className="text-sm space-y-1">
                     {h.members.map((m) => (
@@ -462,11 +501,13 @@ export default function PersonsPage() {
                           <SelectValue placeholder="Person…" />
                         </SelectTrigger>
                         <SelectContent>
-                          {data.persons.map((p) => (
-                            <SelectItem key={p.id} value={p.id}>
-                              {p.fullName}
-                            </SelectItem>
-                          ))}
+                          {data.persons
+                            .filter((p) => !p.mergedInto)
+                            .map((p) => (
+                              <SelectItem key={p.id} value={p.id}>
+                                {p.fullName}
+                              </SelectItem>
+                            ))}
                         </SelectContent>
                       </Select>
                       <Button
