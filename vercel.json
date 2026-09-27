@@ -1,4 +1,9 @@
 {
+  "git": {
+    "deploymentEnabled": {
+      "dependabot/*": false
+    }
+  },
   "crons": [
     {
       "path": "/api/cron/sweep-receipts",
