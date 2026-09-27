@@ -80,6 +80,15 @@ service firebase.storage {
       allow read, update, delete: if false;
     }
 
+    // Database backups (#180) — pg_dump output uploaded by the Admin
+    // SDK from the scheduled GitHub Action / operator machine, which
+    // bypasses rules entirely. No client principal may ever read,
+    // write, or delete a dump: they contain the full registry
+    // including owner PII and payment history.
+    match /db-backups/{allPaths=**} {
+      allow read, write: if false;
+    }
+
     // Default deny
     match /{allPaths=**} {
       allow read, write: if false;

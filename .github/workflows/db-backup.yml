@@ -1,0 +1,69 @@
+name: DB backup
+
+# Scheduled logical backup of the authoritative Postgres registry (#180).
+# Daily pg_dump → private Firebase Storage db-backups/ prefix, newest 8
+# daily objects retained (≥7 days of recovery points). Neon PITR (6h on
+# the Free plan) remains the fast fat-finger layer; this workflow is the
+# recovery path that survives a bad day, not just a bad minute.
+#
+# Failure visibility: a failed run goes red and GitHub emails the repo
+# owner — no application-runtime dependency.
+#
+# Required repo secrets (names only):
+#   BACKUP_DATABASE_URL           — unpooled production Neon URL
+#   FIREBASE_ADMIN_PROJECT_ID     — same service account as Vercel env
+#   FIREBASE_ADMIN_CLIENT_EMAIL
+#   FIREBASE_ADMIN_PRIVATE_KEY
+#   NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET — dump destination bucket
+#
+# Restore/drill procedure: RUNBOOK §19g + scripts/db-restore.ts.
+
+on:
+  schedule:
+    - cron: "15 3 * * *" # daily 03:15 UTC — off-peak for a Saba org
+  workflow_dispatch:
+
+permissions:
+  contents: none
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false # never abort a backup mid-upload
+
+jobs:
+  backup:
+    name: Backup Postgres → Storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install pg_dump (PostgreSQL 18 client)
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-18
+          pg_dump --version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Dump, upload, prune
+        run: npx tsx scripts/db-backup.ts
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          FIREBASE_ADMIN_PROJECT_ID: ${{ secrets.FIREBASE_ADMIN_PROJECT_ID }}
+          FIREBASE_ADMIN_CLIENT_EMAIL: ${{ secrets.FIREBASE_ADMIN_CLIENT_EMAIL }}
+          FIREBASE_ADMIN_PRIVATE_KEY: ${{ secrets.FIREBASE_ADMIN_PRIVATE_KEY }}
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ${{ secrets.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET }}

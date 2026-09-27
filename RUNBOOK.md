@@ -1254,36 +1254,123 @@ explicitly accepted by the owner — **before real registrations,
 payments, or veterinary history are accepted**. Do not treat the
 current window as satisfying the recovery objective.
 
-**#181 precondition — snapshot before every production import.** A
-manual Neon snapshot of `main` is a hard operator precondition before
-*every* production `migrate:firestore --execute` run — not just the
-first planned import:
+**High-risk-operation rule (supersedes the #181 import precondition).**
+Before ANY high-risk bulk mutation of the authoritative database —
+a bulk import, a destructive migration, a batch correction script —
+take a recoverable copy first:
 
-1. Take a manual snapshot of the `main` branch (Neon console or API).
-2. Verify the snapshot exists and its timestamp predates the run.
-3. Run the import; reconcile source/destination counts + integrity.
-4. If the import is bad, restore/revert the Postgres side while
-   Firestore is still authoritative.
+1. `npx tsx scripts/neon-ops.ts snapshot` (manual Neon snapshot of
+   `main`), or confirm the latest `db-backups/` object in Storage is
+   fresh enough for the change window — `npm run db:backup` forces one.
+2. Verify the snapshot/dump exists and its timestamp predates the run.
+3. If the operation goes wrong, restore per §19g.
 
-Free allows exactly **1 manual snapshot**: before a later controlled
-run, replace/delete the previous disposable import snapshot so a fresh
-one can be taken — the snapshot must always reflect the state
-immediately before *that* run, not an older import.
+Free allows exactly **1 manual snapshot**: before a later run,
+replace/delete the previous disposable snapshot so a fresh one can be
+taken — the snapshot must always reflect the state immediately before
+*that* run, not an older one.
 
-**#183 hard gate — now binding.** #183 merged with this gate open.
-Until the recovery posture reaches **at least the former Firestore
-protection** (7-day PITR + weekly 8-week-retained backups), treat the
-registry as recoverable only within the 6-hour window plus the last
-manual snapshot. Acceptable resolutions include a Neon tier with
-≥7-day PITR, scheduled logical dumps to durable storage, or another
-verified mechanism — the exact mechanism is deliberately not decided
-here. See POST-ROADMAP-AUDIT.md for the launch classification.
+**#183 hard gate — RESOLVED (2026-09-27).** Scheduled logical backups
+per §19g now provide ≥7 days of independent recovery history on top of
+the 6-hour PITR, verified by the live restore drill in §19g. A paid
+Neon tier for longer PITR remains a valid owner upgrade, not a
+requirement.
 
-## 20. Firestore → Postgres import (#181)
+### 19g. Logical backups & restore (#180)
 
-One-time operational import of the registry collections. Postgres is a
-verified shadow copy afterward — **Firestore remains authoritative**;
-no runtime path changes.
+**Design.** Two complementary layers:
+
+| Layer | Window | Use |
+|---|---|---|
+| Neon instant restore (Free) | 6 hours | Fat-finger / bad-migration recovery — tested §19e |
+| Scheduled `pg_dump` → Firebase Storage | newest **8 daily** objects (≥7 days of points) | Database loss, corruption discovered late, independent copy |
+
+**Backup mechanics.** `.github/workflows/db-backup.yml` runs
+`scripts/db-backup.ts` daily at 03:15 UTC (plus `workflow_dispatch`):
+
+1. `pg_dump --format=custom --no-owner --no-privileges` of the
+   production branch via `BACKUP_DATABASE_URL` (unpooled). Custom
+   format is compressed and includes schema, data, sequences, indexes,
+   constraints, and the `__drizzle_migrations` journal — a restored DB
+   knows exactly which migrations it has.
+2. Uploads `db-backups/registry-<UTC-timestamp>.dump` to the default
+   Firebase Storage bucket via the Admin SDK. The prefix is explicit
+   deny-all in `storage.rules`; Admin SDK bypasses rules — no client
+   principal can ever read a dump.
+3. Verifies the object landed, THEN prunes objects older than the
+   newest 8. Pruning never precedes a verified upload, so a failed run
+   can never delete the last recovery point.
+
+**Why Firebase Storage:** it is private infrastructure the project
+already operates (service account already provisioned; bucket is
+IAM-gated, deny-all to clients, encrypted at rest). Dumps survive loss
+of the Neon project itself, and no new vendor or bill is introduced.
+
+**Failure visibility:** a failed step exits non-zero → the Actions run
+goes red → GitHub emails the repo owner. No app-runtime dependency.
+
+**Required secrets (repo → Settings → Secrets → Actions):**
+`BACKUP_DATABASE_URL`, `FIREBASE_ADMIN_PROJECT_ID`,
+`FIREBASE_ADMIN_CLIENT_EMAIL`, `FIREBASE_ADMIN_PRIVATE_KEY`,
+`NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET`. Values mirror the existing
+Vercel production env; the URL uses the unpooled endpoint.
+
+**Manual backup:** `npm run db:backup` locally (needs
+`BACKUP_DATABASE_URL`/`DATABASE_URL_UNPOOLED` + `FIREBASE_ADMIN_*` in
+`.env.local`, and `pg_dump` on PATH — `scoop install postgresql`).
+
+**Restore — isolated verification (non-destructive by construction):**
+
+```
+npx tsx scripts/db-restore.ts --dump db-backups/registry-….dump
+```
+
+creates a NEW Neon branch + empty `restore_check` database, runs
+`pg_restore`, validates (every `schema.ts` table present + row counts,
+`__drizzle_migrations` == `drizzle/` file count, zero orphan FK rows),
+then deletes the branch. `--keep` retains it for inspection;
+`--dump ./file.dump` accepts a local file. Needs `NEON_API_KEY` +
+`FIREBASE_ADMIN_*` + `pg_restore` on PATH. The script has no mode that
+targets the primary branch — restoring to production is always the
+documented human procedure below, never a script flag.
+
+**Production recovery decision procedure:**
+
+1. Choose the recovery point: newest good `db-backups/` object (or a
+   Neon PITR timestamp if within 6 hours — §19c/§19e).
+2. `db-restore.ts --dump <object> --keep` → verify on the branch.
+3. If good, EITHER promote the verified branch in the Neon console
+   (it becomes primary — cheapest), OR restore the dump into a fresh
+   database and repoint `DATABASE_URL`/`DATABASE_URL_UNPOOLED` in
+   Vercel (Production scope) → redeploy.
+4. Re-run `npm run db:backup` immediately after recovery so the new
+   state becomes a recovery point.
+
+**Recovery objectives (measured, not promised):**
+- Recovery history: ≥7 days (8 daily objects) + 6h PITR.
+- Frequency: daily 03:15 UTC.
+- Observed restore time for a ~0.1 MB seed-era dump: **~40 s**
+  end-to-end (branch + restore + verify + teardown). Expect this to
+  grow with real data volume; re-time after the first months of real
+  registrations.
+- Firebase Storage objects (`receipts/`, `vet-docs/`) are NOT in these
+  dumps — Storage recovery posture is §17 (7-day Firestore PITR +
+  object-versioning guidance); dumps recover Postgres only.
+
+**Drill record (executed 2026-09-27, against real production `main`):**
+production dump → Storage upload → isolated `restore-drill-180`
+branch → `restore_check` db → `pg_restore` → validation PASSED (33
+tables, journal current, 0 orphans) → branch deleted. Notably the
+first drill run correctly FAILED validation, detecting that production
+was 17 migrations behind — fixed via `npm run db:migrate` before the
+passing run.
+
+## 20. Firestore → Postgres import (#181) — completed, historical
+
+One-time operational import of the registry collections, **completed
+during the migration program**. Postgres is now authoritative (#183);
+the section below is retained as the record of how the import was
+executed and is no longer an operational workflow.
 
 ### 20a. Scope
 
