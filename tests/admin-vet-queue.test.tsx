@@ -41,6 +41,19 @@ vi.mock("@/hooks/use-toast", () => ({
   useToast: () => ({ toast: mockToast }),
 }));
 
+// #177 made kind/window filters URL state — the page reads
+// useSearchParams/usePathname/useRouter, which need this stub outside
+// the app router. The search-params object must be STABLE across
+// renders (a fresh instance each call defeats the page's sync effect).
+const { stableSearchParams } = vi.hoisted(() => ({
+  stableSearchParams: new URLSearchParams(),
+}));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+  usePathname: () => "/admin/vet",
+  useSearchParams: () => stableSearchParams,
+}));
+
 import VetQueuePage from "@/app/admin/vet/page";
 
 const TODAY = todayIsoDate();

@@ -21,6 +21,14 @@ import {
 } from "@/lib/registry/animals";
 import { isRegistrationStatus } from "@/lib/animal-registration";
 import type { AnimalRegistration } from "@/lib/types";
+import {
+  listPendingPayments,
+  type PendingPaymentItem,
+} from "@/lib/registry/payments";
+import {
+  listOwnershipsRequiringConfirmation,
+  type ConfirmationEligibilityRow,
+} from "@/lib/registry/ownership";
 import { logError } from "@/lib/logger";
 
 function toRegistration(
@@ -135,6 +143,26 @@ export async function createRegistrationFromSubmissionAction(
     logError("registration", "registration-create", error);
     return { ok: false };
   }
+}
+
+// Ledger rows declared but not yet money — pending bank transfers staff
+// must confirm or void (#170 reconciliation; #177 dashboard source).
+export async function listPendingPaymentsAction(): Promise<
+  PendingPaymentItem[]
+> {
+  const { authorized } = await requireAdmin();
+  if (!authorized) throw new Error("Unauthorized");
+  return listPendingPayments();
+}
+
+// Ownership relationships past their annual re-affirmation (#166) —
+// the canonical eligibility read, same as the reminder evaluator uses.
+export async function listConfirmationsDueAction(): Promise<
+  ConfirmationEligibilityRow[]
+> {
+  const { authorized } = await requireAdmin();
+  if (!authorized) throw new Error("Unauthorized");
+  return listOwnershipsRequiringConfirmation();
 }
 
 // Lightweight animal search for the link-animal picker — name, registry

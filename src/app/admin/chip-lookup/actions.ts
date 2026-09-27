@@ -8,7 +8,9 @@
 
 import { requireAdmin } from "@/lib/auth";
 import {
+  listChipConflicts,
   lookupChip,
+  type ChipConflictRecord,
   type ChipLookupResult,
 } from "@/lib/registry/microchips";
 import { openFoundCase, resolveCase } from "@/lib/registry/lost-found";
@@ -88,6 +90,17 @@ export async function recordFoundScanAction(input: {
     logError("microchips", "found-scan-save", error);
     return { ok: false };
   }
+}
+
+// Open chip conflicts for the follow-up section — the actionable list
+// the #177 dashboard links to. Resolution happens on the animal
+// profile's microchip panel; this surface only shows what needs it.
+export async function listOpenChipConflictsAction(): Promise<
+  ChipConflictRecord[]
+> {
+  const { authorized } = await requireAdmin();
+  if (!authorized) throw new Error("Unauthorized");
+  return listChipConflicts({ status: "open" });
 }
 
 // Close an open case surfaced by the lookup (the missing case the scan

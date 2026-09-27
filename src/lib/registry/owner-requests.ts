@@ -372,6 +372,18 @@ export async function listOwnerRequests(
   return rows.map(toRequestDto);
 }
 
+// Aggregate count for the #177 dashboard — pending-only so the summary
+// stays a single indexed aggregate, never a row fetch to count.
+export async function countPendingOwnerRequests(
+  db: RegistryDb = getRegistryDb(),
+): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(ownerRequests)
+    .where(eq(ownerRequests.status, "pending"));
+  return row?.n ?? 0;
+}
+
 // The owner's own request history — the portal's "pending requests"
 // list. Scoped by person (linked account) — an unlinked identity's only
 // possible request is its claim, which the pending state already shows.

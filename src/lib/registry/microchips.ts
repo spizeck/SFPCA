@@ -434,6 +434,18 @@ export async function listChipConflicts(
   );
 }
 
+// Aggregate count for the #177 dashboard — open conflicts only, so the
+// summary stays a single aggregate, never a row fetch to count.
+export async function countOpenChipConflicts(
+  db: RegistryDb = getRegistryDb(),
+): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(microchipConflicts)
+    .where(eq(microchipConflicts.status, "open"));
+  return row?.n ?? 0;
+}
+
 // --- Writes --------------------------------------------------------------------
 
 // Record a chip as the animal's CURRENT chip. Rejects cleanly when the
