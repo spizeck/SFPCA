@@ -26,6 +26,27 @@ function isAuthApiPath(pathname: string): boolean {
   return pathname === "/api/auth" || pathname.startsWith("/api/auth/");
 }
 
+// Operational machine-to-machine APIs (#216): Vercel cron invocations
+// (/api/cron/reminders, /api/cron/sweep-receipts) and the Resend
+// delivery webhook (/api/webhooks/resend). Maintenance mode gates
+// public interactive traffic — it is not a switch for background
+// infrastructure, and silently redirecting these routes would suspend
+// reminders, receipt sweeping, and delivery writebacks for the whole
+// window. Every handler here authenticates independently and fails
+// closed (CRON_SECRET bearer / svix signature), so exemption widens no
+// public surface — the maintenance redirect is the only thing removed.
+// Deliberately NOT a blanket /api/ exemption: any future public API
+// stays gated. The bare namespace roots match for uniformity; they
+// have no handler, so they 404 rather than redirect.
+function isOpsApiPath(pathname: string): boolean {
+  return (
+    pathname === "/api/cron" ||
+    pathname.startsWith("/api/cron/") ||
+    pathname === "/api/webhooks" ||
+    pathname.startsWith("/api/webhooks/")
+  );
+}
+
 // Exact public paths that must stay reachable while the gate is on.
 const MAINTENANCE_EXEMPT_PATHS = new Set([
   "/under-construction",
@@ -51,7 +72,12 @@ const MAINTENANCE_EXEMPT_PREFIXES = [
 
 export function isMaintenanceExemptPath(pathname: string): boolean {
   if (MAINTENANCE_EXEMPT_PATHS.has(pathname)) return true;
-  if (isAdminPath(pathname) || isAuthApiPath(pathname) || isPortalPath(pathname)) {
+  if (
+    isAdminPath(pathname) ||
+    isAuthApiPath(pathname) ||
+    isPortalPath(pathname) ||
+    isOpsApiPath(pathname)
+  ) {
     return true;
   }
   return MAINTENANCE_EXEMPT_PREFIXES.some((prefix) =>
