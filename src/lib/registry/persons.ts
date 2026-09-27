@@ -26,17 +26,24 @@
 import "server-only";
 
 import { and, asc, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import {
   animals,
   auditEvents,
   authIdentities,
   householdMembers,
+  householdMerges,
   households,
   ownerships,
+  personMerges,
   persons,
 } from "../db/schema";
 import { getRegistryDb } from "../db/client";
 import { EMAIL_RE } from "./communications";
+import {
+  getPersonMergeInfo,
+  type PersonMergeInfo,
+} from "./person-merge";
 import type { RegistryDb } from "./public-animals";
 
 const UUID_RE =
@@ -70,6 +77,10 @@ export interface PersonRecord {
   notes: string | null;
   createdAt: string;
   updatedAt: string;
+  // Set when this record is a retired merge duplicate (#211) — the
+  // canonical survivor it resolved into. Retired rows are excluded
+  // from pickers/listings unless a caller asks for them annotated.
+  mergedInto: { id: string; fullName: string } | null;
 }
 
 export interface HouseholdRecord {
@@ -78,6 +89,7 @@ export interface HouseholdRecord {
   address: string | null;
   members: { personId: string; fullName: string; role: string }[];
   createdAt: string;
+  mergedInto: { id: string; name: string } | null;
 }
 
 // What the signed-in owner's session resolves to.
@@ -100,11 +112,15 @@ const PERSON_COLUMNS = {
   updatedAt: persons.updatedAt,
 } as const;
 
-function toPersonDto(row: typeof persons.$inferSelect): PersonRecord {
+function toPersonDto(
+  row: typeof persons.$inferSelect,
+  mergedInto: { id: string; fullName: string } | null = null,
+): PersonRecord {
   return {
     ...row,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    mergedInto,
   };
 }
 
@@ -193,7 +209,7 @@ export async function findClaimCandidates(
       ),
     )
     .orderBy(asc(persons.createdAt));
-  return rows.map(toPersonDto);
+  return rows.map((r) => toPersonDto(r));
 }
 
 // --- Persons -----------------------------------------------------------------
@@ -246,7 +262,37 @@ function personWriteValues(input: PersonWriteInput) {
 
 export type PersonMutationResult =
   | { ok: true; person: PersonRecord }
-  | { ok: false; reason: "not-found" | "conflict" | "invalid"; field?: string };
+  | {
+      ok: false;
+      // 'merged' — the record is a retired duplicate; edit the
+      // canonical survivor instead (person_merges lineage).
+      reason: "not-found" | "conflict" | "invalid" | "merged";
+      field?: string;
+    };
+
+// A person is retired exactly when person_merges names it — the merge
+// executor is the only writer.
+async function personIsRetired(
+  personId: string,
+  db: RegistryDb,
+): Promise<boolean> {
+  const [r] = await db
+    .select({ id: personMerges.id })
+    .from(personMerges)
+    .where(eq(personMerges.retiredPersonId, personId));
+  return !!r;
+}
+
+async function householdIsRetired(
+  householdId: string,
+  db: RegistryDb,
+): Promise<boolean> {
+  const [r] = await db
+    .select({ id: householdMerges.id })
+    .from(householdMerges)
+    .where(eq(householdMerges.retiredHouseholdId, householdId));
+  return !!r;
+}
 
 export async function createPerson(
   input: PersonWriteInput,
@@ -294,6 +340,9 @@ export async function updatePerson(
       .where(eq(persons.id, id))
       .for("update");
     if (!before) return { ok: false as const, reason: "not-found" as const };
+    if (await personIsRetired(id, tx)) {
+      return { ok: false as const, reason: "merged" as const };
+    }
     if (before.updatedAt.getTime() !== expectedMs) {
       return { ok: false as const, reason: "conflict" as const };
     }
@@ -334,6 +383,9 @@ export async function updateOwnerProfile(
       .where(eq(persons.id, personId))
       .for("update");
     if (!before) return { ok: false as const, reason: "not-found" as const };
+    if (await personIsRetired(personId, tx)) {
+      return { ok: false as const, reason: "merged" as const };
+    }
     const { notes: _notes, ...values } = personWriteValues(input);
     const [row] = await tx
       .update(persons)
@@ -356,20 +408,51 @@ export async function updateOwnerProfile(
 
 // --- Staff reads ------------------------------------------------------------------
 
+// Retired merge duplicates carry their survivor for annotation.
+const retiredPersonJoin = alias(persons, "retired_survivor");
+
+function personSelect(db: RegistryDb) {
+  return db
+    .select({
+      ...PERSON_COLUMNS,
+      mergedId: personMerges.survivorPersonId,
+      mergedName: retiredPersonJoin.fullName,
+    })
+    .from(persons)
+    .leftJoin(personMerges, eq(personMerges.retiredPersonId, persons.id))
+    .leftJoin(
+      retiredPersonJoin,
+      eq(personMerges.survivorPersonId, retiredPersonJoin.id),
+    );
+}
+
+type PersonListRow = typeof persons.$inferSelect & {
+  mergedId: string | null;
+  mergedName: string | null;
+};
+
+function toPersonListDto(row: PersonListRow): PersonRecord {
+  const { mergedId, mergedName, ...person } = row;
+  return toPersonDto(
+    person,
+    mergedId ? { id: mergedId, fullName: mergedName ?? "" } : null,
+  );
+}
+
 export async function listPersons(
-  { limit = 200 }: { limit?: number } = {},
+  { limit = 200, includeRetired = false }: { limit?: number; includeRetired?: boolean } = {},
   db: RegistryDb = getRegistryDb(),
 ): Promise<PersonRecord[]> {
-  const rows = await db
-    .select(PERSON_COLUMNS)
-    .from(persons)
+  const rows = await personSelect(db)
+    .where(includeRetired ? undefined : isNull(personMerges.retiredPersonId))
     .orderBy(asc(persons.fullName), asc(persons.id))
     .limit(Math.min(Math.max(limit, 1), 500));
-  return rows.map(toPersonDto);
+  return rows.map(toPersonListDto);
 }
 
 // Staff person picker — name or email substring. Returns a bounded
-// list; the picker narrows further client-side.
+// list; the picker narrows further client-side. Retired merge
+// duplicates are never pickable.
 export async function searchPersons(
   query: string,
   { limit = 20 }: { limit?: number } = {},
@@ -377,19 +460,23 @@ export async function searchPersons(
 ): Promise<PersonRecord[]> {
   const q = query.trim();
   if (!q) return listPersons({ limit }, db);
-  const rows = await db
-    .select(PERSON_COLUMNS)
-    .from(persons)
+  const rows = await personSelect(db)
     .where(
-      or(ilike(persons.fullName, `%${q}%`), ilike(persons.email, `%${q}%`)),
+      and(
+        isNull(personMerges.retiredPersonId),
+        or(ilike(persons.fullName, `%${q}%`), ilike(persons.email, `%${q}%`)),
+      ),
     )
     .orderBy(asc(persons.fullName), asc(persons.id))
     .limit(Math.min(Math.max(limit, 1), 100));
-  return rows.map(toPersonDto);
+  return rows.map(toPersonListDto);
 }
 
 export interface PersonDetail {
   person: PersonRecord;
+  // Merge lineage (#211): 'merged' → the canonical survivor this
+  // record resolved into; 'canonical' → retired duplicates absorbed.
+  merge: PersonMergeInfo;
   identities: AuthIdentityRecord[];
   households: HouseholdRecord[];
   // Current + historical ownership rows, newest first — staff see the
@@ -408,11 +495,9 @@ export async function getPersonDetail(
   db: RegistryDb = getRegistryDb(),
 ): Promise<PersonDetail | null> {
   if (!UUID_RE.test(personId)) return null;
-  const [person] = await db
-    .select(PERSON_COLUMNS)
-    .from(persons)
-    .where(eq(persons.id, personId));
-  if (!person) return null;
+  const [row] = await personSelect(db).where(eq(persons.id, personId));
+  if (!row) return null;
+  const person = toPersonListDto(row);
 
   const [identityRows, householdRows, ownershipRows] = await Promise.all([
     db
@@ -445,7 +530,15 @@ export async function getPersonDetail(
   ]);
 
   return {
-    person: toPersonDto(person),
+    person,
+    merge:
+      (await getPersonMergeInfo(personId, db)) ?? {
+        status: "canonical",
+        survivor: null,
+        mergedAt: null,
+        mergedByLabel: null,
+        absorbed: [],
+      },
     identities: identityRows.map(toIdentityDto),
     households: householdRows.map((h) => ({
       id: h.id,
@@ -453,6 +546,7 @@ export async function getPersonDetail(
       address: h.address,
       members: [],
       createdAt: h.createdAt.toISOString(),
+      mergedInto: null,
     })),
     ownerships: ownershipRows,
   };
@@ -462,7 +556,7 @@ export async function getPersonDetail(
 
 export type LinkResult =
   | { ok: true }
-  | { ok: false; reason: "not-found" | "conflict" | "invalid" };
+  | { ok: false; reason: "not-found" | "conflict" | "invalid" | "merged" };
 
 // Attach an auth identity to a person — the ONLY way an existing person
 // gains portal access. Used by claim resolution and direct staff action.
@@ -489,6 +583,11 @@ export async function linkIdentityToPerson(
       .from(persons)
       .where(eq(persons.id, personId));
     if (!person) return { ok: false as const, reason: "not-found" as const };
+    // A retired duplicate can never gain a login — the merge executor
+    // guarantees retired persons hold no identities; keep it that way.
+    if (await personIsRetired(personId, tx)) {
+      return { ok: false as const, reason: "merged" as const };
+    }
     if (identity.personId !== null && identity.personId !== personId) {
       return { ok: false as const, reason: "conflict" as const };
     }
@@ -546,10 +645,28 @@ export async function unlinkIdentity(
 
 export async function listHouseholds(
   db: RegistryDb = getRegistryDb(),
+  { includeRetired = false }: { includeRetired?: boolean } = {},
 ): Promise<HouseholdRecord[]> {
   const householdRows = await db
-    .select()
+    .select({
+      id: households.id,
+      name: households.name,
+      address: households.address,
+      createdAt: households.createdAt,
+      mergedId: householdMerges.survivorHouseholdId,
+      mergedName: sql<string | null>`(
+        SELECT h.name FROM households h
+        WHERE h.id = ${householdMerges.survivorHouseholdId}
+      )`,
+    })
     .from(households)
+    .leftJoin(
+      householdMerges,
+      eq(householdMerges.retiredHouseholdId, households.id),
+    )
+    .where(
+      includeRetired ? undefined : isNull(householdMerges.retiredHouseholdId),
+    )
     .orderBy(asc(households.name), asc(households.id));
   const memberRows = await db
     .select({
@@ -566,6 +683,7 @@ export async function listHouseholds(
     name: h.name,
     address: h.address,
     createdAt: h.createdAt.toISOString(),
+    mergedInto: h.mergedId ? { id: h.mergedId, name: h.mergedName ?? "" } : null,
     members: memberRows
       .filter((m) => m.householdId === h.id)
       .map((m) => ({ personId: m.personId, fullName: m.fullName, role: m.role })),
@@ -595,7 +713,7 @@ export interface HouseholdWriteInput {
 
 export type HouseholdMutationResult =
   | { ok: true; household: HouseholdRecord }
-  | { ok: false; reason: "not-found" | "invalid"; field?: string };
+  | { ok: false; reason: "not-found" | "invalid" | "merged"; field?: string };
 
 export async function createHousehold(
   input: HouseholdWriteInput,
@@ -628,6 +746,7 @@ export async function createHousehold(
         address: row.address,
         members: [],
         createdAt: row.createdAt.toISOString(),
+        mergedInto: null,
       },
     };
   });
@@ -650,6 +769,9 @@ export async function updateHousehold(
       .where(eq(households.id, id))
       .for("update");
     if (!before) return { ok: false as const, reason: "not-found" as const };
+    if (await householdIsRetired(id, tx)) {
+      return { ok: false as const, reason: "merged" as const };
+    }
     const [row] = await tx
       .update(households)
       .set({ name: input.name.trim(), address: clean(input.address), updatedAt: new Date() })
@@ -671,6 +793,7 @@ export async function updateHousehold(
         address: row.address,
         members: [],
         createdAt: row.createdAt.toISOString(),
+        mergedInto: null,
       },
     };
   });
@@ -686,7 +809,7 @@ export async function setHouseholdMember(
   role: "member" | "primary",
   actorLabel: string,
   db: RegistryDb = getRegistryDb(),
-): Promise<{ ok: true } | { ok: false; reason: "not-found" | "invalid" }> {
+): Promise<{ ok: true } | { ok: false; reason: "not-found" | "invalid" | "merged" }> {
   if (!UUID_RE.test(householdId) || !UUID_RE.test(personId)) {
     return { ok: false, reason: "invalid" };
   }
@@ -703,6 +826,13 @@ export async function setHouseholdMember(
       .from(persons)
       .where(eq(persons.id, personId));
     if (!household || !person) return { ok: false as const, reason: "not-found" as const };
+    // Retired identities never gain new relationships.
+    if (await householdIsRetired(householdId, tx)) {
+      return { ok: false as const, reason: "merged" as const };
+    }
+    if (await personIsRetired(personId, tx)) {
+      return { ok: false as const, reason: "merged" as const };
+    }
 
     await tx
       .insert(householdMembers)
@@ -727,11 +857,14 @@ export async function removeHouseholdMember(
   personId: string,
   actorLabel: string,
   db: RegistryDb = getRegistryDb(),
-): Promise<{ ok: true } | { ok: false; reason: "not-found" | "invalid" }> {
+): Promise<{ ok: true } | { ok: false; reason: "not-found" | "invalid" | "merged" }> {
   if (!UUID_RE.test(householdId) || !UUID_RE.test(personId)) {
     return { ok: false, reason: "invalid" };
   }
   return db.transaction(async (tx) => {
+    if (await householdIsRetired(householdId, tx)) {
+      return { ok: false as const, reason: "merged" as const };
+    }
     const [row] = await tx
       .delete(householdMembers)
       .where(

@@ -292,6 +292,7 @@ export async function provisionOwnerLink(
           ...person,
           createdAt: person.createdAt.toISOString(),
           updatedAt: person.updatedAt.toISOString(),
+          mergedInto: null,
         },
       };
     }

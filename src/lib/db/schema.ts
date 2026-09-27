@@ -1887,3 +1887,88 @@ export const animalMerges = pgTable(
     ),
   ],
 );
+
+// Duplicate-person merge lineage (#211). Persons have no lifecycle
+// column — retirement is wholly expressed by a row here: a person with
+// a person_merges.retired_person_id entry is a merged duplicate, never
+// an independent identity again. The merge executor is the only writer;
+// retired_person_id is unique so a person merges exactly once and alias
+// chains cannot form.
+//
+// The auth-identity safety rule lives in the executor, not the schema:
+// a merge that would leave a retired person holding an auth_identities
+// link is refused, so "retired person" and "authenticated account" can
+// never coexist. The row persists — ownership, registration, payment,
+// and communication history reparents to the survivor while snapshot
+// columns (owner_label, recipient, request detail) keep their
+// registration-time truth.
+export const personMerges = pgTable(
+  "person_merges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    retiredPersonId: uuid("retired_person_id")
+      .notNull()
+      .references(() => persons.id), // restrictive — lineage is history
+    survivorPersonId: uuid("survivor_person_id")
+      .notNull()
+      .references(() => persons.id), // restrictive — lineage is history
+    // Snapshots of the retired identity for search/audit display.
+    retiredFullName: text("retired_full_name").notNull(),
+    retiredEmail: text("retired_email"),
+    // Explicit staff field resolutions and per-domain reparent counts —
+    // the record of what the human chose and what moved.
+    fieldChoices: jsonb("field_choices"),
+    movedCounts: jsonb("moved_counts"),
+    note: text("note"),
+    mergedByLabel: text("merged_by_label"),
+    mergedByIdentityId: uuid("merged_by_identity_id").references(
+      () => authIdentities.id,
+      { onDelete: "set null" },
+    ),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("person_merges_retired_key").on(t.retiredPersonId),
+    index("person_merges_survivor_idx").on(t.survivorPersonId),
+    check(
+      "person_merges_not_self_check",
+      sql`${t.retiredPersonId} <> ${t.survivorPersonId}`,
+    ),
+  ],
+);
+
+// Duplicate-household merge lineage (#211) — same shape as
+// person_merges: a households row with a household_merges entry is a
+// retired duplicate, excluded from pickers and ownership creation while
+// its members/ownerships/registrations reparent to the survivor.
+export const householdMerges = pgTable(
+  "household_merges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    retiredHouseholdId: uuid("retired_household_id")
+      .notNull()
+      .references(() => households.id), // restrictive — lineage is history
+    survivorHouseholdId: uuid("survivor_household_id")
+      .notNull()
+      .references(() => households.id), // restrictive — lineage is history
+    retiredName: text("retired_name").notNull(),
+    retiredAddress: text("retired_address"),
+    fieldChoices: jsonb("field_choices"),
+    movedCounts: jsonb("moved_counts"),
+    note: text("note"),
+    mergedByLabel: text("merged_by_label"),
+    mergedByIdentityId: uuid("merged_by_identity_id").references(
+      () => authIdentities.id,
+      { onDelete: "set null" },
+    ),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("household_merges_retired_key").on(t.retiredHouseholdId),
+    index("household_merges_survivor_idx").on(t.survivorHouseholdId),
+    check(
+      "household_merges_not_self_check",
+      sql`${t.retiredHouseholdId} <> ${t.survivorHouseholdId}`,
+    ),
+  ],
+);

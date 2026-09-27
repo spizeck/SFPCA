@@ -43,10 +43,12 @@ import {
   animals,
   auditEvents,
   householdMembers,
+  householdMerges,
   households,
   microchipRecords,
   ownershipConfirmations,
   ownerships,
+  personMerges,
   persons,
   registrations,
 } from "../db/schema";
@@ -860,7 +862,7 @@ export type OwnershipMutationResult =
   | { ok: true; ownership: OwnershipRecord }
   | {
       ok: false;
-      reason: "not-found" | "invalid" | "conflict" | "overlap";
+      reason: "not-found" | "invalid" | "conflict" | "overlap" | "merged";
       field?: string;
     };
 
@@ -955,6 +957,12 @@ export async function createOwnership(
         .where(eq(persons.id, personId));
       if (!person)
         return { ok: false as const, reason: "invalid" as const, field: "personId" };
+      // A retired merge duplicate never gains new relationships (#211).
+      const [merged] = await tx
+        .select({ id: personMerges.id })
+        .from(personMerges)
+        .where(eq(personMerges.retiredPersonId, personId));
+      if (merged) return { ok: false as const, reason: "merged" as const };
     } else {
       const [household] = await tx
         .select({ id: households.id })
@@ -962,6 +970,11 @@ export async function createOwnership(
         .where(eq(households.id, householdId!));
       if (!household)
         return { ok: false as const, reason: "invalid" as const, field: "householdId" };
+      const [merged] = await tx
+        .select({ id: householdMerges.id })
+        .from(householdMerges)
+        .where(eq(householdMerges.retiredHouseholdId, householdId!));
+      if (merged) return { ok: false as const, reason: "merged" as const };
     }
 
     if (

@@ -327,7 +327,7 @@ export default function DataQualityPage() {
                     <div className="flex flex-wrap gap-2 pt-1">
                       <Button size="sm" variant="outline" asChild>
                         <Link href={f.href}>
-                          {f.detector === "duplicate-animal" ? (
+                          {f.detector.startsWith("duplicate-") ? (
                             <>
                               <GitMerge className="h-4 w-4 mr-1" />
                               Compare &amp; merge
