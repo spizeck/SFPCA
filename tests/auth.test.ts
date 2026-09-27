@@ -15,7 +15,7 @@ const {
   mockLogError: vi.fn(),
 }));
 
-vi.mock("@/lib/firebase-admin", () => ({
+vi.mock("@/lib/firebase-admin-auth", () => ({
   adminAuth: () => ({
     verifySessionCookie: mockVerifySessionCookie,
   }),

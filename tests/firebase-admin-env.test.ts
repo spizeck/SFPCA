@@ -2,7 +2,7 @@
 // missing env vars — never a cryptic cert() failure, and never the
 // values themselves.
 import { describe, expect, test } from "vitest";
-import { missingAdminEnvVars } from "@/lib/firebase-admin";
+import { missingAdminEnvVars } from "@/lib/firebase-admin-app";
 
 describe("missingAdminEnvVars", () => {
   test("names every missing required variable", () => {

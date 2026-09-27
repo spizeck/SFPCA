@@ -152,7 +152,7 @@ async function main() {
     );
   }
 
-  const { adminDb } = await import("../src/lib/firebase-admin");
+  const { adminDb } = await import("../src/lib/firebase-admin-db");
   const fs = adminDb();
   const pg = dbUrlValid ? postgres(dbUrl!, { max: 1, prepare: false }) : null;
   const db = pg ? drizzle(pg) : null;

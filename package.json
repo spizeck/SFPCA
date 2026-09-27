@@ -20,13 +20,14 @@
     "db:restore": "tsx scripts/db-restore.ts",
     "migrate:firestore": "tsx scripts/migrate-firestore.ts",
     "test:db": "vitest run tests/db",
-    "test": "vitest run",
+    "test": "npm run check:admin-import && vitest run",
     "test:watch": "vitest",
     "test:rules": "firebase emulators:exec --only auth,firestore,storage --project demo-sfpca \"node --test \\\"tests/*.test.mjs\\\"\"",
     "test:maintenance": "vitest run tests/maintenance.test.ts",
     "test:e2e": "firebase emulators:exec --only auth,firestore --project demo-sfpca \"playwright test\"",
     "test:e2e:headed": "firebase emulators:exec --only auth,firestore --project demo-sfpca \"playwright test --headed\"",
-    "deploy:functions": "node scripts/deploy-functions.js"
+    "deploy:functions": "node scripts/deploy-functions.js",
+    "check:admin-import": "node scripts/check-admin-import.mjs"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.11",
@@ -45,7 +46,7 @@
     "drizzle-orm": "^0.45.2",
     "fast-xml-parser": "^5.3.4",
     "firebase": "^12.19.0",
-    "firebase-admin": "^13.10.0",
+    "firebase-admin": "^14.5.0",
     "framer-motion": "^13.4.0",
     "klaro": "^0.7.21",
     "lucide-react": "^1.47.0",
@@ -86,6 +87,9 @@
     "vitest": "^5.0.1"
   },
   "overrides": {
-    "fast-xml-parser": "^5.3.4"
+    "fast-xml-parser": "^5.3.4",
+    "jwks-rsa": {
+      "jose": "5.10.0"
+    }
   }
 }

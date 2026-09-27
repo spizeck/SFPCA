@@ -118,7 +118,7 @@ async function apiRetry(pathname: string, init?: RequestInit, attempts = 15) {
 
 async function fetchDump(): Promise<string> {
   if (fs.existsSync(dumpArg!)) return dumpArg!;
-  const { adminBucket } = await import("../src/lib/firebase-admin");
+  const { adminBucket } = await import("../src/lib/firebase-admin-storage");
   const dest = path.join(os.tmpdir(), path.basename(dumpArg!));
   console.log(`db-restore: downloading ${dumpArg} from Storage…`);
   await adminBucket().file(dumpArg!).download({ destination: dest });

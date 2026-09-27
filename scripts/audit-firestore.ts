@@ -74,7 +74,7 @@ async function audit(
 }
 
 async function main() {
-  const { adminDb } = await import("../src/lib/firebase-admin");
+  const { adminDb } = await import("../src/lib/firebase-admin-db");
   const fs = adminDb();
   for (const c of ["animals", "animalRegistrations", "admins"]) {
     await audit(fs, c);

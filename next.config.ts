@@ -10,6 +10,11 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  // Keep firebase-admin outside the server bundle: its auth graph pulls
+  // jwks-rsa -> jose, and bundling the Node-specific chain into a
+  // serverless chunk caused the #144 Vercel runtime outage
+  // (ERR_REQUIRE_ESM). Load the real node_modules at runtime instead.
+  serverExternalPackages: ["firebase-admin"],
   // Enable video optimization
   experimental: {
     optimizePackageImports: ['lucide-react'],

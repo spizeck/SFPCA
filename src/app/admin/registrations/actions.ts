@@ -6,7 +6,7 @@
 // private (no public-read Storage rule).
 
 import { requireAdmin } from "@/lib/auth";
-import { adminReceiptBucket } from "@/lib/firebase-admin";
+import { adminReceiptBucket } from "@/lib/firebase-admin-storage";
 import {
   createRegistration,
   getRegistrationQueues,

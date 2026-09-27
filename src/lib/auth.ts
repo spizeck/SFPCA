@@ -1,4 +1,4 @@
-import { adminAuth } from "./firebase-admin";
+import { adminAuth } from "./firebase-admin-auth";
 import { findAdminUser } from "./registry/admin-users";
 import { resolveOwnerSession } from "./registry/persons";
 import { logError } from "./logger";

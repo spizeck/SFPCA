@@ -1,10 +1,10 @@
 const functions = require("firebase-functions/v2");
 const logger = require("firebase-functions/logger");
-const admin = require("firebase-admin");
+const {initializeApp} = require("firebase-admin/app");
 const crypto = require("crypto");
 const {triggerVercelRebuild} = require("./lib/rebuild");
 
-admin.initializeApp();
+initializeApp();
 
 // Get environment variables
 const {

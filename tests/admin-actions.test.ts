@@ -14,7 +14,7 @@ vi.mock("@/lib/auth", () => ({
   requireAdmin: mockRequireAdmin,
 }));
 
-vi.mock("@/lib/firebase-admin", () => ({
+vi.mock("@/lib/firebase-admin-db", () => ({
   adminDb: () => ({
     collection: () => ({
       doc: () => ({ set: mockDocSet, get: mockDocGet }),
