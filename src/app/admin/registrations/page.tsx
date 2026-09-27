@@ -36,10 +36,14 @@ import {
   createRegistrationFromSubmissionAction,
   getReceiptUrlAction,
   getRegistrationQueuesAction,
+  listConfirmationsDueAction,
+  listPendingPaymentsAction,
   listRegistrationsAction,
   searchAnimalsForLinkAction,
   setRegistrationStatusAction,
 } from "./actions";
+import type { PendingPaymentItem } from "@/lib/registry/payments";
+import type { ConfirmationEligibilityRow } from "@/lib/registry/ownership";
 import {
   createRegistrationAction,
 } from "@/app/admin/animals/[id]/actions";
@@ -65,6 +69,8 @@ function cents(v: number, currency = "USD"): string {
 export default function RegistrationsPage() {
   const [registrations, setRegistrations] = useState<AnimalRegistration[]>([]);
   const [queues, setQueues] = useState<RegistrationQueues | null>(null);
+  const [pendingPayments, setPendingPayments] = useState<PendingPaymentItem[]>([]);
+  const [confirmations, setConfirmations] = useState<ConfirmationEligibilityRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [selected, setSelected] = useState<AnimalRegistration | null>(null);
@@ -88,12 +94,16 @@ export default function RegistrationsPage() {
     try {
       // Postgres returns submissions newest-first (submitted_at DESC);
       // every stored row has a timestamp, so nothing is silently hidden.
-      const [subs, q] = await Promise.all([
+      const [subs, q, pending, confs] = await Promise.all([
         listRegistrationsAction(),
         getRegistrationQueuesAction(),
+        listPendingPaymentsAction(),
+        listConfirmationsDueAction(),
       ]);
       setRegistrations(subs);
       setQueues(q);
+      setPendingPayments(pending);
+      setConfirmations(confs);
     } catch (error) {
       logError("admin", "registrations-load", error);
       setLoadError(true);
@@ -311,8 +321,9 @@ export default function RegistrationsPage() {
           </Card>
         </div>
 
-        {/* Queue: animals missing a current-period registration */}
-        <Card className="mb-8">
+        {/* Queue: animals missing a current-period registration.
+            The id is the dashboard's anchored destination — keep it. */}
+        <Card id="unregistered" className="mb-8 scroll-mt-6 target:ring-2 target:ring-primary/40">
           <CardHeader>
             <CardTitle>Needs {year} registration</CardTitle>
           </CardHeader>
@@ -377,16 +388,22 @@ export default function RegistrationsPage() {
             {[
               {
                 title: "Outstanding balance",
+                anchor: "outstanding",
                 items: queues?.outstanding ?? [],
                 empty: "Nothing outstanding.",
               },
               {
                 title: "Completed",
+                anchor: "completed",
                 items: queues?.completed ?? [],
                 empty: "No completed registrations yet.",
               },
             ].map((section) => (
-              <div key={section.title}>
+              <div
+                key={section.title}
+                id={section.anchor}
+                className="scroll-mt-6 rounded-md target:ring-2 target:ring-primary/40"
+              >
                 <h3 className="font-medium mb-2">{section.title}</h3>
                 <Table>
                   <TableHeader>
@@ -445,8 +462,132 @@ export default function RegistrationsPage() {
           </CardContent>
         </Card>
 
-        {/* Intake submissions — public-form claims awaiting staff review */}
-        <Card>
+        {/* Ownership relationships past their annual re-affirmation —
+            #177 dashboard destination (#confirmations). Staff record the
+            confirmation on the animal's profile ownership panel. */}
+        <Card id="confirmations" className="mb-8 scroll-mt-6 target:ring-2 target:ring-primary/40">
+          <CardHeader>
+            <CardTitle>Ownership confirmations overdue</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Animal</TableHead>
+                  <TableHead>Owner</TableHead>
+                  <TableHead>Confirmation due</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {confirmations.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center text-muted-foreground">
+                      Every current ownership is confirmed for the year.
+                    </TableCell>
+                  </TableRow>
+                )}
+                {confirmations.map((c) => (
+                  <TableRow key={c.ownershipId}>
+                    <TableCell className="font-medium">
+                      <Link
+                        href={`/admin/animals/${c.animalId}`}
+                        className="text-primary underline"
+                      >
+                        {c.animalName}
+                      </Link>
+                    </TableCell>
+                    <TableCell>
+                      {c.personName ?? c.householdName ?? "—"}
+                    </TableCell>
+                    <TableCell>{c.dueOn}</TableCell>
+                    <TableCell>
+                      <Button size="sm" variant="outline" asChild>
+                        <Link href={`/admin/animals/${c.animalId}`}>
+                          Open profile
+                        </Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+
+        {/* Declared money awaiting reconciliation (#170) — pending
+            transfers never settle a balance until staff confirm them.
+            #177 dashboard destination (#awaiting-confirmation). */}
+        <Card id="awaiting-confirmation" className="mb-8 scroll-mt-6 target:ring-2 target:ring-primary/40">
+          <CardHeader>
+            <CardTitle>Payments awaiting confirmation</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Animal</TableHead>
+                  <TableHead>Amount</TableHead>
+                  <TableHead>Method</TableHead>
+                  <TableHead>Reference</TableHead>
+                  <TableHead>Declared</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pendingPayments.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-muted-foreground">
+                      No unconfirmed payments.
+                    </TableCell>
+                  </TableRow>
+                )}
+                {pendingPayments.map((p) => (
+                  <TableRow key={p.paymentId}>
+                    <TableCell className="font-medium">
+                      {p.animalId ? (
+                        <Link
+                          href={`/admin/animals/${p.animalId}`}
+                          className="text-primary underline"
+                        >
+                          {p.animalName ?? "—"}
+                        </Link>
+                      ) : (
+                        "—"
+                      )}
+                      {p.registryRef && (
+                        <div className="font-mono text-xs text-muted-foreground">
+                          {p.registryRef}
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell>{cents(p.amountCents, p.currency)}</TableCell>
+                    <TableCell className="capitalize">
+                      {p.method.replace("-", " ")}
+                    </TableCell>
+                    <TableCell>{p.reference ?? "—"}</TableCell>
+                    <TableCell>{p.occurredAt.slice(0, 10)}</TableCell>
+                    <TableCell>
+                      {p.animalId ? (
+                        <Button size="sm" variant="outline" asChild>
+                          <Link href={`/admin/animals/${p.animalId}`}>
+                            Review
+                          </Link>
+                        </Button>
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+
+        {/* Intake submissions — public-form claims awaiting staff review.
+            #177 dashboard destination (#submissions). */}
+        <Card id="submissions" className="scroll-mt-6 target:ring-2 target:ring-primary/40">
           <CardHeader>
             <CardTitle>Intake submissions</CardTitle>
           </CardHeader>

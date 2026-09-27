@@ -11,12 +11,14 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
+  listOpenChipConflictsAction,
   lookupChipAction,
   recordFoundScanAction,
   resolveOpenCaseAction,
   type FoundScanActionResult,
 } from "./actions";
 import type {
+  ChipConflictRecord,
   ChipLookupOwner,
   ChipLookupResult,
   MicrochipRecord,
@@ -718,6 +720,91 @@ export default function ChipLookupPage() {
       {result?.status === "match" && (
         <MatchCard match={result} onRefresh={refreshMatch} />
       )}
+
+      <ConflictsSection />
     </div>
+  );
+}
+
+// Open chip conflicts — the registry-integrity follow-up queue the #177
+// dashboard links to (#conflicts). Rows link to the claimed animal's
+// profile, where the microchip panel resolves the conflict.
+function ConflictsSection() {
+  const [conflicts, setConflicts] = useState<ChipConflictRecord[] | null>(
+    null,
+  );
+
+  useEffect(() => {
+    listOpenChipConflictsAction()
+      .then(setConflicts)
+      .catch((error) => {
+        logError("microchips", "conflicts-load", error);
+        setConflicts([]);
+      });
+  }, []);
+
+  if (conflicts === null) return null;
+
+  return (
+    <Card
+      id="conflicts"
+      className="scroll-mt-6 target:ring-2 target:ring-primary/40"
+    >
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          Open chip conflicts
+          {conflicts.length > 0 && (
+            <Badge variant="secondary">{conflicts.length}</Badge>
+          )}
+        </CardTitle>
+        <CardDescription>
+          The same chip number is claimed on two records — resolve it on
+          the animal&apos;s profile before relying on a scan match.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {conflicts.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No open conflicts — every chip maps to at most one animal.
+          </p>
+        ) : (
+          <ul className="divide-y text-sm">
+            {conflicts.map((c) => (
+              <li
+                key={c.id}
+                className="py-3 flex items-start justify-between gap-3"
+              >
+                <div>
+                  <span className="font-mono font-medium">
+                    {c.chipNumber}
+                  </span>
+                  <p className="text-muted-foreground">
+                    Claimed on {c.claimedAnimalName ?? "an animal"}
+                    {c.existingAnimalName
+                      ? ` — already recorded on ${c.existingAnimalName}`
+                      : ""}
+                  </p>
+                  {c.detail && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {c.detail}
+                    </p>
+                  )}
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  asChild
+                  className="flex-shrink-0"
+                >
+                  <Link href={`/admin/animals/${c.claimedAnimalId}`}>
+                    Resolve
+                  </Link>
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   );
 }
