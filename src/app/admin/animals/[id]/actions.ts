@@ -93,6 +93,10 @@ import {
 } from "@/lib/registry/payments";
 import type { RegistrationCancellationReason } from "@/lib/registrations";
 import { openMissingCase } from "@/lib/registry/lost-found";
+import {
+  getAnimalMergeInfo,
+  type AnimalMergeInfo,
+} from "@/lib/registry/merge";
 import { logError, type LogSubsystem } from "@/lib/logger";
 
 export interface AnimalMedicalRecord {
@@ -124,6 +128,9 @@ export interface AnimalMedicalRecord {
   // payments, documents, audit trail — read-only projections owned by
   // other domains.
   registry: AnimalRegistryContext;
+  // Merge lineage (#178): for a retired record, which animal it merged
+  // into; for a canonical record, which retired identities it absorbed.
+  merge: AnimalMergeInfo | null;
   // Picker data for the ownership panel.
   persons: PersonRecord[];
   households: HouseholdRecord[];
@@ -149,6 +156,7 @@ export async function getAnimalMedicalAction(
     lifecycleHistory,
     sterilization,
     registry,
+    merge,
     persons,
     households,
   ] = await Promise.all([
@@ -161,6 +169,7 @@ export async function getAnimalMedicalAction(
     listLifecycleHistory(animal.id),
     getAnimalSterilization(animal.id),
     getAnimalRegistryContext(animal.id),
+    getAnimalMergeInfo(animal.id),
     listPersons(),
     listHouseholds(),
   ]);
@@ -189,6 +198,7 @@ export async function getAnimalMedicalAction(
       documents: [],
       auditTrail: [],
     },
+    merge,
     persons,
     households,
   };
@@ -220,6 +230,7 @@ export interface SaveResult {
     | "invalid"
     | "not-found"
     | "conflict"
+    | "referenced"
     | "overlap"
     | "not-owner"
     | "not-current"
@@ -245,6 +256,7 @@ type MutationOutcome =
         | "not-found"
         | "conflict"
         | "invalid"
+        | "referenced"
         | "overlap"
         | "not-owner"
         | "not-current"

@@ -63,8 +63,9 @@ describe("getDashboardWork", () => {
     expect(work.needsAttention).toHaveLength(0);
     expect(work.comingUp).toHaveLength(0);
     expect(work.failures).toHaveLength(0);
-    // Every domain loaded and reported empty — all 8 in the clear.
-    expect(work.allClear).toHaveLength(8);
+    // Every domain loaded and reported empty — all 9 in the clear
+    // (data quality joined the summary sources in #178).
+    expect(work.allClear).toHaveLength(9);
   });
 
   test("an unregistered active animal surfaces in needs attention", async () => {

@@ -25,23 +25,36 @@ import {
   eq,
   inArray,
   isNull,
+  ne,
   or,
   sql,
   type SQL,
 } from "drizzle-orm";
+import type { AnyPgColumn, PgTable } from "drizzle-orm/pg-core";
 import {
   animalLifecycleEvents,
+  animalMerges,
   animals,
   auditEvents,
   clinicExpectations,
+  communications,
   followUps,
   households,
+  lostFoundCases,
+  medicalAlerts,
+  microchipConflicts,
   microchipRecords,
+  ownerRequests,
+  ownershipConfirmations,
   ownerships,
   persons,
   registrations,
+  vaccinations,
   vetDocuments,
+  vetEncounters,
+  vetMedications,
   vetProcedures,
+  weightRecords,
 } from "../db/schema";
 import { getRegistryDb } from "../db/client";
 import {
@@ -220,12 +233,16 @@ function writeValues(input: AnimalWriteInput) {
   };
 }
 
+// The registry list never shows merged (#178) records — a retired
+// duplicate is not a second animal. Retired identifiers still resolve
+// through searchAnimals / merge lineage, not the flat list.
 export async function listAdminAnimals(
   db: RegistryDb = getRegistryDb(),
 ): Promise<AdminAnimal[]> {
   const rows = await db
     .select(ADMIN_COLUMNS)
     .from(animals)
+    .where(ne(animals.lifecycleStatus, "merged"))
     .orderBy(asc(animals.createdAt), asc(animals.id));
   return rows.map(toAdminDto);
 }
@@ -249,7 +266,10 @@ export async function getAdminAnimal(
 
 export type AnimalMutationResult =
   | { ok: true; animal: AdminAnimal }
-  | { ok: false; reason: "not-found" | "conflict" | "invalid" };
+  | {
+      ok: false;
+      reason: "not-found" | "conflict" | "invalid" | "referenced";
+    };
 
 // Creating an animal records its initial registry lifecycle as the first
 // animal_lifecycle_events row (from_status NULL = "entered the
@@ -348,39 +368,103 @@ export async function updateAnimal(
   });
 }
 
-// Hard delete exists only for genuinely erroneous/test records — the
-// permanent registry has no "remove because no longer current" path, and
-// ownership/medical/microchip/registration references are restrictive
-// FKs, so deleting a referenced animal fails loudly instead of orphaning
-// history. The animal's own lifecycle events are part of the record
-// being deleted (their content is preserved in the audit before-state);
-// every OTHER domain's references still block. Merge-for-duplicates is
-// #178, not this path.
+// Hard delete exists ONLY for genuinely erroneous empty records — a
+// mistyped animal created seconds ago with nothing attached. The
+// permanent registry has no "remove because no longer current" path:
+// anything with history must be retired through a lifecycle transition
+// or, for duplicates, the #178 merge — never deleted.
+//
+// The policy is enforced by counting every referencing row across the
+// domain tables BEFORE the delete, inside the transaction: any
+// ownership, registration, payment-reachable registration, microchip,
+// medical, lost/found, communication, request, follow-up, or merge
+// reference returns 'referenced' instead of attempting a delete that
+// would either fail on restrictive FKs or silently sever set-null
+// references. The animal's own lifecycle events are part of the record
+// being deleted (their content is preserved in the audit before-state)
+// and are the one table not counted.
 export async function deleteAnimal(
   id: string,
   actorLabel: string,
   db: RegistryDb = getRegistryDb(),
 ): Promise<AnimalMutationResult> {
+  if (!UUID_RE.test(id)) return { ok: false, reason: "not-found" };
   return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(animals)
+      .where(eq(animals.id, id))
+      .for("update");
+    if (!row) return { ok: false as const, reason: "not-found" as const };
+    // A merged duplicate is lineage history — never deletable.
+    if (row.lifecycleStatus === "merged") {
+      return { ok: false as const, reason: "referenced" as const };
+    }
+
+    const countRefs = async (
+      column: AnyAnimalRefColumn,
+    ): Promise<number> => {
+      const [r] = await tx
+        .select({ c: sql<number>`count(*)::int` })
+        .from(column.table)
+        .where(eq(column.ref, id));
+      return r?.c ?? 0;
+    };
+    const checks = await Promise.all(ANIMAL_REFERENCE_COLUMNS.map(countRefs));
+    if (checks.some((c) => c > 0)) {
+      return { ok: false as const, reason: "referenced" as const };
+    }
+
     await tx
       .delete(animalLifecycleEvents)
       .where(eq(animalLifecycleEvents.animalId, id));
-    const [row] = await tx
+    const [deleted] = await tx
       .delete(animals)
       .where(eq(animals.id, id))
       .returning();
-    if (!row) return { ok: false as const, reason: "not-found" as const };
+    if (!deleted) return { ok: false as const, reason: "not-found" as const };
 
     await tx.insert(auditEvents).values({
       actorLabel,
       entityType: "animal",
       entityId: id,
       action: "delete",
-      before: toAdminDto(row),
+      before: toAdminDto(deleted),
     });
-    return { ok: true, animal: toAdminDto(row) };
+    return { ok: true, animal: toAdminDto(deleted) };
   });
 }
+
+interface AnyAnimalRefColumn {
+  table: PgTable;
+  ref: AnyPgColumn;
+}
+
+// Every table holding an animal reference — a row in ANY of these makes
+// the animal part of the historical record, so only lifecycle/merge
+// workflows may remove it from the active registry.
+const ANIMAL_REFERENCE_COLUMNS: AnyAnimalRefColumn[] = [
+  { table: ownerships, ref: ownerships.animalId },
+  { table: ownershipConfirmations, ref: ownershipConfirmations.animalId },
+  { table: ownerRequests, ref: ownerRequests.animalId },
+  { table: registrations, ref: registrations.animalId },
+  { table: microchipRecords, ref: microchipRecords.animalId },
+  { table: microchipConflicts, ref: microchipConflicts.claimedAnimalId },
+  { table: microchipConflicts, ref: microchipConflicts.existingAnimalId },
+  { table: lostFoundCases, ref: lostFoundCases.animalId },
+  { table: vetEncounters, ref: vetEncounters.animalId },
+  { table: vetProcedures, ref: vetProcedures.animalId },
+  { table: vetMedications, ref: vetMedications.animalId },
+  { table: medicalAlerts, ref: medicalAlerts.animalId },
+  { table: weightRecords, ref: weightRecords.animalId },
+  { table: vetDocuments, ref: vetDocuments.animalId },
+  { table: vaccinations, ref: vaccinations.animalId },
+  { table: followUps, ref: followUps.animalId },
+  { table: clinicExpectations, ref: clinicExpectations.animalId },
+  { table: communications, ref: communications.animalId },
+  { table: animalMerges, ref: animalMerges.retiredAnimalId },
+  { table: animalMerges, ref: animalMerges.survivorAnimalId },
+];
 
 // --- Lifecycle --------------------------------------------------------
 
@@ -614,6 +698,9 @@ export interface AnimalSearchHit {
   owners: string[];
   // Active microchip numbers.
   microchips: string[];
+  // Set when the hit is a merged (#178) retired record — the registry
+  // reference points staff at the canonical survivor.
+  mergedInto: { id: string; registryRef: string } | null;
 }
 
 const SEARCH_LIMIT = 50;
@@ -650,24 +737,16 @@ export async function searchAnimals(
   const q = query.trim();
   if (q) {
     const like = `%${escapeLike(q)}%`;
-    const clauses: SQL[] = [
-      sql`${animals.name} ILIKE ${like}`,
+    // Exact-identifier clauses — a merged/retired record (#178) surfaces
+    // ONLY on these: its registry ref, uuid, legacy id, or a chip still
+    // recorded against it. Name/notes/owner fuzzy text never revives a
+    // retired duplicate as a plausible second animal.
+    const identifierClauses: SQL[] = [
       sql`${animals.registryRef} ILIKE ${like}`,
-      sql`${animals.identifyingNotes} ILIKE ${like}`,
       sql`${animals.legacyId} = ${q}`,
-      sql`EXISTS (
-        SELECT 1 FROM ownerships o
-        JOIN persons p ON p.id = o.person_id
-        WHERE o.animal_id = ${animals.id} AND p.full_name ILIKE ${like}
-      )`,
-      sql`EXISTS (
-        SELECT 1 FROM ownerships o
-        JOIN households h ON h.id = o.household_id
-        WHERE o.animal_id = ${animals.id} AND h.name ILIKE ${like}
-      )`,
     ];
     if (UUID_RE.test(q)) {
-      clauses.push(sql`${animals.id} = ${q}::uuid`);
+      identifierClauses.push(sql`${animals.id} = ${q}::uuid`);
     }
     // Microchip numbers are stored normalized — the canonical
     // normalizeChipNumber keeps search and the dedicated chip lookup on
@@ -679,13 +758,37 @@ export async function searchAnimals(
     // needed.
     const chipQuery = normalizeChipNumber(q);
     if (chipQuery.length >= 4) {
-      clauses.push(sql`EXISTS (
+      identifierClauses.push(sql`EXISTS (
         SELECT 1 FROM microchip_records mc
         WHERE mc.animal_id = ${animals.id}
           AND mc.chip_number LIKE ${`${chipQuery}%`}
       )`);
     }
-    conditions.push(or(...clauses) as SQL);
+    const clauses: SQL[] = [
+      sql`${animals.name} ILIKE ${like}`,
+      sql`${animals.identifyingNotes} ILIKE ${like}`,
+      sql`EXISTS (
+        SELECT 1 FROM ownerships o
+        JOIN persons p ON p.id = o.person_id
+        WHERE o.animal_id = ${animals.id} AND p.full_name ILIKE ${like}
+      )`,
+      sql`EXISTS (
+        SELECT 1 FROM ownerships o
+        JOIN households h ON h.id = o.household_id
+        WHERE o.animal_id = ${animals.id} AND h.name ILIKE ${like}
+      )`,
+      ...identifierClauses,
+    ];
+    const identifierMatch = or(...identifierClauses) as SQL;
+    conditions.push(
+      and(
+        or(...clauses) as SQL,
+        or(ne(animals.lifecycleStatus, "merged"), identifierMatch) as SQL,
+      ) as SQL,
+    );
+  } else {
+    // No query text = browse — merged records are never browsed.
+    conditions.push(ne(animals.lifecycleStatus, "merged"));
   }
 
   const rows = await db
@@ -697,29 +800,40 @@ export async function searchAnimals(
   if (rows.length === 0) return [];
 
   const ids = rows.map((r) => r.id);
-  const ownerRows = await db
-    .select({
-      animalId: ownerships.animalId,
-      personName: persons.fullName,
-      householdName: households.name,
-    })
-    .from(ownerships)
-    .leftJoin(persons, eq(ownerships.personId, persons.id))
-    .leftJoin(households, eq(ownerships.householdId, households.id))
-    .where(and(inArray(ownerships.animalId, ids), isNull(ownerships.validTo)));
-  const chipRows = await db
-    .select({
-      animalId: microchipRecords.animalId,
-      chipNumber: microchipRecords.chipNumber,
-      chipDisplay: microchipRecords.chipDisplay,
-    })
-    .from(microchipRecords)
-    .where(
-      and(
-        inArray(microchipRecords.animalId, ids),
-        isNull(microchipRecords.assignedTo),
+  const [ownerRows, chipRows, mergeRows] = await Promise.all([
+    db
+      .select({
+        animalId: ownerships.animalId,
+        personName: persons.fullName,
+        householdName: households.name,
+      })
+      .from(ownerships)
+      .leftJoin(persons, eq(ownerships.personId, persons.id))
+      .leftJoin(households, eq(ownerships.householdId, households.id))
+      .where(and(inArray(ownerships.animalId, ids), isNull(ownerships.validTo))),
+    db
+      .select({
+        animalId: microchipRecords.animalId,
+        chipNumber: microchipRecords.chipNumber,
+        chipDisplay: microchipRecords.chipDisplay,
+      })
+      .from(microchipRecords)
+      .where(
+        and(
+          inArray(microchipRecords.animalId, ids),
+          isNull(microchipRecords.assignedTo),
+        ),
       ),
-    );
+    db
+      .select({
+        retiredId: animalMerges.retiredAnimalId,
+        survivorId: animalMerges.survivorAnimalId,
+        survivorRef: animals.registryRef,
+      })
+      .from(animalMerges)
+      .innerJoin(animals, eq(animalMerges.survivorAnimalId, animals.id))
+      .where(inArray(animalMerges.retiredAnimalId, ids)),
+  ]);
 
   const ownersByAnimal = new Map<string, string[]>();
   for (const r of ownerRows) {
@@ -735,11 +849,18 @@ export async function searchAnimals(
     list.push(r.chipDisplay ?? r.chipNumber);
     chipsByAnimal.set(r.animalId, list);
   }
+  const mergedIntoByAnimal = new Map(
+    mergeRows.map((r) => [
+      r.retiredId,
+      { id: r.survivorId, registryRef: r.survivorRef },
+    ]),
+  );
 
   return rows.map((row) => ({
     animal: toAdminDto(row),
     owners: ownersByAnimal.get(row.id) ?? [],
     microchips: chipsByAnimal.get(row.id) ?? [],
+    mergedInto: mergedIntoByAnimal.get(row.id) ?? null,
   }));
 }
 

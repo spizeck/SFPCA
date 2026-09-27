@@ -888,5 +888,197 @@ introduces it, not here.
 A new domain joins by adding one `attempt()` call to
 `gatherDashboardSummaries`, one key to `DashboardSummaries` +
 `FAILURE_DESTINATIONS`, and one block in `composeDashboard` — the page
-and plumbing don't change. Generic duplicate/data-quality detection is
-#178's scope — the composition only consumes its eventual summary seam.
+and plumbing don't change. The data-quality detector (#178, §17)
+consumes this seam via `getDataQualitySummary`: blocking findings float
+to the overdue band, everything else is ordinary review work, and a
+detector failure is a failure row — never a zero.
+
+## 17. Data quality, duplicate detection & safe merge (#178)
+
+The registry is authoritative, so bad data must be *found* safely and
+*fixed* deliberately. The system's rule:
+
+> Detection may be automated. Destructive identity decisions must not be.
+
+Nothing auto-merges or silently rewrites: detectors produce typed
+**findings**, humans record review **decisions**, and the only
+identity-changing operation is the explicit, transactional animal
+merge.
+
+### 17a. Findings architecture
+
+`src/lib/registry/data-quality.ts` is the canonical service.
+**Findings are computed live** — cheap deterministic set-based queries
+on a registry of this size, so fixes clear themselves and there is no
+stale findings table to drift out of sync. Each finding is a typed
+DTO: detector, category, severity, entity type/ids, human-readable
+label + detail, evidence strings, an actionable `href`, and an
+**evidence fingerprint** (sha-256 over detector + canonical entity ids
++ evidence).
+
+The one persisted table is `data_quality_reviews` — the human decision
+layer (`confirmed` / `dismissed` + actor + note). Pair order is
+canonicalized (`entity_a < entity_b`, enforced by CHECK + unique index)
+so `A+B` and `B+A` are one review row. A dismissal applies **only while
+its fingerprint still matches**: materially new evidence resurfaces the
+finding flagged "evidence changed — re-review" rather than suppressing
+it forever. Deleting a decision reopens the finding on current
+evidence.
+
+Severity is deliberately small:
+
+- `blocking` — the data contradicts itself (open chip conflict,
+  malformed chip number);
+- `review` — needs a human decision (probable duplicates, contradictory
+  state, money on a cancelled registration);
+- `advisory` — worth knowing, not urgent (overdue confirmations,
+  ownerless adoption-listed animals).
+
+### 17b. Detectors
+
+| detector | severity | what it checks |
+|---|---|---|
+| `microchip-conflict` | blocking | **Surfaces** `microchip_conflicts` open rows (#168's evidence trail — never re-detected) |
+| `duplicate-animal` | review | Same non-`corrected` chip, or shared current owner, or same normalized name+species corroborated by owner/identical birth date/sex+near-birth. **Name similarity alone never qualifies.** |
+| `duplicate-person` | review | Same normalized email, or same normalized name+phone. Name- or phone-only never qualifies (household members legitimately share contact channels). |
+| `duplicate-household` | review | A shared member, or an identical normalized address. Label similarity never qualifies. |
+| `animal-no-owner` | review/advisory | Active animal with no open ownership — `advisory` when adoption-listed (legitimately ownerless), `review` otherwise |
+| `terminal-open-ownership` | review | Open ownership on deceased/moved-off-saba/merged animals — transitions should have closed it |
+| `terminal-open-work` | advisory | Open follow-ups/clinic expectations left on terminal animals |
+| `lifecycle-history-mismatch` | review | `lifecycle_status` diverging from the newest `animal_lifecycle_events` row — the row was mutated outside the transition path |
+| `impossible-dates` | review | `birth_date` or `lifecycle_effective_on` in the future |
+| `registration-on-ineligible` | review | Active registration on a terminal-lifecycle animal |
+| `money-on-cancelled-registration` | review | Confirmed ledger rows netting nonzero on a cancelled registration |
+| `malformed-microchip` | blocking | Stored `chip_number` violating canonical normalization |
+| `invalid-animal-photo` | review | `photo_urls` entries that would fail write-time validation today |
+| `confirmation-overdue` | advisory | #166's `listOwnershipsRequiringConfirmation` projected as findings — the authoritative stale-relationship calculation, not a second one |
+
+`/admin/data-quality` renders the queue with category/severity/status
+filters and records decisions via admin-authorized server actions.
+Duplicate-animal findings link to `/admin/data-quality/merge?a=&b=`;
+everything else links to the record that resolves it.
+
+### 17c. Dashboard integration
+
+`getDataQualitySummary` plugs into §16's seam as one `attempt()` call.
+Blocking findings count into the needs-attention band; review/advisory
+counts link to the workspace. Open chip conflicts are **excluded** from
+the summary because they already carry their own dashboard item —
+nothing double-counts.
+
+### 17d. Safe animal merge
+
+The merge workflow is split in two because preview and execute must
+never drift:
+
+- **Preview** (`previewAnimalMerge`) — server-side `analyzePair`: hard
+  blockers, field conflicts, auto-combinations, registration
+  collisions, per-domain reparent counts, and a `fingerprint` over all
+  of it plus both rows' `updated_at`. The page renders this; the
+  client computes nothing.
+- **Execute** (`executeAnimalMerge`) — one transaction: lock both rows
+  `FOR UPDATE` in deterministic order, re-run `analyzePair`, refuse on
+  `stale` when the fresh fingerprint differs from the preview's, refuse
+  `invalid` while any displayed field conflict lacks a staff choice,
+  then apply.
+
+**Blockers** (merge refuses, explains why): self-merge; either side
+already `merged` (no chains); both records holding a *different current
+microchip* (only a human can say which chip the animal wears — correct
+an assignment first); both holding an open missing case or an open
+found case (resolve/cancel one first — one animal can't be missing or
+found twice).
+
+**Retired identity**: the duplicate row is updated to
+`lifecycle_status='merged'` + `adoption_status='not-listed'` — never
+deleted. `merged` is a legal DB value but sits outside the staff
+transition vocabulary (`ANIMAL_LIFECYCLE_STATUSES`), so no dropdown or
+transition rule produces it; every display path handles it explicitly
+(badge, label, detail-page lineage banner). `animal_merges` records the
+lineage: retired/survivor ids, retired registry ref + legacy id
+snapshots, field choices, moved counts, note, actor.
+`retired_animal_id` is unique so an animal merges exactly once and
+alias chains cannot form.
+
+**Dependent history**: restrictive-FK domain tables reparent to the
+survivor — ownerships/confirmations, microchip records, lost/found
+cases, the full medical chain (encounters, procedures, medications,
+alerts, weights, documents), vaccinations, follow-ups, clinic
+expectations, communications, owner requests, and the retired record's
+lifecycle history. Set-null tables reparent too — merge keeps history
+whole rather than severing it.
+
+Three relations get special handling:
+
+- **Registrations**: `(animal_id, year)` is unique, so a same-year
+  collision **cannot** reparent. The colliding row stays on the retired
+  record and is cancelled as `correction` — its payments and audit
+  trail stay attached forever, which is also why `animal_merges`
+  snapshots the retired registry ref: the cancelled registration's
+  history still names a real reference.
+- **Microchips**: rows with `closed_reason='corrected'` stay on the
+  retired record ("was never this animal's chip" is evidence); all
+  other chip history moves. Open `microchip_conflicts` reparent with
+  the animal; a conflict *between the pair* becomes a self-reference
+  and resolves automatically — it was the merge's own evidence.
+- **Ownerships**: if the same person/household already holds an open
+  interval on the survivor, the retired record's duplicate open
+  interval **closes at merge** (annotated) rather than create two open
+  intervals to one owner — the closed row stays on the retired record
+  as evidence. All other intervals move.
+
+**Field conflicts**: staff pick per conflicting field (species, sex,
+birth date, sterilization status/date/provider) — recorded in
+`animal_merges.field_choices`. Safe combinations are automatic and
+shown: `unknown` yields to a recorded value, photo lists union,
+identifying notes concatenate, description fills only when empty,
+names always keep the survivor's (the retired name lives on in the
+retired row and audit trail).
+
+**Auditability**: a lifecycle event (`source='merge'`) is the retired
+record's terminal row; two `audit_events` rows (`merge-retire` /
+`merge-absorb`) carry the field choices and moved counts; a
+`data_quality_reviews` `confirmed` row closes the pair's review loop.
+
+### 17e. Aliases, search & delete policy
+
+- `listAdminAnimals` and browse-mode `searchAnimals` exclude `merged`
+  rows — a retired duplicate is never a second animal.
+- `searchAnimals` still resolves a retired record on **identifier**
+  clauses only (registry ref, uuid, legacy id, chip number) and returns
+  it annotated `mergedInto: {id, registryRef}` — fuzzy text (name,
+  notes, owner names) never revives it.
+- `getAnimalMergeInfo` powers the detail-page lineage: retired pages
+  show "merged into SFPCA-…" and survivor pages list absorbed refs.
+  `resolveAnimalMergeTarget` maps a retired uuid to its canonical id.
+- `deleteAnimal` is now gated: it counts every animal-referencing row
+  inside the transaction and returns `referenced` instead of deleting —
+  hard delete survives **only** for genuinely empty erroneous records.
+  History-bearing records retire via lifecycle or merge, period.
+- `merged` values are excluded from the annual-confirmation queue and
+  can never satisfy `isPubliclyListed` (`active`+`available`), so
+  retired identities cannot leak onto public or operational surfaces.
+
+### 17f. Concurrency & staleness
+
+Execute locks both animal rows in deterministic id order — concurrent
+merges, chip assignments, and lifecycle transitions serialize rather
+than interleave. The preview fingerprint covers both rows'
+`updated_at` plus every computed decision; ANY change after preview
+(new ownership, registration, chip, edit) makes execution return
+`stale` and the UI re-previews. A dismissed finding mid-review has no
+locking hazard: dismissal is a view-layer decision, never a write
+guard.
+
+### 17g. Person/household merge boundary
+
+Duplicate *detection and human review* is implemented for people and
+households (`duplicate-person`, `duplicate-household` findings,
+dismissal/confirmation). **No person/household merge executor exists**:
+a person merge must reconcile `auth_identities` (two login identities
+can never be casually fused), ownership history, household membership,
+owner requests, and communications — materially larger than the animal
+case. Findings route staff to `/admin/persons` to reconcile manually
+(demote the duplicate record's contact details, move ownerships by
+hand). A dedicated safe person-merge is a follow-up; the workspace
+language says people/households are never merged automatically.

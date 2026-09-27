@@ -29,10 +29,20 @@ void firebase;
 let testEnv;
 
 before(async () => {
+  // emulator hosts come from FIRESTORE_EMULATOR_HOST /
+  // FIREBASE_STORAGE_EMULATOR_HOST when `emulators:exec` exports them,
+  // so nonstandard local ports work without edits (see
+  // src/lib/firebase.ts's override convention).
+  const [fsHost, fsPort] = (
+    process.env.FIRESTORE_EMULATOR_HOST ?? "127.0.0.1:8080"
+  ).split(":");
+  const [stHost, stPort] = (
+    process.env.FIREBASE_STORAGE_EMULATOR_HOST ?? "127.0.0.1:9199"
+  ).split(":");
   testEnv = await initializeTestEnvironment({
     projectId: PROJECT_ID,
-    firestore: { host: "127.0.0.1", port: 8080 },
-    storage: { host: "127.0.0.1", port: 9199, bucket: BUCKET },
+    firestore: { host: fsHost, port: Number(fsPort) },
+    storage: { host: stHost, port: Number(stPort), bucket: BUCKET },
   });
 
   // Seed data bypassing security rules

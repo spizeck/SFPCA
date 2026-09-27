@@ -1782,3 +1782,108 @@ that resolves it.
 - A queue row leads to a page that shows nothing: the filter params
   are bookmarkable URL state (`?window=`, `#anchor`) — confirm the URL
   still carries them.
+
+## 27. Data quality & duplicate merges (#178)
+
+`/admin/data-quality` is the unified exception surface for registry
+data problems: probable duplicates, identifier problems, contradictory
+lifecycle state, registration/payment inconsistencies, and stale
+records. Everything on it is a **finding** computed live from the
+current data — fixes clear themselves, and nothing on the page mutates
+registry data except the deliberate actions below.
+
+### 27a. Reading the workspace
+
+- **Severity** means how much it matters: *Blocking conflict* (the data
+  contradicts itself — e.g. a chip claimed by two animals), *Needs
+  review* (a person should look — probable duplicates, impossible
+  dates), *Advisory* (good to know, not urgent — overdue
+  confirmations).
+- **Filters**: category, severity, and status (Open / Dismissed /
+  Everything).
+- Every finding shows **evidence** — the concrete facts that raised it
+  (e.g. "same microchip 98511…", "same current owner (Jane Owner)").
+  If the evidence is wrong or thin, that IS the finding: fix the data,
+  don't argue with the list.
+- **Dismissed** findings stay suppressed only while their evidence is
+  unchanged. If the underlying facts materially change, the pair
+  resurfaces flagged "Evidence changed — re-review" — a dismissal can
+  never permanently hide a real problem.
+
+### 27b. "I think these are the same animal. What do I do?"
+
+1. Find the pair on `/admin/data-quality` (or get there from the
+   dashboard's Data quality row). If no finding exists but you're
+   still suspicious, open both animal profiles and compare — the
+   detector only flags corroborated evidence.
+2. Click **Compare & merge** on the finding. The merge review shows
+   the two records side by side — name, species, sex, birth date,
+   owners, microchips, notes.
+3. **Decide honestly whether they ARE the same animal.** Microchip or
+   ownership evidence is strong; a name match alone is not — two
+   different animals can both be called "Bella". If you're not sure,
+   go back and click **Not duplicates** instead — that records the
+   decision so nobody re-triages the pair.
+4. If they are the same animal: pick **Keep this record** under the
+   record that should survive (prefer the one with the stronger
+   history — more registrations, vet records, the chip the animal
+   actually wears). The other record is retired, never deleted.
+5. Click **Preview merge** and read the plan: what moves (ownerships,
+   registrations, chips, medical history, lost/found cases,
+   documents), any same-year registration collisions (the retired
+   record's duplicate year stays cancelled-as-correction with its
+   payments intact), and any fields where the records disagree — pick
+   the right value for each.
+6. If the preview shows a **blocker**, stop — it means the records
+   disagree in a way a merge can't resolve (two different current
+   microchips, or open missing/found cases on both). Resolve that on
+   the profiles first, then come back.
+7. Click **Merge — retire …** and confirm in the dialog. This is the
+   one irreversible step — it's deliberately two clicks, never one.
+8. You land on the surviving record, which lists the absorbed
+   duplicate. The retired reference stays searchable: staff searching
+   the old SFPCA-… ref find it annotated "merged into" the survivor.
+
+**Never merge because two animals share a name.** If the only evidence
+is a name, mark the pair Not duplicates (or leave it) and move on.
+
+### 27c. What a merge preserves
+
+A merge retires the duplicate row (`merged` status) and moves ALL its
+history onto the survivor in one transaction: ownerships,
+confirmations, registrations, microchip records, medical/vet records,
+vaccinations, follow-ups, clinic expectations, lost/found cases,
+communications, documents, owner requests, and its lifecycle history.
+Payments travel with their registrations. Where the same owner held an
+open interval on both records, the retired record's duplicate closes
+annotated instead of doubling up. Where both records hold a
+registration for the same year, the retired one stays on the retired
+record cancelled as a correction — its payment history never moves,
+never disappears. The retired page shows "merged into SFPCA-…" forever;
+hard delete refuses any record with history, so there is no path that
+bypasses this.
+
+### 27d. Person/household duplicates
+
+The workspace flags probable duplicate people (same email, or same
+name+phone) and households (shared member, identical address).
+**There is no merge button for people or households** — two login
+identities can never be casually combined. Open the records from the
+finding, confirm they're truly the same person, then reconcile
+manually: move ownerships to the correct person record and demote the
+duplicate's contact details. Mark the finding's decision when done.
+
+### 27e. Failure modes
+
+- **Merge fails with "records changed since the preview"**: the data
+  moved between preview and confirm (someone added an ownership, chip,
+  etc.). Re-preview and check the new state — that's the stale-preview
+  guard working, not a bug.
+- **Two people tried to merge the same pair**: the second merge waits
+  on the row lock, then sees the record is already `merged` and
+  refuses — the lineage table allows exactly one merge per record.
+- **A finding won't stay dismissed**: its evidence changed (new chip,
+  new shared owner). That's intentional — re-review.
+- **Data-quality row shows "couldn't load" on the dashboard**: the
+  detector query failed; the failure is a row, never a zero. Check
+  Sentry (`dashboard` subsystem), then `/admin/data-quality` directly.

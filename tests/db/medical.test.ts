@@ -503,9 +503,11 @@ describe("timeline and historical integrity", () => {
     );
     if (!enc.ok) throw new Error("setup failed");
 
-    await expect(
-      deleteAnimal(animal.id, "admin@test.dev", db),
-    ).rejects.toThrow();
+    // #178: referenced records refuse deletion outright — the gate runs
+    // before any write so clinical history can never be orphaned.
+    const refused = await deleteAnimal(animal.id, "admin@test.dev", db);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.reason).toBe("referenced");
     expect(await listEncountersForAnimal(animal.id, db)).toHaveLength(1);
   });
 

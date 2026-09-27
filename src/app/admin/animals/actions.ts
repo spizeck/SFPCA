@@ -19,11 +19,15 @@ import {
 import { logError } from "@/lib/logger";
 
 // One row of the staff registry list: the admin animal DTO plus the
-// search-hit context (current owners, active chips) the list renders.
+// search-hit context (current owners, active chips, merge lineage) the
+// list renders.
 export interface AdminAnimalRow {
   animal: AdminAnimal;
   owners: string[];
   microchips: string[];
+  // Set when the hit is a retired duplicate (#178) — the row points at
+  // the canonical survivor and offers no edit/delete actions.
+  mergedInto: { id: string; registryRef: string } | null;
 }
 
 // Staff search — one text box matching name, registry ref, uuid, legacy
@@ -39,12 +43,13 @@ export async function searchAnimalsAction(
     animal: hit.animal,
     owners: hit.owners,
     microchips: hit.microchips,
+    mergedInto: hit.mergedInto,
   }));
 }
 
 export interface SaveAnimalResult {
   ok: boolean;
-  reason?: "invalid" | "not-found" | "conflict";
+  reason?: "invalid" | "not-found" | "conflict" | "referenced";
 }
 
 export interface SaveAnimalInput extends AnimalWriteInput {

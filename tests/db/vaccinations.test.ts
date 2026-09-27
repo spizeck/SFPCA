@@ -211,11 +211,11 @@ describe("vaccination domain service", () => {
       db,
     );
     expect(created.ok).toBe(true);
-    // The restrictive FK protects medical history — the delete errors
-    // rather than silently erasing vaccinations.
-    await expect(
-      deleteAnimal(animal.id, "admin@test.dev", db),
-    ).rejects.toThrow();
+    // #178: the reference gate refuses the delete outright — vaccination
+    // history can never be silently orphaned.
+    const refused = await deleteAnimal(animal.id, "admin@test.dev", db);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.reason).toBe("referenced");
     const history = await listVaccinationsForAnimal(animal.id, db);
     expect(history).toHaveLength(1);
   });

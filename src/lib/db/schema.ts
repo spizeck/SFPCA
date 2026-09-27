@@ -163,6 +163,11 @@ export const householdMembers = pgTable(
 //     'moved-off-saba', 'unknown' (on-island/living status unconfirmed).
 //     Mutated only through transitionAnimalLifecycle — every change is a
 //     row in animal_lifecycle_events, never a silent overwrite.
+//     'merged' is a terminal retire status (#178): a confirmed duplicate
+//     consolidated into a survivor. It is NOT part of the staff lifecycle
+//     vocabulary — only the merge executor writes it — and merged rows
+//     are excluded from every normal registry projection while their
+//     dependent history moves to the survivor (see animal_merges).
 //   - adoptionStatus — the public adoption-catalog state
 //     ('not-listed','available','pending','adopted'): whether the animal
 //     appears on the public site. Publication requires BOTH
@@ -237,7 +242,7 @@ export const animals = pgTable(
     check("animals_sex_check", sql`${t.sex} IN ('male','female','unknown')`),
     check(
       "animals_lifecycle_status_check",
-      sql`${t.lifecycleStatus} IN ('active','deceased','moved-off-saba','unknown')`,
+      sql`${t.lifecycleStatus} IN ('active','deceased','moved-off-saba','unknown','merged')`,
     ),
     check(
       "animals_adoption_status_check",
@@ -291,15 +296,15 @@ export const animalLifecycleEvents = pgTable(
     index("animal_lifecycle_events_animal_idx").on(t.animalId, t.effectiveOn),
     check(
       "animal_lifecycle_events_from_status_check",
-      sql`${t.fromStatus} IS NULL OR ${t.fromStatus} IN ('active','deceased','moved-off-saba','unknown')`,
+      sql`${t.fromStatus} IS NULL OR ${t.fromStatus} IN ('active','deceased','moved-off-saba','unknown','merged')`,
     ),
     check(
       "animal_lifecycle_events_to_status_check",
-      sql`${t.toStatus} IN ('active','deceased','moved-off-saba','unknown')`,
+      sql`${t.toStatus} IN ('active','deceased','moved-off-saba','unknown','merged')`,
     ),
     check(
       "animal_lifecycle_events_source_check",
-      sql`${t.source} IN ('staff','owner-request','import')`,
+      sql`${t.source} IN ('staff','owner-request','import','merge')`,
     ),
   ],
 );
@@ -1776,5 +1781,109 @@ export const auditEvents = pgTable(
   (t) => [
     index("audit_events_entity_idx").on(t.entityType, t.entityId),
     index("audit_events_created_idx").on(t.createdAt),
+  ],
+);
+
+// --- Data quality & duplicate merge (#178) ----------------------------------
+// Detection is automated; identity decisions are not. Findings are
+// computed live (see src/lib/registry/data-quality.ts); this table is
+// the persisted human review layer — staff decisions about a specific
+// detected item, so dismissed/confirmed findings do not resurface every
+// page load. entity_a/entity_b carry the affected ids (a pair when the
+// finding compares two identities); canonical ordering entity_a <
+// entity_b is enforced so "A+B" and "B+A" are the same review row.
+// The fingerprint captures the evidence the decision was made against —
+// when the detector's evidence materially changes, the fingerprint
+// changes and the finding resurfaces for re-review.
+// Deliberately no FKs on entity ids: a review row is a decision record,
+// not ownership of the entities, and detector+entity_type already say
+// which domain table they belong to.
+export const dataQualityReviews = pgTable(
+  "data_quality_reviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    detector: text("detector").notNull(),
+    entityType: text("entity_type").notNull(),
+    entityA: uuid("entity_a").notNull(),
+    entityB: uuid("entity_b"),
+    // Short stable hash of the finding's evidence — detectors compute
+    // it; a decision applies only while the fingerprint still matches.
+    fingerprint: text("fingerprint").notNull(),
+    // 'dismissed' = reviewed, not a real problem (suppress until the
+    // fingerprint changes); 'confirmed' = staff verified the problem is
+    // real (stays visible, flagged as confirmed, unblocks merge review).
+    decision: text("decision").notNull(),
+    note: text("note"),
+    decidedByLabel: text("decided_by_label"),
+    decidedByIdentityId: uuid("decided_by_identity_id").references(
+      () => authIdentities.id,
+      { onDelete: "set null" },
+    ),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    // One decision row per (detector, pair). entity_b is nulled into a
+    // sentinel so single-entity findings share the uniqueness.
+    uniqueIndex("data_quality_reviews_finding_key").on(
+      t.detector,
+      t.entityType,
+      t.entityA,
+      sql`coalesce(${t.entityB}, '00000000-0000-0000-0000-000000000000'::uuid)`,
+    ),
+    check(
+      "data_quality_reviews_decision_check",
+      sql`${t.decision} IN ('confirmed','dismissed')`,
+    ),
+    check(
+      "data_quality_reviews_pair_order_check",
+      sql`${t.entityB} IS NULL OR ${t.entityA} < ${t.entityB}`,
+    ),
+  ],
+);
+
+// Duplicate-animal merge lineage (#178). Merging RETIRES the duplicate
+// row (lifecycle 'merged') — nothing is deleted — and reparents its
+// dependent history to the survivor in one transaction. This table is
+// the durable alias: the retired uuid/registry_ref resolve to the
+// survivor for staff search, deep links, and future integrations.
+// retired_animal_id is unique — an animal merges exactly once, so alias
+// chains cannot form (merging a retired row again is rejected, and the
+// survivor of a later merge is always a canonical animal).
+export const animalMerges = pgTable(
+  "animal_merges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    retiredAnimalId: uuid("retired_animal_id")
+      .notNull()
+      .references(() => animals.id), // restrictive — lineage is history
+    survivorAnimalId: uuid("survivor_animal_id")
+      .notNull()
+      .references(() => animals.id), // restrictive — lineage is history
+    // Snapshots of the retired identity for search/audit display —
+    // the animal row keeps them too, but a merge must be readable
+    // without joining.
+    retiredRegistryRef: text("retired_registry_ref").notNull(),
+    retiredLegacyId: text("retired_legacy_id"),
+    // Explicit staff field resolutions ({field, kept, value}) and
+    // per-domain reparent counts from the executed merge — the record
+    // of exactly what the human chose and what moved.
+    fieldChoices: jsonb("field_choices"),
+    movedCounts: jsonb("moved_counts"),
+    note: text("note"),
+    mergedByLabel: text("merged_by_label"),
+    mergedByIdentityId: uuid("merged_by_identity_id").references(
+      () => authIdentities.id,
+      { onDelete: "set null" },
+    ),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("animal_merges_retired_key").on(t.retiredAnimalId),
+    index("animal_merges_survivor_idx").on(t.survivorAnimalId),
+    check(
+      "animal_merges_not_self_check",
+      sql`${t.retiredAnimalId} <> ${t.survivorAnimalId}`,
+    ),
   ],
 );

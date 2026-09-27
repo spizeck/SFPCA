@@ -193,6 +193,7 @@ export default function AnimalMedicalPage() {
     lifecycleHistory,
     sterilization,
     registry,
+    merge,
     persons,
     households,
   } = record;
@@ -256,19 +257,21 @@ export default function AnimalMedicalPage() {
             status={animal.adoptionStatus}
             lifecycleStatus={animal.lifecycleStatus}
           />
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              setLifecycleDialog({
-                toStatus: "",
-                effectiveOn: today,
-                reason: "",
-              })
-            }
-          >
-            Change registry status
-          </Button>
+          {animal.lifecycleStatus !== "merged" && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                setLifecycleDialog({
+                  toStatus: "",
+                  effectiveOn: today,
+                  reason: "",
+                })
+              }
+            >
+              Change registry status
+            </Button>
+          )}
         </div>
         <p className="text-muted-foreground mt-1 capitalize">
           {animal.registryRef} · {animal.species} · {animal.sex}
@@ -277,6 +280,45 @@ export default function AnimalMedicalPage() {
             : ""}
         </p>
       </div>
+
+      {/* Merge lineage (#178): a retired record shows where its history
+          went; a canonical record lists the identities it absorbed. */}
+      {merge?.status === "merged" && merge.survivor && (
+        <div className="mb-6 rounded-md border border-amber-500/50 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm">
+          This record was merged into{" "}
+          <Link
+            href={`/admin/animals/${merge.survivor.id}`}
+            className="font-medium underline"
+          >
+            {merge.survivor.registryRef}
+          </Link>
+          {merge.mergedAt ? ` on ${merge.mergedAt.slice(0, 10)}` : ""}
+          {merge.mergedByLabel ? ` by ${merge.mergedByLabel}` : ""}. Its
+          history moved with it — this page is the audit view of the
+          retired identity.
+        </div>
+      )}
+      {merge?.status === "canonical" && merge.absorbed.length > 0 && (
+        <div className="mb-6 rounded-md border bg-muted/40 p-3 text-sm">
+          This record absorbed duplicate{" "}
+          {merge.absorbed.length === 1 ? "record" : "records"}:{" "}
+          {merge.absorbed.map((m, i) => (
+            <span key={m.id}>
+              {i > 0 && ", "}
+              <Link
+                href={`/admin/animals/${m.id}`}
+                className="font-medium underline"
+              >
+                {m.registryRef}
+              </Link>
+              <span className="text-muted-foreground">
+                {" "}
+                on {m.mergedAt.slice(0, 10)}
+              </span>
+            </span>
+          ))}
+        </div>
+      )}
 
       <Card className="mb-6">
         <CardHeader>

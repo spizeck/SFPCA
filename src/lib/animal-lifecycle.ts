@@ -67,6 +67,26 @@ export const OWNERSHIP_ENDING_STATUSES: readonly AnimalLifecycleStatus[] = [
   "moved-off-saba",
 ];
 
+// 'merged' (#178) is a terminal retire status written ONLY by the
+// duplicate-merge executor — deliberately outside the staff transition
+// vocabulary so no dropdown, transition rule, or eligibility projection
+// ever treats a merged duplicate as an ordinary animal. It IS a legal
+// database value (the CHECK includes it) and every display/read path
+// must handle it explicitly.
+export const ANIMAL_MERGED_STATUS = "merged";
+
+export function isAnimalMergedStatus(value: unknown): boolean {
+  return value === ANIMAL_MERGED_STATUS;
+}
+
+// True for any value the database accepts — staff statuses plus the
+// merge-retire status. Use this where a row's stored value is rendered
+// or filtered; use isAnimalLifecycleStatus where a staff CHOICE is
+// being validated.
+export function isAnyAnimalLifecycleStatus(value: unknown): boolean {
+  return isAnimalLifecycleStatus(value) || isAnimalMergedStatus(value);
+}
+
 export function isAnimalLifecycleStatus(
   value: unknown,
 ): value is AnimalLifecycleStatus {
@@ -77,6 +97,7 @@ export function isAnimalLifecycleStatus(
 }
 
 export function getAnimalLifecycleLabel(status: unknown): string {
+  if (isAnimalMergedStatus(status)) return "Merged duplicate";
   return isAnimalLifecycleStatus(status)
     ? ANIMAL_LIFECYCLE_LABELS[status]
     : "Unknown";

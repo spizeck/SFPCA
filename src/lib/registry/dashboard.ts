@@ -27,10 +27,9 @@
 // rather than retrofitting the composition. Destination routes stay
 // server-authorized regardless.
 //
-// #178 extension seam: when the duplicate/data-quality work lands, it
-// adds ONE summary source (e.g. countDuplicateFlags) to
-// gatherDashboardSummaries and one block in composeDashboard — the
-// dashboard page and this plumbing don't change.
+// #178's data-quality detector plugs in as ONE summary source
+// (getDataQualitySummary → the "Data quality" item) — the same seam
+// every domain above uses, same failure-isolation semantics.
 
 import "server-only";
 
@@ -52,6 +51,10 @@ import { vetQueueSummary, type VetQueueSummary } from "./vet-queue";
 import { getOpenCaseCounts } from "./lost-found";
 import { countPendingOwnerRequests } from "./owner-requests";
 import { countOpenChipConflicts } from "./microchips";
+import {
+  getDataQualitySummary,
+  type DataQualitySummary,
+} from "./data-quality";
 
 // --- Presentation model ----------------------------------------------------------
 
@@ -113,6 +116,7 @@ export interface DashboardSummaries {
   }>;
   ownerRequests: DomainResult<number>;
   chipConflicts: DomainResult<number>;
+  dataQuality: DomainResult<DataQualitySummary>;
 }
 
 // Gather every domain's canonical summary concurrently. A rejected
@@ -141,6 +145,7 @@ export async function gatherDashboardSummaries(
     lostFound,
     ownerRequests,
     chipConflicts,
+    dataQuality,
   ] = await Promise.all([
     attempt("registrations", () => getRegistrationQueues({}, db)),
     attempt("payments", async () => (await listPendingPayments({}, db)).length),
@@ -153,6 +158,7 @@ export async function gatherDashboardSummaries(
     attempt("lost-found", () => getOpenCaseCounts(db)),
     attempt("owner-requests", () => countPendingOwnerRequests(db)),
     attempt("chip-conflicts", () => countOpenChipConflicts(db)),
+    attempt("data-quality", () => getDataQualitySummary(db)),
   ]);
 
   return {
@@ -164,6 +170,7 @@ export async function gatherDashboardSummaries(
     lostFound,
     ownerRequests,
     chipConflicts,
+    dataQuality,
   };
 }
 
@@ -193,6 +200,7 @@ const FAILURE_DESTINATIONS: Record<keyof DashboardSummaries, { domain: string; h
   lostFound: { domain: "Lost & found", href: "/admin/lost-found" },
   ownerRequests: { domain: "Owner requests", href: "/admin/requests" },
   chipConflicts: { domain: "Chip conflicts", href: "/admin/chip-lookup" },
+  dataQuality: { domain: "Data quality", href: "/admin/data-quality" },
 };
 
 // Map domain summaries to presentation items. Pure — no I/O — so the
@@ -429,6 +437,29 @@ export function composeDashboard(
     );
   }
 
+  // #178: blocking findings (hard data conflicts) float to the overdue
+  // band; the rest are ordinary review work. Chip conflicts keep their
+  // own item above — the data-quality summary deliberately excludes
+  // them so nothing double-counts.
+  const dq = summaries.dataQuality;
+  if (dq.ok && dq.value.blocking + dq.value.review > 0) {
+    const n = dq.value.blocking + dq.value.review;
+    attention.push(
+      item(
+        "data-quality",
+        "Data quality",
+        n,
+        "data-quality " +
+          plural(n, "item") +
+          (dq.value.blocking > 0
+            ? `, including ${dq.value.blocking} blocking`
+            : " to review"),
+        dq.value.blocking > 0 ? "overdue" : "action",
+        "/admin/data-quality",
+      ),
+    );
+  }
+
   for (const [key, result] of Object.entries(summaries) as [
     keyof DashboardSummaries,
     DomainResult<unknown>,
@@ -470,6 +501,8 @@ export function composeDashboard(
     allClear.push("Lost & found");
   if (req.ok && req.value === 0) allClear.push("Owner requests");
   if (chip.ok && chip.value === 0) allClear.push("Chip conflicts");
+  if (dq.ok && dq.value.blocking + dq.value.review === 0)
+    allClear.push("Data quality");
 
   // Overdue floats to the top of needs-attention; declaration order
   // otherwise holds so the layout is predictable scan-to-scan.

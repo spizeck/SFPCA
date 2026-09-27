@@ -653,9 +653,12 @@ describe("registry independence", () => {
       { toStatus: "deceased", source: "staff", actorLabel: STAFF },
       db,
     );
-    // Restrictive FKs on ownerships + lifecycle events make hard delete
-    // fail loudly — history cannot be orphaned.
-    await expect(deleteAnimal(created.animal.id, STAFF, db)).rejects.toThrow();
+    // History-bearing records can no longer be hard-deleted (#178) —
+    // the reference gate refuses before any write, so ownership,
+    // medical, and registration history can never be orphaned.
+    const refused = await deleteAnimal(created.animal.id, STAFF, db);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.reason).toBe("referenced");
     expect(await getAdminAnimal(created.animal.id, db)).not.toBeNull();
   });
 });
