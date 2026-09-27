@@ -23,14 +23,16 @@ when the token is unset.
 ## Application surfaces
 
 - **Public pages**: `/`, `/contact`, `/faq`, `/animal-adoptions`,
-  `/animal-registration`, `/vet-services`, `/under-construction`
+  `/animal-registration`, `/vet-services`, `/statistics` (anonymous
+  aggregate registry stats, #179), `/under-construction`
 - **Auth**: `/login` (email/password sign-in, sign-up, reset + Google
   popup); `POST|DELETE /api/auth/session` is the only API route
 - **Admin** (`/admin`, protected): dashboard, `homepage`, `animals`,
   `animal-adoptions`, `animal-registration`, `registrations`, `faq`,
   `veterinary-services`, `settings`, `chip-lookup` (found-animal scan
   workflow, #168 — owner contact is staff-only via authorized server
-  actions)
+  actions), `reports` (#179 — aggregate metrics workspace + audited CSV
+  export; public counterpart is `/statistics`, a separate suppressed DTO)
 - **Production gate**: `SITE_MAINTENANCE_MODE=true` (Vercel Production
   only) redirects all public paths to `/under-construction`; `/login`,
   `/admin`, `/api/auth`, and static assets stay reachable
@@ -88,6 +90,12 @@ when the token is unset.
 - **Maintenance mode is explicit.** `SITE_MAINTENANCE_MODE` is
   server-side only (never `NEXT_PUBLIC_*`) and is never inferred from
   `NODE_ENV`, branch names, or hostnames.
+- **Reporting never overclaims or leaks (#179).** Registry counts are
+  "animals known to SFPCA" — the total island population is unknown and
+  must never be estimated or implied. Public statistics come only from
+  `getPublicStats`'s anonymous DTO with `PUBLIC_SMALL_CELL_MIN`
+  suppression (single canonical threshold in `src/lib/reports.ts`);
+  staff export is `requireAdmin`-gated, audited, aggregate-only CSV.
 
 ## Auth/session flow (actual)
 

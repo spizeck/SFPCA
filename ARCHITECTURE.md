@@ -1141,3 +1141,180 @@ retired identity cannot be edited, gain a login, gain membership, or
 gain new ownership. There is no person/household hard-delete in the
 codebase at all, so no path bypasses merge for identity consolidation.
 
+
+## 18. Reporting & anonymous statistics (#179)
+
+Reporting turns the registry into planning information while holding
+two promises the data cannot violate on its own:
+
+1. **Scope** — the registry describes *animals known to SFPCA*. It can
+   never estimate the total animal population of Saba, so no surface
+   may word a registry count as a census ("animals on Saba" is banned
+   phrasing anywhere user-facing).
+2. **Privacy** — staff see accurate aggregates; anonymous visitors see
+   only suppressed, aggregate-level figures with no owner data.
+
+### Terminology (canonical — `src/lib/reports.ts`)
+
+| Term | Definition |
+|---|---|
+| **known animal** | an `animals` row that is not a retired merge duplicate (`lifecycle_status <> 'merged'`) |
+| **active known animal** | a known animal with `lifecycle_status = 'active'` |
+| **registration-eligible** | lifecycle `'active'` or `'unknown'` — the canonical `REGISTRATION_ELIGIBLE_LIFECYCLES`; unconfirmed is not exempt |
+| **registered for year Y** | an animal with an authoritative `registrations` row `status='active'`, `year=Y` |
+| **total Saba population** | **unknown** — never computed, never reported |
+
+### Time semantics
+
+- **Population metrics** describe *current registry state* as of the
+  report's as-of date — the `animals` row stores current lifecycle, and
+  the reports do not replay history to reconstruct past population.
+- **Period metrics** (registration, payments) take a calendar-year
+  `year` parameter via `currentRegistrationYear` semantics.
+- **History metrics** (lifecycle outcomes, workload) group by the
+  event's own real-world column (`effective_on`, `reported_at`,
+  `resolved_at`, `administered_on`, `performed_on`, `assigned_from`,
+  `confirmed_on`, `registered_at`, `created_at`), never `updated_at`.
+- `asOf` is an explicit parameter everywhere (`YYYY-MM-DD`); invalid
+  input falls back to today — never trusted. `normalizeReportParams` in
+  `src/lib/registry/reports.ts` is the single normalization point, so
+  tests are deterministic and the UI can always state its date.
+
+### Architecture
+
+- `src/lib/reports.ts` — client-safe vocabulary: population terms,
+  `PUBLIC_SMALL_CELL_MIN` (the ONLY small-cell threshold), suppression +
+  complementary-suppression helpers, age bands, `csvCell`/`toCsv`
+  (RFC-4180 + formula-injection guard).
+- `src/lib/registry/reports.ts` — server-only service: one typed metric
+  function per domain question, composed by `getStaffReport` /
+  `getPublicStats`. All reads are set-based aggregates over canonical
+  tables; business rules are delegated to the owning services
+  (`moneyByRegistration` + `deriveRegistrationBalance` for money,
+  `vaccinationDueState` over a latest-dose-per-series projection for
+  vaccinations, `REGISTRATION_ELIGIBLE_LIFECYCLES` for eligibility).
+- `/admin/reports` — the staff workspace (server component; layout AND
+  page both run `requireAdmin`). `?year=`/`?asof=` query params are
+  bookmarkable and validated server-side.
+- `GET /admin/reports/export?report=overview|period|trends` — CSV
+  downloads. Route handlers are not layout-wrapped, so the handler runs
+  `requireAdmin()` itself, emits `cache-control: no-store`, and writes
+  an `audit_events` row (`report_export`) recording the actor and the
+  filters — never the payload.
+- `/statistics` — the public anonymous surface (force-dynamic), fed by
+  `getPublicStats`, a separate DTO that contains only aggregate values.
+
+### Metric dictionary
+
+Every metric lists its question, numerator, denominator, lifecycle
+scope, period, and privacy class.
+
+**Population** (current registry state at asOf; merged rows excluded)
+
+| Metric | Answers | Denominator | Public? |
+|---|---|---|---|
+| `activeKnownAnimals` | How many living on-island animals does SFPCA know? | — | yes |
+| `knownAnimals` | How many durable records exist? | — | yes |
+| lifecycle split | What share is unconfirmed/departed/deceased? | known animals | staff; public gets active+total only |
+| species split | Dog/cat/other composition | active known | yes, suppressed |
+| age bands | Rough age structure (<1, 1–3, 4–7, 8–11, 12+, unknown) | active known | yes, suppressed |
+| `estimatedBirthDates` | How much of the age data is approximate | active known with a birth date | staff |
+| `with/withoutCurrentOwner` | Ownership coverage | active known | staff |
+
+**Registration** (calendar year Y)
+
+| Metric | Answers | Denominator | Public? |
+|---|---|---|---|
+| `rowsForPeriod`, `active`, `cancelledCorrection`, `cancelledWithdrawn` | How many authoritative rows, split by #169 status | period Y rows | staff |
+| `uniqueAnimalsRegistered` | Animals registered for Y (history preserved — a since-deceased animal still counts) | — | yes (count) |
+| `eligibleRegistered` / `eligibleAnimals` / `eligibleUnregistered` | Coverage of the population expected to register | eligible animals | yes as `registeredPct` |
+| registration trend | Rows/unique animals per year, all years | per-year | staff |
+
+**Payments** (active registrations of period Y only)
+
+| Metric | Definition | Public? |
+|---|---|---|
+| `byState` | Count per derived payment state (`paid`/`partial`/`unpaid`/`waived`/`complimentary`/`no-fee`) — from `deriveRegistrationBalance` over `moneyByRegistration`; pending never settles | staff |
+| `assessed/settled/outstanding/pending/overpaid` | Cents sums; `settled = received − refunded + adjustments` | staff |
+| `resolved`, `resolvedPct` | paid + waived + complimentary + no-fee over active registrations — "financially resolved" ≠ "paid" | staff |
+| `cancelledWithMoney` | Cancelled rows still carrying money — data-quality signal, not debt | staff |
+
+**Health & identification** (active known at asOf)
+
+| Metric | Definition | Public? |
+|---|---|---|
+| `sterilizationAmongActive` | sterilized / intact / **unknown** — unknown stays in the denominator | staff; public rate only |
+| `microchippedActive` / coverage % | `assigned_to IS NULL` current chip only — replaced/historical chips don't count | staff; public rate only |
+| `openChipConflicts` | unresolved duplicate-chip claims | staff |
+| vaccination `doseStates` | latest dose per (animal, series) → `current`/`due-soon`/`overdue`/`unscheduled` via `vaccinationDueState`; superseded doses never inflate | staff |
+| vaccination `series` | per-series animals/state table | staff |
+| `animalsWithoutRecord` | no vaccination row — "unknown", NOT "unvaccinated" | staff |
+
+**Lifecycle history** (`animal_lifecycle_events.effective_on` year; distinct animals per (year, outcome))
+
+| Metric | Definition |
+|---|---|
+| `entered` | first registry event (`from_status IS NULL`) |
+| `becameActive` | non-entry transitions to `active` (corrections/confirmations) |
+| `deceased` / `movedOffSaba` | outcome events — distinct animals, so corrected double-transitions count once; merge retirements (`to_status='merged'`) excluded — a duplicate is not a loss |
+
+**Program workload** (year the work happened)
+
+`registrationsProcessed` (registered_at), `intakeSubmissions`
+(submitted_at), `ownerRequestsOpened/Resolved`, `lostFoundOpened/
+Resolved`, `animalsReunited` (resolved + outcome='reunited'),
+`communicationsSent` (created_at, status sent|delivered),
+`vaccinationsAdministered`, `spayNeuterProcedures`, `chipsAssigned`,
+`annualConfirmations`, `vetVisitsRecorded`. These are program volumes —
+no per-volunteer scoring exists or may be added.
+
+**Data-quality context** — `unknownBirthDate`, `unknownSterilization`,
+`noCurrentOwner`, `openChipConflicts` among active known animals; the
+completeness of the denominators above.
+
+### Public/privacy boundary
+
+`/statistics` returns `PublicStatsReport` — a separate DTO, not the
+staff report minus fields. The type itself cannot carry owner names,
+contacts, households, chip numbers, payment identifiers, or medical
+detail because no such field exists on it.
+
+**Small-cell policy** (one canonical place: `PUBLIC_SMALL_CELL_MIN = 5`):
+
+- a non-zero breakdown cell below the threshold is suppressed (renders
+  "Fewer than N"; the true value never leaves the server);
+- zero cells publish — an empty category protects no one;
+- **complementary suppression**: if exactly one cell is suppressed, the
+  smallest surviving cell hides too — otherwise `total − visible`
+  isolates it;
+- rates publish only when the denominator ≥ threshold (rounded whole
+  percent; the numerator is never published separately);
+- staff reports are exempt — authorized users need accurate figures.
+
+Suppression is applied in `getPublicStats` after authoritative
+computation, so the staff report stays exact while the public DTO is
+safe.
+
+### Export behavior
+
+Three staff CSVs (`overview`, `period`, `trends`) built by
+`buildExportCsv` from the same `StaffReport` the page renders — the
+download cannot disagree with the screen. Stable snake_case headers;
+`section,metric,value,denominator,period,as_of` for overview/period and
+a wide per-year table for trends. `csvCell` prefixes formula-leading
+characters (`= + - @` tab CR) with `'`, so even a vaccine name like
+`=HYPERLINK(...)` is inert. Exports are aggregate-only: no owner-level
+rows exist in any report. Each download writes a `report_export` audit
+row (actor + filters, no payload).
+
+### Known data limitations
+
+- Population is *current state* — the registry does not reconstruct
+  "how many animals were active last March"; lifecycle trends come from
+  event history instead.
+- `animalsWithoutRecord` / sterilization `unknown` mean "not recorded",
+  not "not vaccinated/sterilized" — imported histories are incomplete.
+- Vaccination series keys derive from free-text `vaccine_name` —
+  spelling variants create separate series rows.
+- Public rates withhold entirely when the active population is smaller
+  than the suppression threshold.

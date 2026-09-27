@@ -104,6 +104,7 @@ const INDEXABLE_PATHS = [
   "/contact",
   "/faq",
   "/privacy",
+  "/statistics",
   "/vet-services",
 ] as const;
 

@@ -69,6 +69,15 @@ export function Footer({ social }: FooterProps) {
               ·
             </span>
             <Link
+              href="/statistics"
+              className="hover:text-primary transition-colors underline-offset-4 hover:underline"
+            >
+              Registry statistics
+            </Link>
+            <span aria-hidden="true" className="text-background/40">
+              ·
+            </span>
+            <Link
               href="/privacy"
               className="hover:text-primary transition-colors underline-offset-4 hover:underline"
             >
