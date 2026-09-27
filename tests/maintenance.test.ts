@@ -83,6 +83,65 @@ test("auth session API is allowed when enabled", () => {
   assert.equal(getProxyAction("/api/auth/session", false, ON), "allow");
 });
 
+// --- Operational machine-to-machine APIs (#216) ----------------------------
+//
+// Cron + webhook routes are background infrastructure, not public
+// content. Exemption only removes the maintenance redirect — each
+// handler still enforces its own auth (CRON_SECRET bearer / svix
+// signature), so an unauthenticated request reaches the handler and
+// gets ITS 401/400/503, never a 307 to /under-construction.
+
+test("cron routes are allowed when enabled", () => {
+  assert.equal(getProxyAction("/api/cron/reminders", false, ON), "allow");
+  assert.equal(getProxyAction("/api/cron/sweep-receipts", false, ON), "allow");
+});
+
+test("webhook routes are allowed when enabled", () => {
+  assert.equal(getProxyAction("/api/webhooks/resend", false, ON), "allow");
+});
+
+test("future children under the ops namespaces stay exempt", () => {
+  // New cron/webhook endpoints inherit the namespace exemption — the
+  // point of a namespace is that the next scheduled job doesn't have
+  // to remember to update this list.
+  assert.equal(getProxyAction("/api/cron/some-future-job", false, ON), "allow");
+  assert.equal(
+    getProxyAction("/api/webhooks/some-future-provider", false, ON),
+    "allow",
+  );
+});
+
+test("lookalike paths are NOT exempt — prefix is slash-delimited", () => {
+  for (const path of [
+    "/api/cron-foo",
+    "/api/cronfoo",
+    "/api/webhooks-foo",
+    "/api/webhooksfoo",
+    "/api/cronjob",
+    "/api/webhook",
+  ]) {
+    assert.equal(getProxyAction(path, false, ON), "maintenance", path);
+  }
+});
+
+test("bare namespace roots are exempt (they 404 — no handler exists)", () => {
+  // Deliberate: the namespace is uniformly ungated; a root with no
+  // handler falls through to the framework 404 rather than implying a
+  // public page exists behind the gate.
+  assert.equal(getProxyAction("/api/cron", false, ON), "allow");
+  assert.equal(getProxyAction("/api/webhooks", false, ON), "allow");
+});
+
+test("other /api paths remain gated — no blanket exemption", () => {
+  assert.equal(getProxyAction("/api/anything-else", false, ON), "maintenance");
+  assert.equal(getProxyAction("/api", false, ON), "maintenance");
+});
+
+test("ops API behavior is unchanged when disabled", () => {
+  assert.equal(getProxyAction("/api/cron/reminders", false, OFF), "allow");
+  assert.equal(getProxyAction("/api/webhooks/resend", false, OFF), "allow");
+});
+
 // --- Framework and static assets ------------------------------------------
 
 test("Next.js framework assets are not gated", () => {
@@ -118,6 +177,10 @@ test("exempt-path predicate agrees with the routing decision", () => {
   assert.equal(isMaintenanceExemptPath("/under-construction"), true);
   assert.equal(isMaintenanceExemptPath("/admin"), true);
   assert.equal(isMaintenanceExemptPath("/api/auth/session"), true);
+  assert.equal(isMaintenanceExemptPath("/api/cron/reminders"), true);
+  assert.equal(isMaintenanceExemptPath("/api/webhooks/resend"), true);
+  assert.equal(isMaintenanceExemptPath("/api/cron-foo"), false);
+  assert.equal(isMaintenanceExemptPath("/api/anything-else"), false);
   assert.equal(isMaintenanceExemptPath("/_next/static/app.js"), true);
   assert.equal(isMaintenanceExemptPath("/faq"), false);
   assert.equal(isMaintenanceExemptPath("/"), false);

@@ -288,14 +288,18 @@ while it is `"true"`. Verified behavior (`src/lib/maintenance.ts`,
 
 - **Stays reachable:** `/login`, `/admin/*` (still behind the session
   gate — maintenance mode never weakens admin auth), `/api/auth/*`,
-  `/under-construction`, `/robots.txt`, `/sitemap.xml`, share images,
-  `/_next/*` and other static assets.
+  `/api/cron/*` and `/api/webhooks/*` (#216 — reminders, receipt
+  sweeping, and Resend delivery writebacks keep running; each handler's
+  own CRON_SECRET/svix auth still applies), `/under-construction`,
+  `/robots.txt`, `/sitemap.xml`, share images, `/_next/*` and other
+  static assets.
 - **SEO while gated:** `robots.txt` disallows everything and the sitemap
   is empty; both revert automatically when the flag lifts.
-- **Scope:** this gates HTTP requests to the Next.js app only. It does
-  **not** change Firestore/Storage rules — public receipt uploads to
-  `receipts/` are still accepted by the rules layer, and Firebase
-  Functions keep running normally.
+- **Scope:** this gates public interactive traffic to the Next.js app
+  only. It does **not** change Firestore/Storage rules — public receipt
+  uploads to `receipts/` are still accepted by the rules layer —
+  Firebase Functions keep running normally, and authenticated cron +
+  webhook infrastructure continues operating.
 
 **Enable before risky work:**
 

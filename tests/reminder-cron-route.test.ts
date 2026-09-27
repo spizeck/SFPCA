@@ -119,4 +119,16 @@ describe("GET /api/cron/reminders", () => {
     const response = await GET(authed());
     expect(response.status).toBe(500);
   });
+
+  // #216: with maintenance mode enabled the proxy must let this
+  // request through to the handler, whose OWN auth then decides — the
+  // response is the handler's 401, never a maintenance redirect.
+  // (The route itself never reads SITE_MAINTENANCE_MODE; this pins
+  // that an unauthenticated machine request reaches handler security.)
+  test("under maintenance mode an unauthenticated call still gets the handler's 401", async () => {
+    vi.stubEnv("SITE_MAINTENANCE_MODE", "true");
+    const response = await GET(request());
+    expect(response.status).toBe(401);
+    expect(mockRunCycle).not.toHaveBeenCalled();
+  });
 });
