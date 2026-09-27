@@ -35,6 +35,7 @@ import {
   isNull,
   lt,
   lte,
+  ne,
   or,
   sql,
 } from "drizzle-orm";
@@ -1447,6 +1448,9 @@ export async function listOwnershipsRequiringConfirmation(
       and(
         lte(ownerships.validFrom, asOf),
         or(isNull(ownerships.validTo), gt(ownerships.validTo, asOf)),
+        // Merged (#178) records are retired duplicates — an ownership on
+        // one is merge residue, not a relationship needing confirmation.
+        ne(animals.lifecycleStatus, "merged"),
         sql`((coalesce((SELECT max(c.confirmed_on) FROM ownership_confirmations c WHERE c.ownership_id = ${ownerships.id}), ${ownerships.validFrom})::date + interval '1 day' * ${CONFIRMATION_PERIOD_DAYS})::date) <= ${asOf}`,
       ),
     )

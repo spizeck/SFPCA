@@ -72,6 +72,7 @@ function emptySummaries(): DashboardSummaries {
     lostFound: ok({ missing: 0, foundUnmatched: 0, foundMatched: 0 }),
     ownerRequests: ok(0),
     chipConflicts: ok(0),
+    dataQuality: ok({ blocking: 0, review: 0, advisory: 0, suppressed: 0 }),
   };
 }
 
@@ -81,8 +82,8 @@ describe("composeDashboard", () => {
     expect(work.needsAttention).toHaveLength(0);
     expect(work.comingUp).toHaveLength(0);
     expect(work.failures).toHaveLength(0);
-    // All eight domains loaded clean — the routine strip says so.
-    expect(work.allClear).toHaveLength(8);
+    // All nine domains loaded clean — the routine strip says so.
+    expect(work.allClear).toHaveLength(9);
   });
 
   test("one domain at a time produces exactly one item", () => {
@@ -254,6 +255,51 @@ describe("composeDashboard", () => {
     s.chipConflicts = ok(2);
     const work = composeDashboard(s);
     expect(work.needsAttention[0].href).toBe("/admin/chip-lookup#conflicts");
+  });
+
+  // #178 — data-quality findings compose like any other domain:
+  // blocking findings read as overdue; review-only as ordinary work;
+  // advisory-only never lands on the attention list; a failed source
+  // is a failure row, never a zero.
+  test("data-quality findings deep-link to the workspace", () => {
+    const s = emptySummaries();
+    s.dataQuality = ok({ blocking: 0, review: 3, advisory: 5, suppressed: 1 });
+    const work = composeDashboard(s);
+    const i = work.needsAttention.find((x) => x.key === "data-quality");
+    expect(i?.count).toBe(3);
+    expect(i?.urgency).toBe("action");
+    expect(i?.href).toBe("/admin/data-quality");
+    expect(work.allClear).not.toContain("Data quality");
+  });
+
+  test("blocking data-quality findings are overdue work", () => {
+    const s = emptySummaries();
+    s.dataQuality = ok({ blocking: 1, review: 2, advisory: 0, suppressed: 0 });
+    const work = composeDashboard(s);
+    const i = work.needsAttention.find((x) => x.key === "data-quality");
+    expect(i?.count).toBe(3);
+    expect(i?.urgency).toBe("overdue");
+  });
+
+  test("advisory-only data quality does not make the attention list", () => {
+    const s = emptySummaries();
+    s.dataQuality = ok({ blocking: 0, review: 0, advisory: 7, suppressed: 0 });
+    const work = composeDashboard(s);
+    expect(
+      work.needsAttention.find((x) => x.key === "data-quality"),
+    ).toBeUndefined();
+    expect(work.allClear).toContain("Data quality");
+  });
+
+  test("a failed data-quality source is a failure row, not a zero", () => {
+    const s = emptySummaries();
+    s.dataQuality = failed();
+    const work = composeDashboard(s);
+    expect(
+      work.needsAttention.find((x) => x.key === "data-quality"),
+    ).toBeUndefined();
+    expect(work.failures.map((f) => f.key)).toContain("dataQuality");
+    expect(work.allClear).not.toContain("Data quality");
   });
 
   test("a failed domain is a failure row, never a zero count", () => {

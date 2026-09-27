@@ -2,7 +2,7 @@ import {
   getAnimalAdoptionLabel,
   getAnimalLifecycleLabel,
   isAnimalAdoptionStatus,
-  isAnimalLifecycleStatus,
+  isAnyAnimalLifecycleStatus,
 } from "@/lib/animal-lifecycle";
 
 // Color supports the text but never carries meaning alone: every badge
@@ -16,10 +16,12 @@ const LIFECYCLE_CLASSES: Record<string, string> = {
   unknown: "bg-yellow-100 text-yellow-800",
   "moved-off-saba": "bg-blue-100 text-blue-800",
   deceased: "bg-gray-100 text-gray-800",
+  // Retired duplicate (#178) — reads as neutral/inactive, never error-red.
+  merged: "bg-purple-100 text-purple-800",
 };
 
 export function AnimalLifecycleBadge({ status }: { status: string }) {
-  const known = isAnimalLifecycleStatus(status);
+  const known = isAnyAnimalLifecycleStatus(status);
   const classes = known
     ? LIFECYCLE_CLASSES[status]
     : "bg-red-100 text-red-800";

@@ -210,7 +210,10 @@ export default function AnimalsManager() {
         if (!result.ok) {
           toast({
             title: "Error",
-            description: "Failed to delete animal. Try again.",
+            description:
+              result.reason === "referenced"
+                ? "This record has registry history and can't be deleted. For a duplicate, use the merge workflow on the data-quality page; otherwise update its registry status on the profile."
+                : "Failed to delete animal. Try again.",
             variant: "destructive",
           });
           return;
@@ -562,6 +565,17 @@ export default function AnimalsManager() {
                       <TableRow key={animal.id}>
                         <TableCell className="font-mono text-xs">
                           {animal.registryRef}
+                          {row.mergedInto && (
+                            <div className="text-muted-foreground">
+                              merged into{" "}
+                              <Link
+                                href={`/admin/animals/${row.mergedInto.id}`}
+                                className="underline"
+                              >
+                                {row.mergedInto.registryRef}
+                              </Link>
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell className="font-medium">
                           <Link
@@ -589,22 +603,26 @@ export default function AnimalsManager() {
                           {row.owners.join(", ") || "—"}
                         </TableCell>
                         <TableCell className="text-right space-x-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            aria-label={`Edit ${animal.name}`}
-                            onClick={() => handleEdit(row)}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            aria-label={`Delete ${animal.name}`}
-                            onClick={() => setDeleteTarget(row)}
-                          >
-                            <Trash className="h-4 w-4 text-red-500" />
-                          </Button>
+                          {!row.mergedInto && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                aria-label={`Edit ${animal.name}`}
+                                onClick={() => handleEdit(row)}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                aria-label={`Delete ${animal.name}`}
+                                onClick={() => setDeleteTarget(row)}
+                              >
+                                <Trash className="h-4 w-4 text-red-500" />
+                              </Button>
+                            </>
+                          )}
                         </TableCell>
                       </TableRow>
                     );
