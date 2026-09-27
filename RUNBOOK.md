@@ -1913,3 +1913,32 @@ the people inside them — that's a separate person decision.
 - **Data-quality row shows "couldn't load" on the dashboard**: the
   detector query failed; the failure is a row, never a zero. Check
   Sentry (`dashboard` subsystem), then `/admin/data-quality` directly.
+
+## 28. Reporting & statistics (#179)
+
+`/admin/reports` is the staff reporting workspace — aggregate metrics
+over the canonical registry, organized as: registry population,
+registration period + payment completion, health & prevention,
+microchip identification, lifecycle history, program workload, and a
+data-quality context strip. The period selector (`?year=`) scopes
+registration/payment metrics; `?asof=` sets the report date. Population
+counts always describe *current* registry state — they are not
+historical reconstruction and never mean "all animals on Saba".
+
+**Exports.** The page's "Download CSV" links call
+`GET /admin/reports/export?report=overview|period|trends&year=&asof=`.
+Exports are aggregate-only (no owner rows), formula-injection safe, and
+each download writes a `report_export` audit event with the actor and
+filters — check `audit_events` if someone asks "who exported what".
+
+**Public statistics.** `/statistics` shows the anonymous DTO only —
+aggregate counts, suppressed cells ("Fewer than 5"), and rates whose
+denominators clear the threshold. If a category looks hidden, that is
+the small-cell policy working, not missing data. If the whole page
+shows "temporarily unavailable", check Sentry (`reports` subsystem) —
+the page fails closed rather than publishing partial figures.
+
+**Reading a number.** Every figure's denominator and period are printed
+next to it; the full metric dictionary is ARCHITECTURE.md §18. If a
+metric looks wrong, fix the underlying registry data — reports are
+derived and have no separate state to repair.

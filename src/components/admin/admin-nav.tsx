@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Home, FileText, PawPrint, Settings, LogOut, Menu, ClipboardList, Stethoscope, Heart, CircleQuestionMark, CalendarClock, Mail, Users, Inbox, ScanLine, Search, ShieldAlert } from "lucide-react";
+import { Home, FileText, PawPrint, Settings, LogOut, Menu, ClipboardList, Stethoscope, Heart, CircleQuestionMark, CalendarClock, Mail, Users, Inbox, ScanLine, Search, ShieldAlert, ChartColumn } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AdminThemeToggle } from "@/components/admin-theme-toggle";
 import { useState } from "react";
@@ -22,6 +22,8 @@ const navItems = [
   { href: "/admin/registrations", label: "Registrations", icon: ClipboardList },
   // Duplicate/integrity review workspace (#178).
   { href: "/admin/data-quality", label: "Data Quality", icon: ShieldAlert },
+  // Reporting workspace (#179) — aggregate metrics, not a queue.
+  { href: "/admin/reports", label: "Reports", icon: ChartColumn },
   { href: "/admin/requests", label: "Requests", icon: Inbox },
   { href: "/admin/persons", label: "People", icon: Users },
   { href: "/admin/animal-registration", label: "Reg. Page", icon: FileText },

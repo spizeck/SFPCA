@@ -23,6 +23,7 @@ export type LogSubsystem =
   | "communications"
   | "lost-found"
   | "dashboard"
+  | "reports"
   | "content"
   | "portal"
   | "owners"
