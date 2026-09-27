@@ -75,5 +75,9 @@ firebase-export-*/
 # Firebase
 *-firebase-adminsdk-*.json
 
+# Database dumps — backups never live in git (#180)
+*.dump
+backups/
+
 .vercel
 .env*

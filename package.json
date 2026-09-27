@@ -16,6 +16,8 @@
     "seed": "tsx scripts/seed.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/db-migrate.ts",
+    "db:backup": "tsx scripts/db-backup.ts",
+    "db:restore": "tsx scripts/db-restore.ts",
     "migrate:firestore": "tsx scripts/migrate-firestore.ts",
     "test:db": "vitest run tests/db",
     "test": "vitest run",

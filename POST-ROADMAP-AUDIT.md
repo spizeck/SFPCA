@@ -345,10 +345,13 @@ not trapped anywhere requiring raw DB access for ordinary mistakes:
   server-side everywhere, and public surfaces ship only DTOs.
 
 ### Must resolve before accepting REAL registry/financial/veterinary data
-1. **#180 — recovery posture.** 6-hour Neon Free PITR + 1 manual
-   snapshot is below the documented ≥7-day target now that Postgres is
-   authoritative. Resolve (upgrade/scheduled dumps) or get explicit
-   owner risk-acceptance. *The single most important item.*
+1. **#180 — recovery posture. RESOLVED post-audit (2026-09-27):**
+   scheduled daily `pg_dump` → private Firebase Storage `db-backups/`
+   (8-day retention) via GitHub Actions, plus a verified isolated-branch
+   restore drill (~40 s end-to-end on the seed-era database). See
+   RUNBOOK §19g. Original finding preserved for the record: 6-hour Neon
+   Free PITR + 1 manual snapshot was below the documented ≥7-day target
+   now that Postgres is authoritative.
 2. **Production env verification (ops, ~30 min):** confirm in Vercel —
    `DATABASE_URL*` (Prod scope), `CRON_SECRET`, `RESEND_API_KEY`,
    `EMAIL_FROM`, `RESEND_WEBHOOK_SECRET` + Resend endpoint registered,
@@ -399,7 +402,7 @@ Sentry), #219 (public intake throttling).
 
 ## 18. Recommended execution order
 
-1. Resolve #180 recovery posture (or record owner acceptance).
+1. ~~Resolve #180 recovery posture~~ — done post-audit (RUNBOOK §19g).
 2. Verify production env vars + register the Resend webhook.
 3. Clear disposable test data; seed the first real admin.
 4. (Optional) ship #216's two-line exemption.
@@ -418,11 +421,13 @@ Vercel preview deployed.
 ## 20. Bottom line
 
 > **If SFPCA wanted to begin using this system with real data tomorrow,
-> one thing stops us: the recovery posture (#180).** Six-hour
-> point-in-time recovery on a Free-plan database that now holds the
-> authoritative record of animals, owners, payments, and veterinary
-> history is a thin safety net — resolve it or consciously accept it.
-> Everything else is either already done, an owner policy decision, or
-> an ordinary post-launch improvement. The architecture is coherent,
-> the security and privacy boundaries are real, and the code is in
+> one thing stops us: the recovery posture (#180).** *[Post-audit note:
+> resolved 2026-09-27 — scheduled logical backups + verified restore,
+> RUNBOOK §19g.]* Six-hour point-in-time recovery on a Free-plan
+> database that now holds the authoritative record of animals, owners,
+> payments, and veterinary history is a thin safety net — resolve it or
+> consciously accept it. Everything else is either already done, an
+> owner policy decision, or an ordinary post-launch improvement. The
+> architecture is coherent, the security and privacy boundaries are
+> real, and the code is in
 > better shape than the issue tracker was.
