@@ -86,10 +86,14 @@ jobs:
               # get exercised indirectly by a heavy suite.
               case "$f" in
                 vercel.json|firebase.json|firestore.indexes.json|tsconfig.json)
-                  node -e "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))" "$f"
+                  node -e "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))" "$f" || exit 1
                   ;;
                 .github/workflows/*.yml|.github/workflows/*.yaml)
-                  python3 -c "import sys, yaml; yaml.safe_load(open(sys.argv[1]))" "$f"
+                  if python3 -c "import yaml" 2>/dev/null; then
+                    python3 -c "import sys, yaml; yaml.safe_load(open(sys.argv[1]))" "$f" || exit 1
+                  else
+                    echo "::warning::PyYAML unavailable; skipping workflow YAML validation for $f"
+                  fi
                   ;;
               esac
 
