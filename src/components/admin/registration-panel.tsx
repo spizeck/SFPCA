@@ -317,7 +317,10 @@ export function RegistrationPanel({
           break;
       }
       if (result?.ok) {
-        setEditor(null);
+        // Only close the editor this submission came from — a save that
+        // resolves after the staff member opened another editor must not
+        // wipe that in-progress form.
+        setEditor((current) => (current === editor ? null : current));
         onChanged();
       } else {
         fail(result);

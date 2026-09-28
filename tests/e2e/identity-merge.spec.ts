@@ -110,8 +110,13 @@ test.describe("person merge", () => {
       .click();
 
     // Lands back on the directory; the retired row is annotated lineage.
+    // exact: the toast's aria-live announce node repeats the text with a
+    // "Notification Merged" prefix — a plain getByText resolves to both
+    // and trips strict mode whenever it mounts before this assertion.
     await expect(page).toHaveURL("/admin/persons");
-    await expect(page.getByText("Records merged into E2E Duperson.")).toBeVisible();
+    await expect(
+      page.getByText("Records merged into E2E Duperson.", { exact: true }),
+    ).toBeVisible();
     await expect(page.getByText(/Merged into E2E Duperson/)).toBeVisible();
 
     // Lineage exists and the retired record still exists in the database.
