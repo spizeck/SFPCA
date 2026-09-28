@@ -1,8 +1,8 @@
 // E2E journeys for the #91 mutation hardening, run entirely against the
 // Firebase emulator suite (firestore :8080, auth :9099, storage :9199).
 // No real Firebase project or Sentry endpoint is ever contacted.
-import { expect, test, type Page } from "@playwright/test";
-import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./global-setup";
+import { expect, test, type Page } from "./fixtures";
+import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./env";
 import { dismissConsentNotice } from "./helpers";
 
 async function signInAsAdmin(page: Page) {

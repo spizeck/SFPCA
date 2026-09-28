@@ -3,8 +3,8 @@
 // merge, confirms it explicitly, and lands on the canonical survivor —
 // the retired reference still resolves. Runs against the Firebase
 // emulator suite; the registry is PGlite (real Postgres).
-import { expect, test, type Page } from "@playwright/test";
-import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./global-setup";
+import { expect, test, type Page } from "./fixtures";
+import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./env";
 import { dismissConsentNotice } from "./helpers";
 
 async function signInAsAdmin(page: Page) {

@@ -3,13 +3,13 @@
 // and an admin verifies it through the staff lifecycle. Runs entirely
 // against the Firebase emulators — never production. All data is
 // synthetic.
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
   E2E_OWNER_EMAIL,
   E2E_OWNER_PASSWORD,
-} from "./global-setup";
+} from "./env";
 import { dismissConsentNotice } from "./helpers";
 
 async function signInAsAdmin(page: import("@playwright/test").Page) {

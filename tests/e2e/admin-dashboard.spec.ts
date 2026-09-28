@@ -11,8 +11,8 @@
 // "awaiting payment" counts here are exactly what this spec creates.
 // Assertions about shared queues (unregistered animals, confirmations)
 // are presence-based, never absolute totals.
-import { expect, test, type Page } from "@playwright/test";
-import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./global-setup";
+import { expect, test, type Page } from "./fixtures";
+import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./env";
 import { dismissConsentNotice } from "./helpers";
 
 async function signInAsAdmin(page: Page) {

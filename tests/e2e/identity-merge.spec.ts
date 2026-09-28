@@ -5,15 +5,16 @@
 // over the PGlite wire protocol (the same connection the dev server
 // uses); auth identities are synthetic — no real Firebase account is
 // needed to prove the block.
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 import postgres from "postgres";
-import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./global-setup";
+import {
+  E2E_ADMIN_EMAIL,
+  E2E_ADMIN_PASSWORD,
+  E2E_DATABASE_URL,
+} from "./env";
 import { dismissConsentNotice } from "./helpers";
 
-const sql = postgres(
-  "postgres://postgres:postgres@127.0.0.1:5544/postgres",
-  { max: 1 },
-);
+const sql = postgres(E2E_DATABASE_URL, { max: 1 });
 
 async function signInAsAdmin(page: Page) {
   await page.goto("/login");

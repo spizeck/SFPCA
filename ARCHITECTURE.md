@@ -775,7 +775,7 @@ remains a precondition before any production `migrate:firestore
   are a deliberate operator step (RUNBOOK.md §19b).
 - The dev server needs `DATABASE_URL` to exercise registry surfaces
   locally (a Neon dev branch or a local Postgres/PGlite wire server —
-  E2E uses `tests/e2e/global-setup.ts`); unit tests need nothing.
+  E2E uses `tests/e2e/db-server.ts`); unit tests need nothing.
 
 ## 12. CI
 

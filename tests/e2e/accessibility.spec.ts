@@ -1,5 +1,5 @@
 // Accessibility regression suite for the public website, run against the
-// emulator-backed app (see tests/e2e/global-setup.ts for fixtures).
+// emulator-backed app (see tests/e2e/fixtures.ts for fixtures).
 //
 // Axe scans assert zero critical/serious violations — the two severities
 // that map to real user barriers under a WCAG 2.2 AA baseline. Moderate
@@ -7,7 +7,7 @@
 // instead of failing the build, so the suite stays meaningful without
 // becoming a brittle pseudo-compliance gate.
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import { dismissConsentNotice } from "./helpers";
 
 const PUBLIC_ROUTES = [

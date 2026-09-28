@@ -1,13 +1,13 @@
 // Admin journeys: protection of /admin and a real authenticated login
 // through the application's UI against the Firebase Auth emulator
-// (user + admins doc seeded by tests/e2e/global-setup).
-import { expect, test } from "@playwright/test";
+// (user + admins doc seeded by tests/e2e/fixtures.ts).
+import { expect, test } from "./fixtures";
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
   E2E_USER_EMAIL,
   E2E_USER_PASSWORD,
-} from "./global-setup";
+} from "./env";
 
 test.describe("admin journeys", () => {
   test("unauthenticated /admin redirects to login", async ({ page }) => {

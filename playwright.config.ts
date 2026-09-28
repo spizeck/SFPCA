@@ -1,10 +1,26 @@
 import { defineConfig, devices } from "@playwright/test";
+import {
+  E2E_APP_PORT,
+  E2E_DATABASE_URL,
+} from "./tests/e2e/env";
+
+const baseURL = `http://localhost:${E2E_APP_PORT}`;
 
 // E2E smoke suite. `npm run test:e2e` wraps this in
 // `firebase emulators:exec`, so FIRESTORE_EMULATOR_HOST /
 // FIREBASE_AUTH_EMULATOR_HOST are already set for both the webServer
 // process (Admin SDK in /api/auth/session and server components) and the
 // global setup fixture script.
+//
+// Lifecycle (#229): Playwright starts webServer BEFORE globalSetup, so
+// the webServer command — `npm run dev:e2e` (tests/e2e/db-server.ts) —
+// owns the datastore itself: it brings up PGlite, replays migrations,
+// and starts the wire-protocol socket BEFORE spawning `next dev`. The
+// ordering "database ready → application server ready → tests run" is
+// therefore structural, not timed. globalSetup then seeds the fixture
+// baseline through the socket, and the shared fixture (tests/e2e/
+// fixtures.ts) re-applies that baseline before every test attempt so
+// retries never inherit a failed attempt's mutations.
 export default defineConfig({
   testDir: "tests/e2e",
   timeout: 60_000,
@@ -16,7 +32,7 @@ export default defineConfig({
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
   globalSetup: "tests/e2e/global-setup.ts",
   use: {
-    baseURL: "http://localhost:3100",
+    baseURL,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
@@ -24,8 +40,10 @@ export default defineConfig({
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
   ],
   webServer: {
-    command: "npm run dev -- -p 3100",
-    url: "http://localhost:3100",
+    command: "npm run dev:e2e",
+    url: baseURL,
+    // Reused servers only work with `npm run dev:e2e` — it owns the
+    // PGlite socket; a plain `next dev` leaves the harness no datastore.
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
     env: {
@@ -43,10 +61,10 @@ export default defineConfig({
       // E2E must exercise the full site, never the maintenance gate.
       SITE_MAINTENANCE_MODE: "false",
       // The registry datastore: a PGlite Postgres engine served over the
-      // wire protocol by tests/e2e/global-setup.ts — the dev server uses
+      // wire protocol by tests/e2e/db-server.ts — the dev server uses
       // the same postgres.js client it would for Neon, against an
       // isolated throwaway database.
-      DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:5544/postgres",
+      DATABASE_URL: E2E_DATABASE_URL,
       // One connection: pglite-socket queues protocol messages
       // per-message, so multiple pooled connections can interleave
       // extended-protocol sequences. See src/lib/db/client.ts.

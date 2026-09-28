@@ -7,17 +7,17 @@
 //   - an unknown chip becomes an unmatched found case that staff link;
 //   - an owner reports their own animal missing from the portal.
 //
-// Fixture (tests/e2e/global-setup.ts):
+// Fixture (tests/e2e/fixtures.ts):
 //   Daisy — lifecycle 'active', owned by the E2E owner (person), chip
 //   985222000333444. A dedicated animal so case state can't collide
 //   with other suites' lifecycle changes.
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
   E2E_OWNER_EMAIL,
   E2E_OWNER_PASSWORD,
-} from "./global-setup";
+} from "./env";
 
 async function signInAsAdmin(page: Page) {
   await page.goto("/login");
