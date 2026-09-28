@@ -13,12 +13,172 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Change-aware CI. The `Detect changes` job classifies the PR diff into
+# domains; each check below runs only when the diff can plausibly affect
+# its domain. Pushes to main always run the full suite — main remains the
+# integrated signal.
+#
+# Required-check safety: the "Protect main" ruleset requires
+# "Next.js app", "Firebase Functions", "Firebase security rules" and
+# "E2E smoke". Gating is done with job-level `if:` (never workflow-level
+# `paths:` filters): a workflow filtered out entirely would leave its
+# required checks pending forever, while a job skipped by a conditional
+# reports Success and satisfies the ruleset. Check names therefore stay
+# present and deterministic on every PR.
+#
+# The classifier fails safe: if the diff cannot be computed it reports
+# "run everything" rather than skipping protection.
+#
 # All jobs resolve Node from .nvmrc (the repo's canonical runtime
 # declaration). Root package.json "engines" declares the same policy for
-# npm and Vercel; functions/package.json pins the Functions deploy runtime.
+# npm and Vercel; functions/package.json pins the Functions deploy
+# runtime.
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.classify.outputs.app }}
+      functions: ${{ steps.classify.outputs.functions }}
+      rules: ${{ steps.classify.outputs.rules }}
+      db: ${{ steps.classify.outputs.db }}
+      e2e: ${{ steps.classify.outputs.e2e }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Classify changed files
+        id: classify
+        shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -u
+          app=false
+          functions=false
+          rules=false
+          db=false
+          e2e=false
+          files=""
+
+          run_all() {
+            app=true; functions=true; rules=true; db=true; e2e=true
+          }
+
+          if [ "$EVENT_NAME" = "push" ]; then
+            # Full integration run on main.
+            run_all
+          else
+            files="$(git diff --name-only "origin/${BASE_REF}...HEAD" 2>/dev/null)" || files=""
+            if [ -z "$files" ]; then
+              # A real PR always has a diff; empty means the diff failed.
+              # Fail safe toward full coverage, never toward skipping it.
+              echo "::warning::Could not compute PR diff — running all domains"
+              run_all
+            fi
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+
+              # Cheap validation for config-only changes that no longer
+              # get exercised indirectly by a heavy suite.
+              case "$f" in
+                vercel.json|firebase.json|firestore.indexes.json|tsconfig.json)
+                  node -e "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))" "$f" || exit 1
+                  ;;
+                .github/workflows/*.yml|.github/workflows/*.yaml)
+                  if python3 -c "import yaml" 2>/dev/null; then
+                    python3 -c "import sys, yaml; yaml.safe_load(open(sys.argv[1]))" "$f" || exit 1
+                  else
+                    echo "::warning::PyYAML unavailable; skipping workflow YAML validation for $f"
+                  fi
+                  ;;
+              esac
+
+              case "$f" in
+                # Docs / metadata / CI config: cannot affect runtime.
+                *.md|LICENSE|docs/*|.github/*|.env.example|.gitignore|.gitattributes|.vercelignore|vercel.json|firestore-debug.log|test-results/*|playwright-report/*)
+                  ;;
+
+                # Postgres schema, migrations, DB tests and DB tooling.
+                # src/lib/db and tests/db changes also affect the app
+                # (`npm test` runs tests/db and app code imports the
+                # schema) and real registry workflows (E2E).
+                drizzle/*|drizzle.config.ts|src/lib/db/*|tests/db/*)
+                  db=true; app=true; e2e=true ;;
+                scripts/db-*|scripts/seed.ts|scripts/seed-data.json|scripts/migrate-firestore.ts|scripts/preview-migrate.ts|scripts/reconcile-migration.ts|scripts/neon-ops.ts)
+                  db=true; app=true ;;
+                scripts/deploy-functions.js)
+                  functions=true ;;
+
+                # Firebase security rules, indexes and emulator config.
+                # E2E runs against the same emulators, so rules changes
+                # are E2E-relevant too.
+                firestore.rules|storage.rules|firestore.indexes.json|firebase.json|.firebaserc|tests/*.test.mjs)
+                  rules=true; e2e=true ;;
+
+                # Firebase Functions package (isolated dependency tree;
+                # not exercised by the E2E emulators).
+                functions/*)
+                  functions=true ;;
+
+                # Playwright suite/config itself.
+                tests/e2e/*|playwright.config.ts)
+                  e2e=true ;;
+
+                # Unit/component tests (vitest include: tests/**/*.test.*).
+                tests/*)
+                  app=true ;;
+
+                # Application runtime, including auth, proxy/middleware,
+                # payments and admin flows — all E2E-relevant.
+                src/*|public/*)
+                  app=true; e2e=true ;;
+
+                # Root dependencies / runtime pin: blast radius crosses
+                # every domain that installs from the root lockfile
+                # (app build/tests, drizzle-kit, firebase-tools,
+                # Playwright) — broad coverage.
+                package.json|package-lock.json|.nvmrc)
+                  run_all ;;
+
+                # Build/toolchain config that can change shipped output.
+                next.config.ts|tsconfig.json|tailwind.config.ts|postcss.config.js)
+                  app=true; e2e=true ;;
+
+                # Lint/unit-test config: app job only.
+                eslint.config.mjs|vitest.config.mts)
+                  app=true ;;
+
+                # Other scripts (ops tooling exercised indirectly) —
+                # conservative: app coverage.
+                scripts/*)
+                  app=true ;;
+
+                # Unknown top-level change: run everything.
+                *)
+                  run_all ;;
+              esac
+            done <<< "$files"
+          fi
+
+          echo "Changed files:"
+          echo "$files"
+          echo "Domains: app=$app functions=$functions rules=$rules db=$db e2e=$e2e"
+          {
+            echo "app=$app"
+            echo "functions=$functions"
+            echo "rules=$rules"
+            echo "db=$db"
+            echo "e2e=$e2e"
+          } >> "$GITHUB_OUTPUT"
+
   app:
     name: Next.js app
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -59,6 +219,8 @@ jobs:
 
   functions:
     name: Firebase Functions
+    needs: changes
+    if: needs.changes.outputs.functions == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -87,12 +249,11 @@ jobs:
         run: node -e "const f = require('./index.js'); for (const name of ['onFirestoreChange', 'triggerRebuild']) { if (!f[name]) { console.error('Missing required function export', name); process.exit(1); } }"
 
   # Security-rules tests are neither app nor Functions code and need the
-  # Java-based emulator suite, so they get their own check. The required
-  # checks on the "Protect main" ruleset ("Next.js app", "Firebase
-  # Functions") are unchanged; "Firebase security rules" is a stable check
-  # name intended to become required after this PR merges.
+  # Java-based emulator suite, so they get their own check.
   rules:
     name: Firebase security rules
+    needs: changes
+    if: needs.changes.outputs.rules == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -123,6 +284,8 @@ jobs:
   # no credentials, no production dependency.
   database:
     name: Postgres schema
+    needs: changes
+    if: needs.changes.outputs.db == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -151,6 +314,8 @@ jobs:
   # demo-* config; no production Firebase or credentials are involved.
   e2e:
     name: E2E smoke
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
