@@ -130,12 +130,18 @@ export default function AnimalMedicalPage() {
   const { toast } = useToast();
 
   useEffect(() => {
+    setLoading(true);
     loadRecord();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [registryId]);
 
   const loadRecord = async () => {
-    setLoading(true);
+    // A refresh must not tear the page down: flipping to the full-page
+    // "Loading..." unmounts every panel and destroys any editor open
+    // mid-edit. Only the first load, a registryId switch, or a retry
+    // with no record rendered shows the spinner; refreshes update the
+    // data in place.
+    if (!record) setLoading(true);
     setLoadError(false);
     try {
       const result = await getAnimalMedicalAction(registryId);

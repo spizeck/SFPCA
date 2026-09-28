@@ -136,7 +136,13 @@ test.describe("annual registrations (#169)", () => {
       .first()
       .fill("100");
     await page.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.getByText("Paid").first()).toBeVisible();
+    // Wait on the new ledger row — getByText is a case-insensitive
+    // substring match, so "Paid" would resolve instantly against the
+    // still-rendered "Unpaid" badge and race ahead of the in-flight save.
+    await expect(page.getByText("+100.00 USD")).toBeVisible();
+    await expect(
+      page.getByText("Paid", { exact: true }).first(),
+    ).toBeVisible();
 
     // Back on the queue page the registration is completed.
     await page.goto("/admin/registrations");
@@ -233,7 +239,13 @@ test.describe("registration payment ledger (#170)", () => {
       .click();
     await editor.locator('input[type="number"]').first().fill("60");
     await editor.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.getByText("Paid").first()).toBeVisible();
+    // Wait on the new ledger row — getByText("Paid") substring-matches
+    // the stale "Partially paid" badge and would let the test open the
+    // refund editor while this save is still in flight.
+    await expect(page.getByText("+60.00 USD")).toBeVisible();
+    await expect(
+      page.getByText("Paid", { exact: true }).first(),
+    ).toBeVisible();
 
     // Refund part of it — the original rows stay, a separate −25
     // refund row appears, and the balance goes back into debt.
