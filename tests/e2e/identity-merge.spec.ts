@@ -2,19 +2,13 @@
 // the data-quality workspace, compared side-by-side, merged under an
 // explicit staff confirmation, and — critically — blocked when both
 // person records hold independent sign-in accounts. Seeds registry rows
-// over the PGlite wire protocol (the same connection the dev server
-// uses); auth identities are synthetic — no real Firebase account is
-// needed to prove the block.
-import { expect, test, type Page } from "./fixtures";
-import postgres from "postgres";
-import {
-  E2E_ADMIN_EMAIL,
-  E2E_ADMIN_PASSWORD,
-  E2E_DATABASE_URL,
-} from "./env";
-import { dismissConsentNotice } from "./helpers";
-
-const sql = postgres(E2E_DATABASE_URL, { max: 1 });
+// through the db-server control endpoint (engine-direct — a second
+// wire-protocol client can corrupt the app's in-flight queries);
+// auth identities are synthetic — no real Firebase account is needed to
+// prove the block.
+import { dbQuery, expect, test, type Page } from "./fixtures";
+import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./env";
+import { dismissConsentNotice, waitForDialogSettled } from "./helpers";
 
 async function signInAsAdmin(page: Page) {
   await page.goto("/login");
@@ -29,34 +23,41 @@ async function signInAsAdmin(page: Page) {
 // detector requires; differing emails create a field conflict the merge
 // UI must put to staff.
 async function seedDuplicatePersons(opts: { withAuth?: boolean } = {}) {
-  const [a, b] = await sql<{ id: string }[]>`
-    insert into persons (full_name, email, phone)
-    values
-      ('E2E Duperson', 'dup-a@example.com', '+599 416 9999'),
-      ('E2E Duperson', 'dup-b@example.com', '+5994169999')
-    returning id`;
+  const [a, b] = await dbQuery<{ id: string }>(
+    `insert into persons (full_name, email, phone)
+     values
+       ('E2E Duperson', 'dup-a@example.com', '+599 416 9999'),
+       ('E2E Duperson', 'dup-b@example.com', '+5994169999')
+     returning id`,
+  );
   if (opts.withAuth) {
-    await sql`
-      insert into auth_identities (provider, provider_uid, email, person_id)
-      values
-        ('firebase', ${`e2e-uid-${a.id}`}, 'dup-a@example.com', ${a.id}),
-        ('firebase', ${`e2e-uid-${b.id}`}, 'dup-b@example.com', ${b.id})`;
+    await dbQuery(
+      `insert into auth_identities (provider, provider_uid, email, person_id)
+       values
+         ('firebase', $1, 'dup-a@example.com', $2),
+         ('firebase', $3, 'dup-b@example.com', $4)`,
+      [`e2e-uid-${a.id}`, a.id, `e2e-uid-${b.id}`, b.id],
+    );
   }
   return { a: a.id, b: b.id };
 }
 
 async function seedDuplicateHouseholds() {
-  const [member] = await sql<{ id: string }[]>`
-    insert into persons (full_name) values ('E2E Housemate') returning id`;
-  const [ha, hb] = await sql<{ id: string }[]>`
-    insert into households (name, address)
-    values
-      ('E2E Duphousehold', 'Zealandia 1, Saba'),
-      ('E2E Duphousehold', 'Zealandia 1, Saba')
-    returning id`;
-  await sql`
-    insert into household_members (household_id, person_id, role)
-    values (${hb.id}, ${member.id}, 'member')`;
+  const [member] = await dbQuery<{ id: string }>(
+    `insert into persons (full_name) values ('E2E Housemate') returning id`,
+  );
+  const [ha, hb] = await dbQuery<{ id: string }>(
+    `insert into households (name, address)
+     values
+       ('E2E Duphousehold', 'Zealandia 1, Saba'),
+       ('E2E Duphousehold', 'Zealandia 1, Saba')
+     returning id`,
+  );
+  await dbQuery(
+    `insert into household_members (household_id, person_id, role)
+     values ($1, $2, 'member')`,
+    [hb.id, member.id],
+  );
   return { a: ha.id, b: hb.id, member: member.id };
 }
 
@@ -105,10 +106,14 @@ test.describe("person merge", () => {
     });
     await expect(retireButton).toBeVisible();
     await retireButton.click();
-    await page
-      .getByRole("dialog")
-      .getByRole("button", { name: "Merge" })
-      .click();
+    const confirmDialog = page.getByRole("dialog");
+    const confirmMerge = confirmDialog.getByRole("button", {
+      name: "Merge",
+    });
+    await expect(confirmMerge).toBeEnabled();
+    await waitForDialogSettled(confirmDialog);
+    await confirmMerge.click();
+    await expect(confirmDialog).toBeHidden();
 
     // Lands back on the directory; the retired row is annotated lineage.
     // exact: the toast's aria-live announce node repeats the text with a
@@ -121,12 +126,16 @@ test.describe("person merge", () => {
     await expect(page.getByText(/Merged into E2E Duperson/)).toBeVisible();
 
     // Lineage exists and the retired record still exists in the database.
-    const lineage = await sql<{ count: string }[]>`
-      select count(*)::text as count from person_merges
-      where survivor_person_id in (${a}, ${b})`;
+    const lineage = await dbQuery<{ count: string }>(
+      `select count(*)::text as count from person_merges
+       where survivor_person_id in ($1, $2)`,
+      [a, b],
+    );
     expect(Number(lineage[0].count)).toBe(1);
-    const persons = await sql<{ count: string }[]>`
-      select count(*)::text as count from persons where id in (${a}, ${b})`;
+    const persons = await dbQuery<{ count: string }>(
+      `select count(*)::text as count from persons where id in ($1, $2)`,
+      [a, b],
+    );
     expect(Number(persons[0].count)).toBe(2);
 
     // The actionable finding is gone.
@@ -165,16 +174,22 @@ test.describe("person merge", () => {
     ).not.toBeVisible();
 
     // Nothing mutated: both persons and both identities are intact.
-    const persons = await sql<{ count: string }[]>`
-      select count(*)::text as count from persons where id in (${a}, ${b})`;
+    const persons = await dbQuery<{ count: string }>(
+      `select count(*)::text as count from persons where id in ($1, $2)`,
+      [a, b],
+    );
     expect(Number(persons[0].count)).toBe(2);
-    const identities = await sql<{ count: string }[]>`
-      select count(*)::text as count from auth_identities
-      where person_id in (${a}, ${b})`;
+    const identities = await dbQuery<{ count: string }>(
+      `select count(*)::text as count from auth_identities
+       where person_id in ($1, $2)`,
+      [a, b],
+    );
     expect(Number(identities[0].count)).toBe(2);
-    const lineage = await sql<{ count: string }[]>`
-      select count(*)::text as count from person_merges
-      where retired_person_id in (${a}, ${b}) or survivor_person_id in (${a}, ${b})`;
+    const lineage = await dbQuery<{ count: string }>(
+      `select count(*)::text as count from person_merges
+       where retired_person_id in ($1, $2) or survivor_person_id in ($1, $2)`,
+      [a, b],
+    );
     expect(Number(lineage[0].count)).toBe(0);
   });
 });
@@ -210,10 +225,14 @@ test.describe("household merge", () => {
     });
     await expect(retireButton).toBeVisible();
     await retireButton.click();
-    await page
-      .getByRole("dialog")
-      .getByRole("button", { name: "Merge" })
-      .click();
+    const confirmDialog = page.getByRole("dialog");
+    const confirmMerge = confirmDialog.getByRole("button", {
+      name: "Merge",
+    });
+    await expect(confirmMerge).toBeEnabled();
+    await waitForDialogSettled(confirmDialog);
+    await confirmMerge.click();
+    await expect(confirmDialog).toBeHidden();
 
     await expect(page).toHaveURL("/admin/persons");
     await expect(
@@ -222,16 +241,22 @@ test.describe("household merge", () => {
 
     // Both household rows still exist; lineage points retired → survivor,
     // and the member sits on exactly one household.
-    const households = await sql<{ count: string }[]>`
-      select count(*)::text as count from households where id in (${a}, ${b})`;
+    const households = await dbQuery<{ count: string }>(
+      `select count(*)::text as count from households where id in ($1, $2)`,
+      [a, b],
+    );
     expect(Number(households[0].count)).toBe(2);
-    const lineage = await sql<{ count: string }[]>`
-      select count(*)::text as count from household_merges
-      where survivor_household_id in (${a}, ${b})`;
+    const lineage = await dbQuery<{ count: string }>(
+      `select count(*)::text as count from household_merges
+       where survivor_household_id in ($1, $2)`,
+      [a, b],
+    );
     expect(Number(lineage[0].count)).toBe(1);
-    const memberships = await sql<{ count: string }[]>`
-      select count(*)::text as count from household_members
-      where person_id = ${member}`;
+    const memberships = await dbQuery<{ count: string }>(
+      `select count(*)::text as count from household_members
+       where person_id = $1`,
+      [member],
+    );
     expect(Number(memberships[0].count)).toBe(1);
 
     await page.goto("/admin/data-quality");

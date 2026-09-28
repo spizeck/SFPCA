@@ -34,3 +34,12 @@ export const E2E_APP_PORT = 3100;
 // before `next dev` is ever spawned.
 export const E2E_PGLITE_PORT = 5544;
 export const E2E_DATABASE_URL = `postgres://postgres:postgres@127.0.0.1:${E2E_PGLITE_PORT}/postgres`;
+
+// Control endpoint on the webServer process (tests/e2e/db-server.ts).
+// Per-test Postgres resets are POSTed here and executed directly on the
+// PGlite engine — never over the wire socket, where a second client
+// connection's protocol messages could interleave with the app's
+// in-flight queries (see seed.ts).
+export const E2E_CONTROL_PORT = 5545;
+export const E2E_RESET_URL = `http://127.0.0.1:${E2E_CONTROL_PORT}/reset`;
+export const E2E_QUERY_URL = `http://127.0.0.1:${E2E_CONTROL_PORT}/query`;
