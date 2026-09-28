@@ -26,10 +26,13 @@ export function isExpectedAuthError(error: unknown): boolean {
   return typeof code === "string" && EXPECTED_AUTH_ERROR_CODES.has(code);
 }
 
-export async function getCurrentUser() {
-  const cookieStore = await cookies();
-  const sessionCookie = cookieStore.get("session")?.value;
-
+// Cookie-value variant of getCurrentUser: the same Firebase session
+// verification (signature + expiry + revocation), usable from call
+// sites that hold the raw cookie — like proxy.ts, which sees
+// NextRequest.cookies rather than the next/headers store.
+export async function getSessionUser(
+  sessionCookie: string | undefined | null,
+) {
   if (!sessionCookie) {
     return null;
   }
@@ -46,6 +49,11 @@ export async function getCurrentUser() {
     }
     return null;
   }
+}
+
+export async function getCurrentUser() {
+  const cookieStore = await cookies();
+  return getSessionUser(cookieStore.get("session")?.value);
 }
 
 export async function isAdmin(email: string): Promise<{ isAdmin: boolean; role?: "admin" | "editor" }> {
@@ -80,6 +88,23 @@ export async function isAdmin(email: string): Promise<{ isAdmin: boolean; role?:
   }
 
   return { isAdmin: false };
+}
+
+// The maintenance gate's trust decision (#189). A session cookie earns
+// the bypass only when the FULL admin chain verifies — Firebase session
+// cookie (signature, expiry, revocation) plus the Postgres admin_users
+// / ADMIN_EMAILS lookup — exactly what requireAdmin() runs on admin
+// pages. Any failure, expected or not, returns false: the gate fails
+// closed. Nothing client-controlled is ever trusted on its own.
+export async function isVerifiedAdminSession(
+  sessionCookie: string | undefined | null,
+): Promise<boolean> {
+  const user = await getSessionUser(sessionCookie);
+  if (!user?.email) {
+    return false;
+  }
+  const { isAdmin: userIsAdmin } = await isAdmin(user.email);
+  return userIsAdmin;
 }
 
 export async function requireAdmin() {

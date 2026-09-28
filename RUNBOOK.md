@@ -283,9 +283,19 @@ without checking what the index serves.
 
 `SITE_MAINTENANCE_MODE` (Vercel env, Production only — never
 `NEXT_PUBLIC_*`) redirects every public route to `/under-construction`
-while it is `"true"`. Verified behavior (`src/lib/maintenance.ts`,
-`src/proxy.ts`):
+while it is `"true"` — for everyone except a **server-verified admin**
+(#189). Verified behavior (`src/lib/maintenance.ts`, `src/proxy.ts`,
+`isVerifiedAdminSession` in `src/lib/auth.ts`):
 
+- **Admin bypass:** the proxy verifies the `session` cookie through the
+  real chain — Firebase session-cookie verification (signature, expiry,
+  revocation) plus the `admin_users`/`ADMIN_EMAILS` lookup — on every
+  gated request. A verified admin browses the public site and `/admin`
+  normally; a forged, expired, revoked, or valid-but-non-admin cookie
+  fails closed to `/under-construction` (cookie presence alone proves
+  nothing — the check runs on the Node.js runtime, same code path as
+  `requireAdmin`). Removing a staff row from `admin_users` or revoking
+  the Firebase session re-engages the gate on the very next request.
 - **Stays reachable:** `/login`, `/admin/*` (still behind the session
   gate — maintenance mode never weakens admin auth), `/api/auth/*`,
   `/api/cron/*` and `/api/webhooks/*` (#216 — reminders, receipt
@@ -308,6 +318,20 @@ while it is `"true"`. Verified behavior (`src/lib/maintenance.ts`,
 2. Trigger a redeploy — env changes do not affect the running
    deployment; only new builds see them (Vercel → Deployments →
    redeploy latest, or push a trivial commit).
+
+**Staff preview while gated (#189):** staff open the site, land on
+`/under-construction`, and use the "sign in" link at the bottom of that
+page (or browse straight to `/login`). Signing in with an `admin_users`
+or `ADMIN_EMAILS` account unlocks the entire site — public pages, `/admin`,
+and `/portal` all work normally for that session; the verified session
+cookie is what the gate checks on every request, so **each staff browser
+session must sign in individually** (the bypass is per-cookie, not
+per-IP or global). Owner and other non-admin accounts do *not* unlock
+the site — they keep working on `/portal` only. Signing out, or letting
+the session expire, returns the browser to `/under-construction`. To
+verify the gate is up, use a private/incognito window or a non-admin
+account — a signed-in admin browser sees the live site even while the
+flag is on.
 
 **Disable:** remove the variable (or set `false`) and redeploy again.
 Verify `/` loads publicly afterward.

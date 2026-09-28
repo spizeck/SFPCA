@@ -126,6 +126,24 @@ client-SDK writes (CMS edits, team-photo uploads) now that the
 logins. Owner accounts (#166) are `auth_identities` + `persons` rows —
 the same chain, no second auth authority; see §5 "Owner registry".
 
+**Maintenance-gate trust boundary (#189).** `src/proxy.ts` (the Next.js
+proxy — always the Node.js runtime in Next 16, so the full server auth
+stack is available there) is the single routing gate. Public paths under
+`SITE_MAINTENANCE_MODE` redirect to `/under-construction` — *unless* the
+request carries a session cookie that verifies as an **authorized
+admin** through `isVerifiedAdminSession()`: Firebase
+`verifySessionCookie(cookie, true)` (signature, expiry, revocation) then
+the same `admin_users`/`ADMIN_EMAILS` lookup `requireAdmin()` runs. The
+same chain, invoked at a second enforcement point — not a second auth
+system. Cookie *presence* earns only the check, never the bypass;
+forged, expired, revoked, and valid-but-non-admin cookies all fail
+closed to the maintenance redirect. `/admin` and `/portal` keep their
+independent page-level `requireAdmin`/`requireOwner` regardless of the
+flag. Exempt routes (`/login`, `/api/auth/*`, `/api/cron/*`,
+`/api/webhooks/*`, `/_next/*`, static assets, `/under-construction`)
+keep running so staff can authenticate and infrastructure keeps working
+during a window.
+
 ## 4. Stack selection
 
 **Neon Postgres** (serverless Postgres, Vercel-native integration,

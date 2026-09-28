@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getProxyAction } from "@/lib/maintenance";
+import { isVerifiedAdminSession } from "@/lib/auth";
 
-export function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest) {
+  const sessionCookie = request.cookies.get("session")?.value;
   const action = getProxyAction(
     request.nextUrl.pathname,
-    Boolean(request.cookies.get("session")),
+    Boolean(sessionCookie),
   );
 
   if (action === "login") {
@@ -14,6 +16,20 @@ export function proxy(request: NextRequest) {
 
   if (action === "maintenance") {
     return NextResponse.redirect(new URL("/under-construction", request.url));
+  }
+
+  if (action === "admin-check") {
+    // Verified admin bypass (#189): the proxy runs on the Node.js
+    // runtime, so the same auth stack the pages use is available here —
+    // Firebase session-cookie verification (signature, expiry,
+    // revocation) followed by the admin_users/ADMIN_EMAILS lookup in
+    // isVerifiedAdminSession. A forged, expired, revoked, or non-admin
+    // cookie falls through to the maintenance redirect; the check fails
+    // closed.
+    const bypass = await isVerifiedAdminSession(sessionCookie);
+    return bypass
+      ? NextResponse.next()
+      : NextResponse.redirect(new URL("/under-construction", request.url));
   }
 
   return NextResponse.next();

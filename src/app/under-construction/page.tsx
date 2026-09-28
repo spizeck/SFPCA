@@ -65,6 +65,17 @@ export default function UnderConstructionPage() {
               <a href="mailto:sfpcasaba@gmail.com">Email Us</a>
             </Button>
           </div>
+
+          {/* Discreet staff entry (#189): /login is maintenance-exempt so
+              staff can authenticate during a window; the verified admin
+              session then unlocks the site. Not a bypass control — the
+              gate's trust decision is entirely server-side. */}
+          <p className="text-xs text-muted-foreground">
+            SFPCA staff:{" "}
+            <a href="/login" className="underline hover:text-foreground">
+              sign in
+            </a>
+          </p>
         </CardContent>
       </Card>
     </main>
