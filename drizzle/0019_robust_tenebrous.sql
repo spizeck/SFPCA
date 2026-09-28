@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "vet_documents_storage_path_key" ON "vet_documents" USING btree ("storage_path");

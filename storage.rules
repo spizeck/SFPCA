@@ -38,6 +38,15 @@ service firebase.storage {
               || request.resource.contentType == "application/pdf");
     }
 
+    // Clinical-document uploads from the admin medical record: image or
+    // PDF, max 5 MB (mirrors isVetDocumentFile in src/lib/medical.ts).
+    function isVetDocUpload() {
+      return request.resource.size < 5 * 1024 * 1024
+          && request.resource.size > 0
+          && (request.resource.contentType.matches("image/.*")
+              || request.resource.contentType == "application/pdf");
+    }
+
     // There is deliberately no images/ rule: no active workflow owns
     // the namespace (nothing in the app uploads to or reads from it,
     // and the production prefix is empty), so it falls through to
@@ -77,6 +86,24 @@ service firebase.storage {
     // for authorization.
     match /receipts/{receiptId} {
       allow create: if resource == null && isReceiptUpload();
+      allow read, update, delete: if false;
+    }
+
+    // Clinical documents attached to the veterinary record (#192) —
+    // private data stored at vet-docs/<uuid>[.<ext>]; the vet_documents
+    // row is written by a server action after the upload lands.
+    //
+    // Create is staff-only: a verified user carrying the admin custom
+    // claim. The resource == null check keeps even staff from
+    // overwriting an existing object (paths carry a fresh uuid anyway).
+    //
+    // There is no client-side read/update/delete at all — not even for
+    // admins. Staff view documents through the /admin/documents/[id]
+    // proxy route and orphan cleanup runs through the Admin SDK in the
+    // scheduled sweep — both bypass rules entirely. A vet document is
+    // therefore unreachable via the client SDK for every principal.
+    match /vet-docs/{docId} {
+      allow create: if resource == null && isAdmin() && isVetDocUpload();
       allow read, update, delete: if false;
     }
 

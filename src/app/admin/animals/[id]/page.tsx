@@ -67,6 +67,7 @@ import { AlertDialog } from "@/components/admin/medical/alert-dialog";
 import { ProcedureDialog } from "@/components/admin/medical/procedure-dialog";
 import { MedicationDialog } from "@/components/admin/medical/medication-dialog";
 import { WeightDialog } from "@/components/admin/medical/weight-dialog";
+import { DocumentUploadDialog } from "@/components/admin/medical/document-dialog";
 import { FollowUpDialog } from "@/components/admin/medical/follow-up-dialog";
 import { FollowUpPanel } from "@/components/admin/medical/follow-up-panel";
 import { ClinicExpectationDialog } from "@/components/admin/medical/clinic-expectation-dialog";
@@ -99,7 +100,8 @@ type DialogType =
   | "alert"
   | "follow-up"
   | "clinic-expectation"
-  | "mark-seen";
+  | "mark-seen"
+  | "document";
 
 export default function AnimalMedicalPage() {
   const params = useParams<{ id: string }>();
@@ -206,6 +208,9 @@ export default function AnimalMedicalPage() {
   const encounters = timeline
     .filter((i) => i.kind === "encounter")
     .map((i) => i.record as AdminVetEncounter);
+  const vaccinations = timeline
+    .filter((i) => i.kind === "vaccination")
+    .map((i) => i.record as AdminVaccination);
 
   const openDialog = (type: DialogType, editing: MedicalTimelineItem | null) =>
     setDialog({ type, editing });
@@ -429,18 +434,41 @@ export default function AnimalMedicalPage() {
                 </ul>
               )}
             </div>
-            <div>
-              <h3 className="font-medium mb-1">Documents</h3>
-              {registry.documents.length === 0 ? (
-                <p className="text-muted-foreground">None recorded.</p>
-              ) : (
-                <ul className="space-y-1">
-                  {registry.documents.map((d) => (
-                    <li key={d.id}>{d.label}</li>
-                  ))}
-                </ul>
-              )}
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="font-medium">Documents</h3>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setDialog({ type: "document", editing: null })}
+              >
+                Upload document
+              </Button>
             </div>
+            {registry.documents.length === 0 ? (
+              <p className="text-muted-foreground">None recorded.</p>
+            ) : (
+              <ul className="space-y-1">
+                {registry.documents.map((d) => (
+                  <li key={d.id} className="flex items-center gap-2">
+                    <a
+                      href={`/admin/documents/${d.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium underline"
+                    >
+                      {d.label}
+                    </a>
+                    <span className="text-muted-foreground">
+                      {d.createdAt.slice(0, 10)}
+                      {d.notes ? ` — ${d.notes}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           <div>
@@ -716,6 +744,15 @@ export default function AnimalMedicalPage() {
         open={dialog?.type === "mark-seen"}
         onOpenChange={(o) => !o && closeDialog()}
         onResolved={loadRecord}
+      />
+      <DocumentUploadDialog
+        animalId={animal.id}
+        animalName={animal.name}
+        encounters={encounters}
+        vaccinations={vaccinations}
+        open={dialog?.type === "document"}
+        onOpenChange={(o) => !o && closeDialog()}
+        onSaved={loadRecord}
       />
 
       <Dialog

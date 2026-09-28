@@ -47,7 +47,7 @@ everything.
 | Next.js app | repo root (`src/`) | Vercel | automatic on merge to `main` [console: confirm production branch] | Vercel → Deployments | Vercel → Logs (Runtime) |
 | `onFirestoreChange` | `functions/index.js` | Cloud Functions v2 | manual `firebase deploy` | `firebase deploy` output / Firebase console → Functions | Cloud Logging, `subsystem:"rebuild"` |
 | `triggerRebuild` | `functions/index.js` | Cloud Functions v2 | manual `firebase deploy` | same | Cloud Logging |
-| Receipt sweep | `src/app/api/cron/sweep-receipts/route.ts`, `src/lib/registry/receipt-sweep.ts` | Vercel cron (`vercel.json`, daily 06:00 UTC) | automatic with Vercel deploy | Vercel → Deployments → Cron / Functions logs | Vercel → Logs, `subsystem:"receipt-cleanup"`; partial failures return 500 |
+| Storage sweep | `src/app/api/cron/sweep-receipts/route.ts`, `src/lib/registry/receipt-sweep.ts`, `src/lib/registry/vet-document-sweep.ts` | Vercel cron (`vercel.json`, daily 06:00 UTC) | automatic with Vercel deploy | Vercel → Deployments → Cron / Functions logs | Vercel → Logs, `subsystem:"receipt-cleanup"` + `subsystem:"vet-doc-cleanup"`; partial failures return 500 |
 | Reminder send | `src/app/api/cron/reminders/route.ts`, `src/lib/registry/reminders.ts`, `src/lib/registry/communications.ts` | Vercel cron (`vercel.json`, daily 12:00 UTC = 08:00 AST) | automatic with Vercel deploy | Vercel → Deployments → Cron; `/admin/communications` | Vercel → Logs, `subsystem:"communications"`; 503 when provider unconfigured |
 | Resend webhook | `src/app/api/webhooks/resend/route.ts` | Resend dashboard (endpoint + signing secret) | manual provider config | Resend dashboard → Webhooks | signature failures → 400; no secret → 503 |
 | Firestore rules | `firestore.rules` | Firestore | manual `firebase deploy --only firestore:rules` | Firebase console → Firestore → Rules | denied requests surface as `permission-denied` in app logs |
@@ -1070,20 +1070,28 @@ covering a scenario soft delete misses at this scale.
 
 ### 18e. Orphan-sweeper interaction (`/api/cron/sweep-receipts`)
 
-The sweeper (Vercel cron, daily) deletes `receipts/<uuid>` objects whose
-Postgres `registration_submissions` row does not exist and which are
-older than one hour. Two properties matter for recovery:
+The sweeper (Vercel cron, daily) covers both private prefixes in one
+pass: `receipts/<uuid>` objects whose `registration_submissions` row
+does not exist, and `vet-docs/<uuid>[.<ext>]` objects whose
+`vet_documents` row does not exist (a clinical upload whose
+registration step never completed — abandoned dialog, lost response).
+Objects younger than one hour are never classified. Two properties
+matter for recovery:
 
 - **Soft-deleted receipts are invisible to the sweeper** — its listing
   sees live objects only. A swept receipt stays recoverable for the
   whole soft-delete window.
 - **Postgres restore ordering hazard:** while a Neon branch restore or
   migration replay is in progress, a receipt can look orphaned if its
-  submission row is temporarily missing. As cheap insurance during any
-  §19/§20 restore or re-import that leaves submissions temporarily
-  absent: **pause the cron first** (Vercel → Settings → Cron Jobs →
-  disable, or temporarily remove the `vercel.json` entry and redeploy),
-  and resume it after the data is verified complete.
+  submission row is temporarily missing — the same hazard applies to a
+  `vet-docs/` object whose `vet_documents` row is temporarily absent.
+  As cheap insurance during any §19/§20 restore or re-import that
+  leaves registry rows temporarily absent: **pause the cron first**
+  (Vercel → Settings → Cron Jobs → disable, or temporarily remove the
+  `vercel.json` entry and redeploy), and resume it after the data is
+  verified complete. `vet_documents.storage_path` plays the same role
+  as `payment_receipt_path` in the combined-incident ordering below —
+  recover the Postgres row first, then the object.
 
 **Combined incident ordering** (submission row + receipt both gone):
 
@@ -1099,16 +1107,17 @@ unrecoverable (re-collect from the registrant).
 
 ### 18f. Privacy & retention boundary
 
-- Soft-deleted `receipts/` objects are PII held for the recovery
-  window only — this is **recovery retention, not business retention**.
-  When #130 defines a registration retention policy, deliberate
-  deletions still age out of soft delete on the same 56-day clock; the
-  mechanism cannot turn a deletion decision into permanent storage.
-  If #130 ever requires immediate PII destruction, an operator must
-  explicitly purge the soft-deleted object — document that in the
-  retention policy.
+- Soft-deleted `receipts/` and `vet-docs/` objects are PII held for the
+  recovery window only — `vet-docs/` additionally carries clinical
+  records — this is **recovery retention, not business retention**.
+  When #130 defines a retention policy, deliberate deletions still age
+  out of soft delete on the same 56-day clock; the mechanism cannot
+  turn a deletion decision into permanent storage. If #130 ever
+  requires immediate PII destruction, an operator must explicitly purge
+  the soft-deleted object — document that in the retention policy.
 - Restore access inherits bucket IAM (project editors/owners) — keep it
-  that way; never grant receipt reads to satisfy a recovery workflow.
+  that way; never grant receipt or clinical-document reads to satisfy a
+  recovery workflow.
 
 ### 18g. Testing status — honest note
 

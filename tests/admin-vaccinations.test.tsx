@@ -66,6 +66,10 @@ vi.mock("next/navigation", () => ({
   useParams: () => ({ id: "animal-uuid-1" }),
 }));
 
+// The document-upload dialog (#192) imports the Firebase client for its
+// vet-docs/ write — stub it so jsdom never initializes a real app.
+vi.mock("@/lib/firebase", () => ({ storage: {} }));
+
 vi.mock("@/hooks/use-toast", () => ({
   useToast: () => ({ toast: mockToast }),
 }));

@@ -1358,11 +1358,12 @@ export const weightRecords = pgTable(
   ],
 );
 
-// Clinical document references (#174) — lab reports, certificates,
-// referral letters. Only the Storage object path is stored (like
-// payment_receipt_path / vaccinations.document_path); the uploader and
-// the vet-docs/* Storage rules are deferred — this table establishes
-// the relational shape so later work doesn't remodel.
+// Clinical document references (#174 shape, #192 upload/access) — lab
+// reports, certificates, referral letters. Only the Storage object path
+// is stored (like payment_receipt_path / vaccinations.document_path);
+// the object lives under vet-docs/<uuid>[.<ext>], uploaded by staff
+// under the admin-claim create rule and read only through the proxied
+// /admin/documents/[id] route — vet-docs/ is deny-all to every client.
 export const vetDocuments = pgTable(
   "vet_documents",
   {
@@ -1381,6 +1382,9 @@ export const vetDocuments = pgTable(
   (t) => [
     index("vet_documents_animal_idx").on(t.animalId),
     index("vet_documents_encounter_idx").on(t.encounterId),
+    // One row per Storage object — a retried registration of the same
+    // upload must collapse, never create a second document record.
+    uniqueIndex("vet_documents_storage_path_key").on(t.storagePath),
     check(
       "vet_documents_path_check",
       sql`${t.storagePath} ~ '^vet-docs/'`,
@@ -1439,8 +1443,9 @@ export const vaccinations = pgTable(
     notes: text("notes"),
     // Storage object path for a certificate/record (vet-docs/...) —
     // a reference like payment_receipt_path, never the object itself.
-    // Upload UI is a later issue; the column exists so the model is
-    // complete without a rewrite.
+    // Documents attached via the upload dialog land as vet_documents
+    // rows linked by vaccination_id instead; this column remains for
+    // direct/external certificate references.
     documentPath: text("document_path"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
