@@ -25,8 +25,8 @@
     "test:watch": "vitest",
     "test:rules": "firebase emulators:exec --only auth,firestore,storage --project demo-sfpca \"node --test \\\"tests/*.test.mjs\\\"\"",
     "test:maintenance": "vitest run tests/maintenance.test.ts",
-    "test:e2e": "firebase emulators:exec --only auth,firestore --project demo-sfpca \"playwright test\"",
-    "test:e2e:headed": "firebase emulators:exec --only auth,firestore --project demo-sfpca \"playwright test --headed\"",
+    "test:e2e": "firebase emulators:exec --only auth,firestore,storage --project demo-sfpca \"playwright test\"",
+    "test:e2e:headed": "firebase emulators:exec --only auth,firestore,storage --project demo-sfpca \"playwright test --headed\"",
     "deploy:functions": "node scripts/deploy-functions.js"
   },
   "dependencies": {

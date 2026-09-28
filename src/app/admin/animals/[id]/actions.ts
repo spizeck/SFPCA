@@ -31,6 +31,7 @@ import {
   listClinicExpectationsForAnimal,
   listFollowUpsForAnimal,
   listMedicalTimeline,
+  registerVetDocument,
   updateAlert,
   updateEncounter,
   updateMedication,
@@ -43,6 +44,7 @@ import {
   type MedicalTimelineItem,
   type MedicationWriteInput,
   type ProcedureWriteInput,
+  type VetDocumentWriteInput,
   type WeightWriteInput,
 } from "@/lib/registry/medical";
 import {
@@ -97,6 +99,8 @@ import {
   getAnimalMergeInfo,
   type AnimalMergeInfo,
 } from "@/lib/registry/merge";
+import { adminBucket } from "@/lib/firebase-admin";
+import { isVetDocumentFile, VET_DOC_PATH_RE } from "@/lib/medical";
 import { logError, type LogSubsystem } from "@/lib/logger";
 
 export interface AnimalMedicalRecord {
@@ -370,6 +374,41 @@ export async function saveWeightAction(
       ? updateWeightRecord(weightId, input, expectedUpdatedAt ?? "", actor)
       : createWeightRecord(input, actor),
   );
+}
+
+// --- Clinical documents (#192) --------------------------------------------------
+// The upload itself is the staff member's browser writing vet-docs/
+// under the admin-claim create rule — the file never transits this
+// server. This action is the registration step: verify the claimed
+// object actually landed and still matches the file contract (rules
+// are the boundary, this is the second check), then write the row.
+export async function registerVetDocumentAction(
+  input: VetDocumentWriteInput,
+): Promise<SaveResult> {
+  return save("medical", async (actor) => {
+    // The path shape must hold before any Storage call — a crafted path
+    // must never reach the bucket as an existence probe.
+    if (!VET_DOC_PATH_RE.test(input.storagePath ?? "")) {
+      return { ok: false, reason: "invalid", field: "storagePath" };
+    }
+    const file = adminBucket().file(input.storagePath);
+    let metadata: { size?: unknown; contentType?: unknown };
+    try {
+      [metadata] = await file.getMetadata();
+    } catch {
+      return { ok: false, reason: "invalid", field: "file" };
+    }
+    if (
+      !isVetDocumentFile({
+        type: typeof metadata.contentType === "string" ? metadata.contentType : "",
+        size: Number(metadata.size),
+      })
+    ) {
+      return { ok: false, reason: "invalid", field: "file" };
+    }
+    const result = await registerVetDocument(input, actor);
+    return result.ok ? { ok: true } : result;
+  });
 }
 
 // --- Ownership (#166) -------------------------------------------------------------

@@ -52,12 +52,12 @@ import {
   type VaccinationDueState,
 } from "../vaccinations";
 import { insertCommunication } from "./communications";
+import { VET_DOC_PATH_RE } from "../medical";
 import { currentOwnershipSq } from "./ownership";
 import type { RegistryDb } from "./public-animals";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const VET_DOC_PATH_RE = /^vet-docs\/[0-9a-f-]{36}(\.[a-z0-9]+)?$/i;
 
 const MAX_SHORT = 200;
 const MAX_NOTES = 2000;

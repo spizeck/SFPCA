@@ -78,6 +78,8 @@ before(async () => {
       // A receipt left by a pre-launch submission — private forever.
       "receipts/reg-1",
       "receipts/existing",
+      // A clinical document already on the record — private forever.
+      "vet-docs/existing-doc.pdf",
     ]) {
       await storage
         .ref(path)
@@ -431,5 +433,89 @@ test("no client principal can delete a receipt — cleanup is server-side only",
     await assertFails(storage.ref("receipts/reg-1").delete());
     await assertFails(storage.ref("receipts/existing").delete());
     await assertFails(storage.ref("receipts/new-undeletable").delete());
+  }
+});
+
+// ---------- Clinical documents (vet-docs/, private medical data) ----------
+// #192 posture: claimed-staff constrained create is the ONLY client-side
+// operation — unlike public receipts, even the upload requires the admin
+// custom claim. Reads/updates/deletes are denied for every principal —
+// staff view documents through the /admin/documents/[id] proxy route and
+// orphan cleanup runs through the Admin SDK, both of which bypass rules.
+
+test("claimed admin can upload an image or PDF clinical document", async () => {
+  await assertSucceeds(
+    adminStorage()
+      .ref("vet-docs/new-doc-1")
+      .put(pngBytes(), { contentType: "image/png" }),
+  );
+  await assertSucceeds(
+    adminStorage()
+      .ref("vet-docs/new-doc-2.pdf")
+      .put(new Uint8Array([37, 80, 68, 70]), {
+        contentType: "application/pdf",
+      }),
+  );
+});
+
+test("non-admin principals cannot upload clinical documents", async () => {
+  for (const storage of [
+    publicStorage(),
+    userStorage(),
+    noClaimStorage(),
+    spoofedStorage(),
+  ]) {
+    await assertFails(
+      storage
+        .ref("vet-docs/forged-doc")
+        .put(pngBytes(), { contentType: "image/png" }),
+    );
+  }
+});
+
+test("admins cannot upload non-image/PDF or oversized clinical documents", async () => {
+  await assertFails(
+    adminStorage()
+      .ref("vet-docs/evil.html")
+      .put(new Uint8Array([60, 104, 116, 109, 108]), {
+        contentType: "text/html",
+      }),
+  );
+  await assertFails(
+    adminStorage()
+      .ref("vet-docs/huge.pdf")
+      .put(new Uint8Array(5 * 1024 * 1024 + 1), {
+        contentType: "application/pdf",
+      }),
+  );
+});
+
+test("clinical documents are not readable by any client principal", async () => {
+  for (const storage of [
+    publicStorage(),
+    userStorage(),
+    noClaimStorage(),
+    spoofedStorage(),
+    adminStorage(),
+  ]) {
+    await assertFails(storage.ref("vet-docs/existing-doc.pdf").getMetadata());
+    await assertFails(storage.ref("vet-docs/existing-doc.pdf").getDownloadURL());
+  }
+});
+
+test("nobody can overwrite or delete a clinical document object", async () => {
+  for (const storage of [
+    publicStorage(),
+    userStorage(),
+    noClaimStorage(),
+    spoofedStorage(),
+    adminStorage(),
+  ]) {
+    await assertFails(
+      storage
+        .ref("vet-docs/existing-doc.pdf")
+        .put(pngBytes(), { contentType: "image/png" }),
+    );
+    await assertFails(storage.ref("vet-docs/existing-doc.pdf").delete());
   }
 });
