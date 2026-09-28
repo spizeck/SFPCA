@@ -1,5 +1,5 @@
 // Shared Playwright helpers for the emulator-backed e2e suite.
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 // Mirrors CONSENT_STORAGE_NAME in src/lib/consent.ts — kept as a literal so
 // e2e helpers stay independent of app internals.
@@ -30,4 +30,27 @@ export async function dismissConsentNotice(page: Page): Promise<void> {
     .getByRole("button", { name: "I decline" })
     .dispatchEvent("click");
   await expect(notice).toBeHidden();
+}
+
+// A freshly mounted Radix dialog animates in (~200ms translate/scale).
+// Playwright's actionability check can pass during a janky frame pair
+// under load, then the dispatched pointer events land where the button
+// WAS — on inert dialog chrome — and the click is silently swallowed
+// (observed: the merge-confirmation dialog stayed open and armed after
+// a "successful" click). Synchronize on the platform truth — no finite
+// animation still running on the dialog subtree — before interacting.
+export async function waitForDialogSettled(dialog: Locator): Promise<void> {
+  await expect(dialog).toBeVisible();
+  await dialog.evaluate((el) =>
+    Promise.all(
+      el
+        .getAnimations({ subtree: true })
+        .filter(
+          (a) =>
+            a.playState !== "finished" &&
+            a.effect?.getComputedTiming().iterations !== Infinity,
+        )
+        .map((a) => a.finished.catch(() => {})),
+    ),
+  );
 }
