@@ -2,7 +2,7 @@
 // does not set NEXT_PUBLIC_SITE_URL, so canonical/OG URLs must resolve to
 // the production fallback origin — proving preview/local origins cannot
 // become canonical.
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 const ORIGIN = "https://www.sabafpca.com";
 

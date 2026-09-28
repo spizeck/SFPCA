@@ -4,10 +4,10 @@
 // 'adopted' or marking the animal deceased both remove it from the
 // public catalog, but only the lifecycle change is permanent registry
 // history. The admin record is always retained. Runs against the
-// Firebase emulators + PGlite (seeded by tests/e2e/global-setup) —
+// Firebase emulators + PGlite (seeded by tests/e2e/fixtures.ts) —
 // never production.
-import { expect, test } from "@playwright/test";
-import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./global-setup";
+import { expect, test } from "./fixtures";
+import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./env";
 import { dismissConsentNotice } from "./helpers";
 
 async function signInAsAdmin(page: import("@playwright/test").Page) {

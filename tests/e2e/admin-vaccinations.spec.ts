@@ -1,7 +1,7 @@
 // E2E for the per-animal vaccination record (#173), run against the
 // Firebase emulators + PGlite registry — no real credentials.
-import { expect, test, type Page } from "@playwright/test";
-import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./global-setup";
+import { expect, test, type Page } from "./fixtures";
+import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./env";
 import { dismissConsentNotice } from "./helpers";
 
 async function signInAsAdmin(page: Page) {

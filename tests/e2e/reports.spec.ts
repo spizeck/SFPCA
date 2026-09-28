@@ -16,13 +16,13 @@
 // registration (Reggie) and a 1-cat species cell regardless of what
 // other suites added before this file runs.
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
   E2E_USER_EMAIL,
   E2E_USER_PASSWORD,
-} from "./global-setup";
+} from "./env";
 import { dismissConsentNotice } from "./helpers";
 
 async function signInAsAdmin(page: Page) {

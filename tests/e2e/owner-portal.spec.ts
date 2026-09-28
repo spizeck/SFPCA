@@ -3,8 +3,8 @@
 // own animals, confirms annually, and files a staff-reviewed request.
 // The claim journey proves an email match alone never links an account —
 // staff approval is the only path from sign-in to another person's
-// records. Fixtures are seeded by tests/e2e/global-setup.
-import { expect, test, type Page } from "@playwright/test";
+// records. Fixtures are seeded by tests/e2e/fixtures.ts.
+import { expect, test, type Page } from "./fixtures";
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
@@ -12,7 +12,7 @@ import {
   E2E_CLAIM_PASSWORD,
   E2E_OWNER_EMAIL,
   E2E_OWNER_PASSWORD,
-} from "./global-setup";
+} from "./env";
 
 async function signIn(page: Page, email: string, password: string) {
   await page.goto("/login");

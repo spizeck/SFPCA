@@ -5,12 +5,12 @@
 // resolution can be recorded — then a second scan works without any
 // mouse interaction.
 //
-// Fixtures (tests/e2e/global-setup.ts):
+// Fixtures (tests/e2e/fixtures.ts):
 //   985113001234567 → Rexley (person-owned by "E2E Owner")
 //   999000111222    → Whiskers (household-owned) + an OPEN chip
 //                     conflict claimed on Claimdog
-import { expect, test, type Page } from "@playwright/test";
-import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./global-setup";
+import { expect, test, type Page } from "./fixtures";
+import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./env";
 
 async function signInAsAdmin(page: Page) {
   await page.goto("/login");
