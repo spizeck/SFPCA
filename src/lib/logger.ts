@@ -44,6 +44,7 @@ export type LogSubsystem =
   | "content"
   | "portal"
   | "owners"
+  | "sentry"
   | "ui";
 
 export interface SafeError {

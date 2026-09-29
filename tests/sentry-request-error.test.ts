@@ -11,18 +11,27 @@
 // no-ops, so the envelope send floats and can be abandoned when a
 // serverless function freezes after the error response. That delivery
 // gap is what kept SENTRY_VERIFICATION_EVENT:server out of Sentry.
-// The SDK is mocked; nothing here can contact sentry.io.
-import { afterEach, describe, expect, test, vi } from "vitest";
+// The flush timeout comes from @vercel/functions getDeadline() — the
+// real invocation budget — and a failed flush is logged so a dropped
+// event is observable. The SDK and platform hooks are mocked; nothing
+// here can contact sentry.io.
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { ErrorEvent } from "@sentry/nextjs";
 
-const { captureRequestError, flush, after } = vi.hoisted(() => ({
-  captureRequestError: vi.fn(),
-  flush: vi.fn().mockResolvedValue(false),
-  after: vi.fn(),
-}));
+const { captureRequestError, flush, getClient, getDeadline, after, logWarn } =
+  vi.hoisted(() => ({
+    captureRequestError: vi.fn(),
+    flush: vi.fn().mockResolvedValue(true),
+    getClient: vi.fn().mockReturnValue({}),
+    getDeadline: vi.fn(),
+    after: vi.fn(),
+    logWarn: vi.fn(),
+  }));
 
-vi.mock("@sentry/nextjs", () => ({ captureRequestError, flush }));
+vi.mock("@sentry/nextjs", () => ({ captureRequestError, flush, getClient }));
+vi.mock("@vercel/functions", () => ({ getDeadline }));
 vi.mock("next/server", () => ({ after }));
+vi.mock("@/lib/logger", () => ({ logWarn }));
 
 import { onRequestError } from "@/instrumentation";
 import { sentryBeforeSend } from "@/lib/sentry";
@@ -46,6 +55,18 @@ const actionContext = {
   renderSource: "react-server-components-payload" as const,
   revalidateReason: undefined,
 };
+
+const runAfterTask = async () => {
+  expect(after).toHaveBeenCalledTimes(1);
+  const task = after.mock.calls[0][0] as () => Promise<unknown>;
+  await task();
+};
+
+beforeEach(() => {
+  getClient.mockReturnValue({});
+  getDeadline.mockReturnValue(undefined);
+  flush.mockResolvedValue(true);
+});
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -82,22 +103,92 @@ describe("onRequestError", () => {
 
     // No flush inline — the task runs after the response, where
     // Next/Vercel keeps the function alive until it resolves.
-    expect(after).toHaveBeenCalledTimes(1);
-    const task = after.mock.calls[0][0] as () => Promise<unknown>;
     expect(flush).not.toHaveBeenCalled();
-    await task();
+    await runAfterTask();
     expect(flush).toHaveBeenCalledTimes(1);
   });
 
-  test("falls back to a floating flush when no request scope exists", () => {
+  test("sizes the flush timeout to the invocation deadline (capped)", async () => {
+    // 60s of invocation budget left → the 30s cap applies.
+    getDeadline.mockReturnValue(new Date(Date.now() + 60_000));
+
+    onRequestError(new Error("uncaught"), request, actionContext);
+    await runAfterTask();
+
+    expect(flush).toHaveBeenCalledWith(30_000);
+  });
+
+  test("leaves margin for the failure log when the deadline is near", async () => {
+    // 10s of budget left → timeout must leave the 2s margin.
+    getDeadline.mockReturnValue(new Date(Date.now() + 10_000));
+
+    onRequestError(new Error("uncaught"), request, actionContext);
+    await runAfterTask();
+
+    const timeout = flush.mock.calls[0][0] as number;
+    expect(timeout).toBeGreaterThan(0);
+    expect(timeout).toBeLessThanOrEqual(8_000);
+  });
+
+  test("does not wait at all when the invocation deadline has passed", async () => {
+    getDeadline.mockReturnValue(new Date(Date.now() - 500));
+
+    onRequestError(new Error("uncaught"), request, actionContext);
+    await runAfterTask();
+
+    expect(flush).toHaveBeenCalledWith(0);
+  });
+
+  test("uses a short fallback off Vercel (no invocation deadline)", async () => {
+    getDeadline.mockReturnValue(undefined);
+
+    onRequestError(new Error("uncaught"), request, actionContext);
+    await runAfterTask();
+
+    expect(flush).toHaveBeenCalledWith(5_000);
+  });
+
+  test("a failed flush is observable in runtime logs, not silent", async () => {
+    flush.mockResolvedValue(false);
+
+    onRequestError(new Error("uncaught"), request, actionContext);
+    await runAfterTask();
+
+    expect(logWarn).toHaveBeenCalledTimes(1);
+    expect(logWarn.mock.calls[0][0]).toBe("sentry");
+    expect(logWarn.mock.calls[0][1]).toBe("flush-uncaught-server-error");
+  });
+
+  test("a successful flush logs nothing", async () => {
+    onRequestError(new Error("uncaught"), request, actionContext);
+    await runAfterTask();
+
+    expect(logWarn).not.toHaveBeenCalled();
+  });
+
+  test("skips the flush entirely when the SDK was never initialized", async () => {
+    // Local dev, CI, and E2E never call Sentry.init (#235) — nothing is
+    // queued, so there must be no flush attempt and no spurious warn.
+    getClient.mockReturnValue(undefined);
+
+    onRequestError(new Error("uncaught"), request, actionContext);
+    await runAfterTask();
+
+    expect(flush).not.toHaveBeenCalled();
+    expect(logWarn).not.toHaveBeenCalled();
+  });
+
+  test("falls back to a floating flush when no request scope exists", async () => {
     after.mockImplementation(() => {
       throw new Error("`after` was called outside a request scope.");
     });
 
     onRequestError(new Error("uncaught"), request, actionContext);
+    // The fallback task is fire-and-forget — give it a tick to run.
+    await Promise.resolve();
 
-    expect(flush).toHaveBeenCalledTimes(1);
     expect(captureRequestError).toHaveBeenCalledTimes(1);
+    expect(flush).toHaveBeenCalledTimes(1);
   });
 });
 

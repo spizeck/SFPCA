@@ -567,7 +567,13 @@ to the request lifecycle with `after()`. This matters on Vercel's Node
 runtime: the SDK's own flush registration (`vercelWaitUntil`) only
 attaches on the Edge runtime, so an unbound send can be abandoned when
 the function freezes after the error response — the gap that dropped
-`SENTRY_VERIFICATION_EVENT:server`.
+`SENTRY_VERIFICATION_EVENT:server`. The flush timeout is derived from
+`@vercel/functions` `getDeadline()` — the invocation deadline Vercel
+computes from `maxDuration`, the same budget `after()`/`waitUntil`
+tasks share — minus a margin reserved for the failure log, capped at
+30s. If the flush still reports undelivered, a `subsystem:"sentry"`
+`logWarn` entry lands in Vercel runtime logs so a dropped event is
+observable instead of silent.
 
 **When to look where:**
 

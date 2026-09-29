@@ -31,8 +31,10 @@ import {
 //   being verified is identical.
 // - Server: calls the admin-gated server action → throw propagates →
 //   instrumentation.ts onRequestError → Sentry (the action POST
-//   intentionally returns HTTP 500; delivery is bound to the request
-//   lifecycle via after() so serverless freeze cannot drop it).
+//   intentionally returns HTTP 500; the SDK flush is bound to the
+//   request lifecycle via after() with a timeout derived from the
+//   Vercel invocation deadline, and a failed flush is logged so a
+//   dropped event is observable).
 // - Caught: calls the admin-gated server action → catches the throw →
 //   logError() → console + Sentry (the #218 path every operational
 //   catch block uses). The action still returns a normal result.

@@ -4,15 +4,15 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { Breadcrumb, ErrorEvent } from "@sentry/nextjs";
 
-const { captureException, init, captureRequestError, flush } = vi.hoisted(
-  () => ({
+const { captureException, init, captureRequestError, flush, getClient } =
+  vi.hoisted(() => ({
     captureException: vi.fn(),
     init: vi.fn(),
     captureRequestError: vi.fn(),
     captureRouterTransitionStart: vi.fn(),
     flush: vi.fn().mockResolvedValue(false),
-  }),
-);
+    getClient: vi.fn().mockReturnValue({}),
+  }));
 
 vi.mock("@sentry/nextjs", () => ({
   init,
@@ -20,6 +20,7 @@ vi.mock("@sentry/nextjs", () => ({
   captureRequestError,
   captureRouterTransitionStart: vi.fn(),
   flush,
+  getClient,
   breadcrumbsIntegration: (opts: unknown) => ({
     name: "Breadcrumbs",
     options: opts,
