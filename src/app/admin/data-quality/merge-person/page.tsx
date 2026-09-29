@@ -125,17 +125,26 @@ function PersonMergeReview() {
       setLoadError(true);
       return;
     }
+    // Reset choices on the param change itself, not in the async
+    // response — a duplicate/late resolution (dev StrictMode fires this
+    // twice) must not wipe a survivor the reviewer already picked.
+    setSurvivorId(null);
+    setPreview(null);
+    let cancelled = false;
     getPersonMergePairAction(aId, bId)
       .then((p) => {
+        if (cancelled) return;
         if (!p) setLoadError(true);
         setPair(p);
-        setSurvivorId(null);
-        setPreview(null);
       })
       .catch((e) => {
+        if (cancelled) return;
         logError("owners", "person-merge-pair-load", e);
         setLoadError(true);
       });
+    return () => {
+      cancelled = true;
+    };
   }, [aId, bId]);
 
   const retiredId = pair && survivorId ? (survivorId === aId ? bId : aId) : null;

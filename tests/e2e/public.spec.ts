@@ -1,6 +1,6 @@
 // Public visitor smoke journeys against the real application running on
-// emulator-backed Firestore content (seeded by tests/e2e/global-setup).
-import { expect, test } from "@playwright/test";
+// emulator-backed Firestore content (seeded by tests/e2e/fixtures.ts).
+import { expect, test } from "./fixtures";
 
 test.describe("public journeys", () => {
   test("homepage renders seeded identity content", async ({ page }) => {

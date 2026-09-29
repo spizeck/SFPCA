@@ -1,14 +1,31 @@
 // Minimal structured logging convention for application-controlled
 // operational events. Server-side calls are captured by Vercel runtime
-// logs; client-side calls stay in the visitor's browser console (there
-// is no centralized browser telemetry — see README's observability
-// section). Both emit one JSON object per event so fields are
-// queryable rather than buried in free text.
+// logs; client-side calls stay in the visitor's browser console. Both
+// emit one JSON object per event so fields are queryable rather than
+// buried in free text.
+//
+// Severity contract (#218):
+// - logError = a genuinely UNEXPECTED failure the code caught and
+//   handled. In addition to the console entry it is reported to Sentry
+//   through the normally-initialized SDK (no-op when the SDK is not
+//   initialized — local dev, CI, and E2E never initialize it, #235).
+// - logWarn/logInfo = expected outcomes (auth denials, validation
+//   rejections, not-found, user cancellation, known business rules)
+//   and routine operational notes — console only, never Sentry.
+// - Uncaught errors need no logging call: Next/Sentry instrumentation
+//   (`onRequestError`, the shared ErrorFallback capture) reports them.
+//   Prefer returning a safe result over catching-then-rethrowing —
+//   a rethrown error is captured a second time by the framework.
 //
 // Hard rule: never pass request bodies, Firestore documents, form
 // payloads, receipt paths, tokens, cookies, headers, or env values to
 // these functions. Errors are normalized to name/code/message — the
 // raw Error object is only echoed in development for stack traces.
+// Sentry context follows the same rule; every event additionally
+// passes the privacy boundary in src/lib/sentry.ts before leaving
+// the process.
+
+import * as Sentry from "@sentry/nextjs";
 
 export type LogSubsystem =
   | "auth"
@@ -27,6 +44,7 @@ export type LogSubsystem =
   | "content"
   | "portal"
   | "owners"
+  | "sentry"
   | "ui";
 
 export interface SafeError {
@@ -61,6 +79,48 @@ export function normalizeError(error: unknown): SafeError {
 
 type SafeContext = Record<string, string | number | boolean | undefined>;
 
+export interface LogErrorOptions {
+  // Set false only when the call site reports the same error to Sentry
+  // itself — the shared ErrorFallback's digest-tagged capture is the
+  // one such site. Everything else keeps the default so caught
+  // operational failures stay observable.
+  sentry?: boolean;
+}
+
+// The single caught-error → Sentry path (#218). Two deliberate skips:
+//
+// - `options.sentry === false`: the call site captured the error
+//   itself; forwarding would double-report.
+// - `error.digest` set: a server error Next.js serialized for the
+//   client carries a digest and a generic message. The real exception
+//   was already captured server-side (onRequestError or the action's
+//   own logError) — forwarding the placeholder would add a second,
+//   information-free event.
+//
+// When the SDK was never initialized (local dev, CI, E2E — #235 keeps
+// sending off and skips Sentry.init entirely) captureException is a
+// documented no-op. The whole call is fire-and-forget: a reporting
+// failure must never break the application's own error handling.
+function reportCaughtError(
+  subsystem: LogSubsystem,
+  operation: string,
+  error: unknown,
+  context: SafeContext | undefined,
+  errorCode: string | undefined,
+) {
+  try {
+    if (typeof (error as { digest?: unknown })?.digest === "string") {
+      return;
+    }
+    Sentry.captureException(error, {
+      tags: { subsystem, operation },
+      extra: { ...context, ...(errorCode ? { errorCode } : {}) },
+    });
+  } catch {
+    // Reporting is best-effort — never propagate.
+  }
+}
+
 function emit(
   level: "info" | "warn" | "error",
   subsystem: LogSubsystem,
@@ -84,6 +144,7 @@ export function logError(
   operation: string,
   error: unknown,
   context?: SafeContext,
+  options?: LogErrorOptions,
 ) {
   const safe = normalizeError(error);
   emit(
@@ -98,6 +159,9 @@ export function logError(
     },
     error,
   );
+  if (options?.sentry !== false) {
+    reportCaughtError(subsystem, operation, error, context, safe.code);
+  }
 }
 
 export function logWarn(

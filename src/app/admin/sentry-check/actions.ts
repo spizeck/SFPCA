@@ -1,6 +1,7 @@
 "use server";
 
 import { requireAdmin } from "@/lib/auth";
+import { logError } from "@/lib/logger";
 import { sentryVerificationError } from "@/lib/sentry-verification";
 
 // Server-side verification: throws a synthetic error that propagates
@@ -20,4 +21,24 @@ export async function fireSentryVerification(): Promise<{
     return { fired: false };
   }
   throw sentryVerificationError("server");
+}
+
+// Caught-path verification (#218): throws, catches, and logs the
+// synthetic error through logError — the same shape every cron,
+// webhook, and action catch block uses. The caller gets the normal
+// safe result ({ fired: true }) while the logging layer reports the
+// error to Sentry: one event, real stack, tagged subsystem/operation.
+export async function fireSentryCaughtVerification(): Promise<{
+  fired: boolean;
+}> {
+  const { authorized } = await requireAdmin();
+  if (!authorized) {
+    return { fired: false };
+  }
+  try {
+    throw sentryVerificationError("caught");
+  } catch (error) {
+    logError("admin", "sentry-check-caught", error);
+    return { fired: true };
+  }
 }

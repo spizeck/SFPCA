@@ -3,9 +3,9 @@
 // merge, confirms it explicitly, and lands on the canonical survivor —
 // the retired reference still resolves. Runs against the Firebase
 // emulator suite; the registry is PGlite (real Postgres).
-import { expect, test, type Page } from "@playwright/test";
-import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./global-setup";
-import { dismissConsentNotice } from "./helpers";
+import { expect, test, type Page } from "./fixtures";
+import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./env";
+import { dismissConsentNotice, waitForDialogSettled } from "./helpers";
 
 async function signInAsAdmin(page: Page) {
   await page.goto("/login");
@@ -101,12 +101,18 @@ test.describe("data quality and safe merge", () => {
     ).trim();
     expect(retiredRef).toMatch(/^SFPCA-/);
 
-    // Explicit confirmation — merging is never one click.
+    // Explicit confirmation — merging is never one click. The dialog is
+    // still animating in when it first becomes visible; settle it before
+    // clicking so the pointer events can't land on inert chrome.
     await retireButton.click();
-    await page
-      .getByRole("dialog")
-      .getByRole("button", { name: "Merge" })
-      .click();
+    const confirmDialog = page.getByRole("dialog");
+    const confirmMerge = confirmDialog.getByRole("button", {
+      name: "Merge",
+    });
+    await expect(confirmMerge).toBeEnabled();
+    await waitForDialogSettled(confirmDialog);
+    await confirmMerge.click();
+    await expect(confirmDialog).toBeHidden();
 
     // Lands on the canonical survivor, which shows the absorbed record.
     await expect(page).toHaveURL(/\/admin\/animals\/[0-9a-f-]+$/);

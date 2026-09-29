@@ -1,7 +1,25 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs/config";
+import { resolveSentryRuntime } from "./src/lib/sentry";
+
+// Single Sentry environment decision for every runtime (#235).
+// resolveSentryRuntime() treats only real Vercel infrastructure
+// (VERCEL_DEPLOYMENT_ID / VERCEL_REGION) as deployable context — a
+// `vercel env pull`-generated .env.local supplies VERCEL_ENV and
+// NEXT_PUBLIC_SENTRY_ENVIRONMENT="production" but never those markers,
+// so local dev, CI, and E2E can never classify themselves as
+// production. The result is injected into the client bundle under
+// dedicated names so the browser consumes the resolved decision rather
+// than re-reading raw env vars.
+const sentryRuntime = resolveSentryRuntime(process.env);
 
 const nextConfig: NextConfig = {
+  env: {
+    NEXT_PUBLIC_SENTRY_RESOLVED_ENVIRONMENT: sentryRuntime.environment,
+    NEXT_PUBLIC_SENTRY_SEND_EVENTS: sentryRuntime.sendEvents
+      ? "true"
+      : "false",
+  },
   images: {
     remotePatterns: [
       {

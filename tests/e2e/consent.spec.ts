@@ -1,6 +1,6 @@
 // Consent boundary: Klaro gates Google Tag Manager. All Google traffic is
 // intercepted and fulfilled locally — nothing reaches real Google services.
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 
 const GOOGLE_REQUESTS = /googletagmanager\.com/;
 const CONSENT_KEY = "sfpca-consent";

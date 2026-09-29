@@ -106,9 +106,13 @@ function evaluateBundle(code: string): Record<string, unknown>[] {
 }
 
 describe("client bundle env substitution (#146)", () => {
-  test("Sentry.init receives the build-time DSN when NEXT_PUBLIC_SENTRY_DSN is set", async () => {
+  test("Sentry.init receives the build-time DSN when the resolved decision enables sending", async () => {
+    // Mirrors what next.config.ts injects on a Vercel production build:
+    // the DSN plus the resolved send/environment pair (#235).
     const code = await bundleClientInit({
       NEXT_PUBLIC_SENTRY_DSN: FAKE_DSN,
+      NEXT_PUBLIC_SENTRY_SEND_EVENTS: "true",
+      NEXT_PUBLIC_SENTRY_RESOLVED_ENVIRONMENT: "production",
       NODE_ENV: "production",
     });
     // The DSN must be inlined into the emitted client code — a runtime
@@ -117,8 +121,6 @@ describe("client bundle env substitution (#146)", () => {
     const initCalls = evaluateBundle(code);
     expect(initCalls).toHaveLength(1);
     expect(initCalls[0].dsn).toBe(FAKE_DSN);
-    // NODE_ENV is inlined too, so the environment resolves correctly
-    // even without the optional NEXT_PUBLIC_SENTRY_ENVIRONMENT override.
     expect(initCalls[0].environment).toBe("production");
     // Privacy boundary survives bundling.
     expect(initCalls[0].sendDefaultPii).toBe(false);
@@ -126,10 +128,11 @@ describe("client bundle env substitution (#146)", () => {
     expect(initCalls[0].enableLogs).toBe(false);
   });
 
-  test("a NEXT_PUBLIC_SENTRY_ENVIRONMENT override reaches the bundle", async () => {
+  test("the resolved environment label reaches the bundle", async () => {
     const code = await bundleClientInit({
       NEXT_PUBLIC_SENTRY_DSN: FAKE_DSN,
-      NEXT_PUBLIC_SENTRY_ENVIRONMENT: "preview",
+      NEXT_PUBLIC_SENTRY_SEND_EVENTS: "true",
+      NEXT_PUBLIC_SENTRY_RESOLVED_ENVIRONMENT: "preview",
       NODE_ENV: "production",
     });
     const initCalls = evaluateBundle(code);
@@ -137,8 +140,34 @@ describe("client bundle env substitution (#146)", () => {
     expect(initCalls[0].environment).toBe("preview");
   });
 
+  test("Sentry.init is skipped when the build resolved sending off — even with a DSN inlined", async () => {
+    // The local/E2E case (#235): a pulled .env.local supplies the real
+    // DSN, but next.config injected send=false + a non-production label.
+    const code = await bundleClientInit({
+      NEXT_PUBLIC_SENTRY_DSN: FAKE_DSN,
+      NEXT_PUBLIC_SENTRY_SEND_EVENTS: "false",
+      NEXT_PUBLIC_SENTRY_RESOLVED_ENVIRONMENT: "test",
+      NODE_ENV: "development",
+    });
+    expect(evaluateBundle(code)).toHaveLength(0);
+  });
+
+  test("Sentry.init is skipped when the resolved variables were never injected", async () => {
+    // Defensive: a bundle built without the resolved pair (e.g. a stale
+    // config) must not send just because a DSN exists.
+    const code = await bundleClientInit({
+      NEXT_PUBLIC_SENTRY_DSN: FAKE_DSN,
+      NODE_ENV: "production",
+    });
+    expect(evaluateBundle(code)).toHaveLength(0);
+  });
+
   test("Sentry.init is skipped when the build supplies no DSN", async () => {
-    const code = await bundleClientInit({ NODE_ENV: "production" });
+    const code = await bundleClientInit({
+      NEXT_PUBLIC_SENTRY_SEND_EVENTS: "true",
+      NEXT_PUBLIC_SENTRY_RESOLVED_ENVIRONMENT: "production",
+      NODE_ENV: "production",
+    });
     expect(evaluateBundle(code)).toHaveLength(0);
   });
 });

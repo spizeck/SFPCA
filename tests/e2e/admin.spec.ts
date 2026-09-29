@@ -1,13 +1,14 @@
 // Admin journeys: protection of /admin and a real authenticated login
 // through the application's UI against the Firebase Auth emulator
-// (user + admins doc seeded by tests/e2e/global-setup).
-import { expect, test } from "@playwright/test";
+// (user + admins doc seeded by tests/e2e/fixtures.ts).
+import { expect, test } from "./fixtures";
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
+  E2E_APP_ORIGIN,
   E2E_USER_EMAIL,
   E2E_USER_PASSWORD,
-} from "./global-setup";
+} from "./env";
 
 test.describe("admin journeys", () => {
   test("unauthenticated /admin redirects to login", async ({ page }) => {
@@ -63,8 +64,8 @@ test.describe("admin journeys", () => {
   test("unauthenticated nested admin routes redirect to login", async ({
     page,
   }) => {
-    // /admin/registrations is absent from AdminNav; authorization must
-    // not depend on discoverability.
+    // Authorization must not depend on navigation discoverability —
+    // direct URL access to unlisted/nested routes fails closed too.
     for (const path of ["/admin/registrations", "/admin/settings"]) {
       await page.goto(path);
       await expect(page).toHaveURL(/\/login/);
@@ -81,7 +82,7 @@ test.describe("admin journeys", () => {
       {
         name: "session",
         value: "forged-not-a-real-session-cookie",
-        url: "http://localhost:3100",
+        url: E2E_APP_ORIGIN,
         httpOnly: true,
       },
     ]);

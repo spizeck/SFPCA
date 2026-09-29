@@ -6,7 +6,7 @@
 // permanently invisible. These tests fail on hydration warnings rather than
 // allowlisting them, and assert that animated content actually reaches
 // opacity 1 (Playwright's toBeVisible passes for opacity:0 elements).
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 
 const PUBLIC_ROUTES = [
   "/",

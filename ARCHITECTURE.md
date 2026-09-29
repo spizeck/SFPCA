@@ -51,11 +51,12 @@ registry data in Firestore is now a mistake, not a shortcut.
 Storage prefixes: `receipts/<submission uuid>` (private PII — public
 constrained create only; no client read/update/delete for anyone; staff
 view via server-minted signed URLs; orphan cleanup via Admin SDK sweep),
-`team-photos/` (public read, admin-claim image upload <5 MB). `images/`
-and `animals/` are deny-all. `vet-docs/` is reserved for clinical
-documents (#174 establishes `vet_documents` rows referencing it) —
-private, staff-only; the uploader and its Storage rules land with the
-document-upload feature, until then the prefix stays deny-all.
+`team-photos/` (public read, admin-claim image upload <5 MB),
+`vet-docs/<uuid>[.<ext>]` (clinical documents — admin-claim constrained
+create only, no client read/update/delete for anyone; staff view via
+the `/admin/documents/[id]` proxy route which resolves the
+`vet_documents` row and audits the access; orphan cleanup via the same
+Admin SDK sweep cron). `images/` and `animals/` are deny-all.
 
 Firebase Auth: email/password, session cookie (`/api/auth/session`).
 Authorization = Postgres `admin_users` lookup in `isAdmin()`; the session
@@ -125,6 +126,28 @@ client-SDK writes (CMS edits, team-photo uploads) now that the
 logins. Owner accounts (#166) are `auth_identities` + `persons` rows —
 the same chain, no second auth authority; see §5 "Owner registry".
 
+**Maintenance-gate trust boundary (#189).** `src/proxy.ts` (the Next.js
+proxy — always the Node.js runtime in Next 16, so the full server auth
+stack is available there) is the single routing gate. Public paths under
+`SITE_MAINTENANCE_MODE` redirect to `/under-construction` — *unless* the
+request carries a session cookie that verifies as an **authorized
+admin** through `isVerifiedAdminSession()`: Firebase
+`verifySessionCookie(cookie, true)` (signature, expiry, revocation) then
+a live Postgres `admin_users` row. The bypass deliberately does **not**
+consult `ADMIN_EMAILS` — `admin_users` is the single revocation point,
+so deleting the row re-engages the gate on the next request even for
+env-bootstrapped accounts (`requireAdmin` keeps the env bootstrap for
+`/admin` itself; the login session route re-provisions the row for
+env-listed users, so this divergence only matters for a row deleted
+post-login). Cookie *presence* earns only the check, never the bypass;
+forged, expired, revoked, and valid-but-non-admin cookies all fail
+closed to the maintenance redirect. `/admin` and `/portal` keep their
+independent page-level `requireAdmin`/`requireOwner` regardless of the
+flag. Exempt routes (`/login`, `/api/auth/*`, `/api/cron/*`,
+`/api/webhooks/*`, `/_next/*`, static assets, `/under-construction`)
+keep running so staff can authenticate and infrastructure keeps working
+during a window.
+
 ## 4. Stack selection
 
 **Neon Postgres** (serverless Postgres, Vercel-native integration,
@@ -170,7 +193,7 @@ plain SQL.
 | `vet_medications` | Medication/course history — treatment record, not prescribing | `end_on ≥ start_on` or null (ongoing); "active" derived, never stored |
 | `medical_alerts` | Allergies/contraindications/conditions that must never hide in notes | `resolved_on` set exactly when `status='resolved'` |
 | `weight_records` | Longitudinal weight | integer `weight_grams` — no ambiguous unit strings |
-| `vet_documents` | Clinical document references (lab reports, certificates) | `storage_path ~ '^vet-docs/'` CHECK; uploader + Storage rules deferred — relational shape only |
+| `vet_documents` | Clinical document references (lab reports, certificates) — the Storage object lands first (admin-claim create), then a server action verifies it and writes the row (#192) | `storage_path ~ '^vet-docs/'` CHECK; `unique(storage_path)` — one row per object, retried registration collapses; optional `encounter_id`/`vaccination_id` links must belong to the row's animal |
 | `vaccinations` | Structured vaccination history (#173) | restrictive FK to `animals`; `due_on`/`valid_until` ≥ `administered_on`; `series_key` generated from `vaccine_name` — only the latest dose per (animal, series) drives the due/reminder projection; due-state derived, never stored; optional `encounter_id` links a dose to the visit it was given at |
 | `follow_ups` | Veterinary follow-up/recheck queue (#175) | status CHECK `open\|completed\|cancelled`; `resolved_at` set exactly when status leaves `open`; time-relative state (upcoming/due/overdue) derived by `followUpState()` — never stored; `reason` is the queue headline; `encounter_id` links a recheck to the visit that recommended it; `person_id` snapshots the owner at creation (history), the queue resolves the CURRENT owner separately; registration-linked rows are #177 operational work, not clinical |
 | `clinic_expectations` | Expected clinic animals (#194) | status CHECK `expected\|seen\|no_show\|cancelled`; `resolved_at` consistency CHECK mirrors follow_ups; urgency derived by `clinicExpectationState()` — never stored; restrictive animal FK — expectations are history; `encounter_id` (set null) records the real visit that fulfilled a `seen` expectation — never manufactured; `person_id` snapshots the owner at creation; `session_label` is a free-text hint, not a slot |
@@ -775,7 +798,7 @@ remains a precondition before any production `migrate:firestore
   are a deliberate operator step (RUNBOOK.md §19b).
 - The dev server needs `DATABASE_URL` to exercise registry surfaces
   locally (a Neon dev branch or a local Postgres/PGlite wire server —
-  E2E uses `tests/e2e/global-setup.ts`); unit tests need nothing.
+  E2E uses `tests/e2e/db-server.ts`); unit tests need nothing.
 
 ## 12. CI
 
@@ -816,10 +839,20 @@ RUNBOOK.md §19.
 
 ## 14. Observability
 
-Registry code uses the existing `src/lib/logger.ts` structured logging
-(`logError(subsystem, operation, err)`) — Sentry picks up the same
-events; no second stack. DB errors are logged by operation name; SQL
-parameters and row data are never logged.
+Registry code uses the `src/lib/logger.ts` structured logging
+convention. `logError(subsystem, operation, err)` means a genuinely
+unexpected failure that code caught and handled: it emits the
+structured console entry AND reports the exception to Sentry through
+the initialized SDK (`captureException`, tags `subsystem`/`operation`,
+context as `extra` — #218). Expected outcomes (auth denials,
+validation, not-found, business-rule rejections) belong on
+`logWarn`/`logInfo` — console only, never Sentry. An error that
+already reached Sentry is not re-forwarded: call sites that capture
+themselves (the shared `ErrorFallback`) pass `{ sentry: false }`, and
+Next.js digested errors serialized to the client are skipped because
+`onRequestError` already captured the real exception server-side.
+DB errors are logged by operation name; SQL parameters and row data
+are never logged.
 
 ## 15. Roadmap notes (#166–#179)
 

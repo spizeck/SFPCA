@@ -65,9 +65,23 @@ describe("saveHomepageData", () => {
     });
     mockDocSet.mockResolvedValue(undefined);
     await expect(saveHomepageData(homepage)).resolves.toEqual({
-      success: true,
+      ok: true,
     });
     expect(mockDocSet).toHaveBeenCalledWith(homepage);
+  });
+
+  test("a Firestore failure returns ok:false instead of rethrowing", async () => {
+    // logError already reported the real error — a rethrow would be
+    // captured a second time by onRequestError.
+    mockRequireAdmin.mockResolvedValue({
+      authorized: true,
+      user: { email: "staff@example.com" },
+      role: "admin",
+    });
+    mockDocSet.mockRejectedValue(new Error("deadline exceeded"));
+    await expect(saveHomepageData(homepage)).resolves.toEqual({
+      ok: false,
+    });
   });
 });
 
@@ -93,7 +107,31 @@ describe("loadHomepageData", () => {
       data: () => ({ hero: { title: "Hello" } }),
     });
     await expect(loadHomepageData()).resolves.toEqual({
-      hero: { title: "Hello" },
+      ok: true,
+      data: { hero: { title: "Hello" } },
     });
+  });
+
+  test("a missing document resolves ok:true with null data", async () => {
+    mockRequireAdmin.mockResolvedValue({
+      authorized: true,
+      user: { email: "staff@example.com" },
+      role: "admin",
+    });
+    mockDocGet.mockResolvedValue({ exists: false });
+    await expect(loadHomepageData()).resolves.toEqual({
+      ok: true,
+      data: null,
+    });
+  });
+
+  test("a Firestore failure returns ok:false instead of rethrowing", async () => {
+    mockRequireAdmin.mockResolvedValue({
+      authorized: true,
+      user: { email: "staff@example.com" },
+      role: "admin",
+    });
+    mockDocGet.mockRejectedValue(new Error("deadline exceeded"));
+    await expect(loadHomepageData()).resolves.toEqual({ ok: false });
   });
 });

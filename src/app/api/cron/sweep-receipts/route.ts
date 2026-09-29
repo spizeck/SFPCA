@@ -1,7 +1,8 @@
-// Scheduled orphan-receipt sweep (#183). Replaces the Firebase
-// Functions sweeper: receipt orphan status is now decided by Postgres
-// registration_submissions, which Functions could not reach without a
-// second copy of the DB credentials.
+// Scheduled orphan-object sweep (#183 receipts, #192 clinical
+// documents). Replaces the Firebase Functions sweeper: orphan status is
+// now decided by Postgres rows (registration_submissions,
+// vet_documents), which Functions could not reach without a second copy
+// of the DB credentials. One cron pass covers both private prefixes.
 //
 // Scheduled via vercel.json crons. Vercel sends Authorization:
 // Bearer $CRON_SECRET on cron invocations; the check fails closed when
@@ -11,6 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { adminReceiptBucket } from "@/lib/firebase-admin-storage";
 import { getRegistryDb } from "@/lib/db/client";
 import { sweepOrphanedReceipts } from "@/lib/registry/receipt-sweep";
+import { sweepOrphanedVetDocuments } from "@/lib/registry/vet-document-sweep";
 import { logError } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
@@ -23,12 +25,17 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const counts = await sweepOrphanedReceipts({
-      bucket: adminReceiptBucket(),
-      db: getRegistryDb(),
-    });
-    const ok = counts.failed === 0;
-    return NextResponse.json({ ok, counts }, { status: ok ? 200 : 500 });
+    const db = getRegistryDb();
+    const bucket = adminReceiptBucket();
+    const [receipts, vetDocs] = await Promise.all([
+      sweepOrphanedReceipts({ bucket, db }),
+      sweepOrphanedVetDocuments({ bucket, db }),
+    ]);
+    const ok = receipts.failed === 0 && vetDocs.failed === 0;
+    return NextResponse.json(
+      { ok, counts: { receipts, vetDocs } },
+      { status: ok ? 200 : 500 },
+    );
   } catch (error) {
     logError("receipt", "sweep-receipts", error);
     return NextResponse.json({ ok: false }, { status: 500 });

@@ -39,6 +39,8 @@ import {
   followUps,
   medicalAlerts,
   ownerships,
+  vaccinations,
+  vetDocuments,
   vetEncounters,
   vetMedications,
   vetProcedures,
@@ -53,6 +55,7 @@ import {
   MAX_WEIGHT_GRAMS,
   PROCEDURE_KINDS,
   RECHECK_FOLLOW_UP_KIND,
+  VET_DOC_PATH_RE,
   compareTimelineItems,
   isPastOrTodayIsoDate,
 } from "../medical";
@@ -1222,6 +1225,179 @@ export async function updateWeightRecord(
         )[0],
     }),
   );
+}
+
+// --- Clinical documents (#192) ------------------------------------------------
+// vet_documents rows reference private vet-docs/ Storage objects. The
+// object is uploaded by the staff member's own browser session (the
+// admin-claim create rule in storage.rules) BEFORE this function runs —
+// the server action verifies the object landed and matches the file
+// contract, then the row makes it part of the clinical record. Reads go
+// through the proxied /admin/documents/[id] route, so no Storage object
+// is ever client-readable.
+
+export interface AdminVetDocument {
+  id: string;
+  animalId: string;
+  encounterId: string | null;
+  vaccinationId: string | null;
+  storagePath: string;
+  label: string;
+  notes: string | null;
+  uploadedBy: string | null;
+  createdAt: string;
+}
+
+export interface VetDocumentWriteInput {
+  animalId: string;
+  // Full vet-docs/<uuid>[.<ext>] object name of an upload that has
+  // already landed — the action verifies it exists before calling this.
+  storagePath: string;
+  label: string;
+  notes?: string | null;
+  encounterId?: string | null;
+  vaccinationId?: string | null;
+}
+
+function vetDocumentDto(
+  row: typeof vetDocuments.$inferSelect,
+): AdminVetDocument {
+  return { ...row, createdAt: row.createdAt.toISOString() };
+}
+
+export function validateVetDocumentInput(
+  input: VetDocumentWriteInput,
+): string | null {
+  if (!UUID_RE.test(input.animalId)) return "animalId";
+  if (!VET_DOC_PATH_RE.test(input.storagePath ?? "")) return "storagePath";
+  if (
+    typeof input.label !== "string" ||
+    !input.label.trim() ||
+    input.label.length > MAX_SHORT
+  ) {
+    return "label";
+  }
+  if (!textOk(input.notes)) return "notes";
+  if (input.encounterId != null && !UUID_RE.test(input.encounterId)) {
+    return "encounterId";
+  }
+  if (input.vaccinationId != null && !UUID_RE.test(input.vaccinationId)) {
+    return "vaccinationId";
+  }
+  return null;
+}
+
+// A vaccination link is only valid if the dose exists AND belongs to
+// the same animal — same rule as encounterBelongsTo.
+async function vaccinationBelongsTo(
+  tx: Queryable,
+  vaccinationId: string,
+  animalId: string,
+): Promise<boolean> {
+  const [dose] = await tx
+    .select({ animalId: vaccinations.animalId })
+    .from(vaccinations)
+    .where(eq(vaccinations.id, vaccinationId));
+  return !!dose && dose.animalId === animalId;
+}
+
+export async function registerVetDocument(
+  input: VetDocumentWriteInput,
+  actorLabel: string,
+  db: RegistryDb = getRegistryDb(),
+): Promise<MedicalMutationResult<AdminVetDocument>> {
+  const invalidField = validateVetDocumentInput(input);
+  if (invalidField) {
+    return { ok: false, reason: "invalid", field: invalidField };
+  }
+
+  return db.transaction(async (tx) => {
+    if (!(await animalExists(tx, input.animalId))) {
+      return { ok: false as const, reason: "not-found" as const };
+    }
+    const encounterId = clean(input.encounterId);
+    if (
+      encounterId !== null &&
+      !(await encounterBelongsTo(tx, encounterId, input.animalId))
+    ) {
+      return {
+        ok: false as const,
+        reason: "invalid" as const,
+        field: "encounterId",
+      };
+    }
+    const vaccinationId = clean(input.vaccinationId);
+    if (
+      vaccinationId !== null &&
+      !(await vaccinationBelongsTo(tx, vaccinationId, input.animalId))
+    ) {
+      return {
+        ok: false as const,
+        reason: "invalid" as const,
+        field: "vaccinationId",
+      };
+    }
+
+    // Idempotent on the object: one row per storage_path (unique index).
+    // A retried submit after a lost response returns the existing record
+    // instead of duplicating the document.
+    const [existing] = await tx
+      .select()
+      .from(vetDocuments)
+      .where(eq(vetDocuments.storagePath, input.storagePath));
+    if (existing) {
+      return { ok: true as const, record: vetDocumentDto(existing) };
+    }
+
+    const [row] = await tx
+      .insert(vetDocuments)
+      .values({
+        animalId: input.animalId,
+        encounterId,
+        vaccinationId,
+        storagePath: input.storagePath,
+        label: input.label.trim(),
+        notes: clean(input.notes),
+        uploadedBy: actorLabel,
+      })
+      .returning();
+    await tx.insert(auditEvents).values({
+      actorLabel,
+      entityType: "vet_document",
+      entityId: row.id,
+      action: "create",
+      after: vetDocumentDto(row),
+    });
+    return { ok: true as const, record: vetDocumentDto(row) };
+  });
+}
+
+// The storage path behind a document row. The download route resolves
+// the row — never a caller-supplied path — so the route cannot be used
+// to read objects outside vet_documents.
+export async function getVetDocumentStoragePath(
+  documentId: string,
+  db: RegistryDb = getRegistryDb(),
+): Promise<string | null> {
+  if (!UUID_RE.test(documentId)) return null;
+  const [row] = await db
+    .select({ storagePath: vetDocuments.storagePath })
+    .from(vetDocuments)
+    .where(eq(vetDocuments.id, documentId));
+  return row?.storagePath ?? null;
+}
+
+// The orphan sweeper's existence check — does any row reference this
+// exact object?
+export async function vetDocumentPathExists(
+  storagePath: string,
+  db: RegistryDb = getRegistryDb(),
+): Promise<boolean> {
+  const [row] = await db
+    .select({ id: vetDocuments.id })
+    .from(vetDocuments)
+    .where(eq(vetDocuments.storagePath, storagePath));
+  return !!row;
 }
 
 // --- Timeline + follow-ups ---------------------------------------------------------

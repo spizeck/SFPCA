@@ -241,3 +241,37 @@ export function isPastOrTodayIsoDate(
 ): boolean {
   return isIsoDateString(value) && value <= today;
 }
+
+// --- Clinical documents (#192) -------------------------------------------------
+//
+// vet_documents rows reference private Storage objects under
+// vet-docs/<uuid>[.<ext>]. The path shape is enforced three ways that
+// must stay in agreement: this regex, the vet_documents_path_check
+// CHECK constraint, and the upload dialog's path builder. The uuid is
+// generated per upload so a path can never collide with or overwrite
+// another document (the create-only Storage rule also refuses
+// overwrites as a second layer).
+export const VET_DOC_PATH_RE = /^vet-docs\/[0-9a-f-]{36}(\.[a-z0-9]+)?$/i;
+
+// Mirrors isVetDocUpload() in storage.rules — keep the two in sync.
+export const VET_DOC_MAX_BYTES = 5 * 1024 * 1024;
+export const VET_DOC_CONTENT_TYPES = ["image/", "application/pdf"] as const;
+
+// Client-side mirror of the storage-rule check so a bad file is caught
+// before any upload is attempted; the rules remain the boundary.
+export function isVetDocumentFile(file: { type: string; size: number }): boolean {
+  if (file.size > VET_DOC_MAX_BYTES || file.size <= 0) return false;
+  return VET_DOC_CONTENT_TYPES.some(
+    (type) => file.type === type || file.type.startsWith(type),
+  );
+}
+
+// Builds the storage path for a new clinical document. The file
+// extension is carried into the object name (lowercase, alnum only) so
+// the downloaded object keeps a recognizable type; a file with no
+// usable extension gets none.
+export function vetDocStoragePath(fileName: string): string {
+  const match = /\.([a-zA-Z0-9]{1,8})$/.exec(fileName);
+  const ext = match ? `.${match[1].toLowerCase()}` : "";
+  return `vet-docs/${crypto.randomUUID()}${ext}`;
+}

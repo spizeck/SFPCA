@@ -47,7 +47,7 @@ everything.
 | Next.js app | repo root (`src/`) | Vercel | automatic on merge to `main` [console: confirm production branch] | Vercel → Deployments | Vercel → Logs (Runtime) |
 | `onFirestoreChange` | `functions/index.js` | Cloud Functions v2 | manual `firebase deploy` | `firebase deploy` output / Firebase console → Functions | Cloud Logging, `subsystem:"rebuild"` |
 | `triggerRebuild` | `functions/index.js` | Cloud Functions v2 | manual `firebase deploy` | same | Cloud Logging |
-| Receipt sweep | `src/app/api/cron/sweep-receipts/route.ts`, `src/lib/registry/receipt-sweep.ts` | Vercel cron (`vercel.json`, daily 06:00 UTC) | automatic with Vercel deploy | Vercel → Deployments → Cron / Functions logs | Vercel → Logs, `subsystem:"receipt-cleanup"`; partial failures return 500 |
+| Storage sweep | `src/app/api/cron/sweep-receipts/route.ts`, `src/lib/registry/receipt-sweep.ts`, `src/lib/registry/vet-document-sweep.ts` | Vercel cron (`vercel.json`, daily 06:00 UTC) | automatic with Vercel deploy | Vercel → Deployments → Cron / Functions logs | Vercel → Logs, `subsystem:"receipt-cleanup"` + `subsystem:"vet-doc-cleanup"`; partial failures return 500 |
 | Reminder send | `src/app/api/cron/reminders/route.ts`, `src/lib/registry/reminders.ts`, `src/lib/registry/communications.ts` | Vercel cron (`vercel.json`, daily 12:00 UTC = 08:00 AST) | automatic with Vercel deploy | Vercel → Deployments → Cron; `/admin/communications` | Vercel → Logs, `subsystem:"communications"`; 503 when provider unconfigured |
 | Resend webhook | `src/app/api/webhooks/resend/route.ts` | Resend dashboard (endpoint + signing secret) | manual provider config | Resend dashboard → Webhooks | signature failures → 400; no secret → 503 |
 | Firestore rules | `firestore.rules` | Firestore | manual `firebase deploy --only firestore:rules` | Firebase console → Firestore → Rules | denied requests surface as `permission-denied` in app logs |
@@ -93,8 +93,8 @@ files is not used by production code.
 | `NEXT_PUBLIC_GTM_ID` | Google Tag Manager container; injected only after analytics consent (§16); absent ⇒ no Google traffic | no |
 | `NEXT_PUBLIC_SITE_URL` | Canonical origin for sitemap/OG/canonical | no |
 | `SITE_MAINTENANCE_MODE` | `"true"` gates all public routes (§9) | no, but server-only — never `NEXT_PUBLIC_*` |
-| `NEXT_PUBLIC_SENTRY_DSN` | Sentry runtime DSN — enables error capture; SDK never initializes without it | no — public config by design, not an auth secret |
-| `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | Optional Sentry environment override (defaults `VERCEL_ENV` → `NODE_ENV`) | no |
+| `NEXT_PUBLIC_SENTRY_DSN` | Sentry runtime DSN — required for capture; on Vercel it enables sending, off Vercel it does nothing without `SENTRY_ENABLE_LOCAL` (§15) | no — public config by design, not an auth secret |
+| `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | Optional Sentry environment override — on Vercel only used if `VERCEL_ENV` is missing/unexpected; off Vercel it may relabel but `production` is unreachable (§15) | no |
 | `SENTRY_ORG` | Sentry org slug for source-map upload at build time | no, but not public config |
 | `SENTRY_PROJECT` | Sentry project slug for source-map upload | no, but not public config |
 | `SENTRY_AUTH_TOKEN` | Auth token for source-map upload during build | **yes** — build-time only |
@@ -121,6 +121,12 @@ variables. `npm run seed` additionally needs `FIREBASE_ADMIN_*`.
   `webServer` config; connects the client SDK to emulators.
 - `FIRESTORE_EMULATOR_HOST` / `FIREBASE_AUTH_EMULATOR_HOST` — set by
   `firebase emulators:exec`; make the Admin SDK skip `cert()`.
+
+**Local-only debugging:**
+
+- `SENTRY_ENABLE_LOCAL` — set to `"true"` in `.env.local` to let a
+  local/test run actually send Sentry events (§15). Events still carry
+  `environment=development` or `test` — never `production`.
 
 **CI only** — `.github/workflows/ci.yml` injects `ci-placeholder`
 `NEXT_PUBLIC_FIREBASE_*` values for the build; no real credentials are
@@ -283,9 +289,23 @@ without checking what the index serves.
 
 `SITE_MAINTENANCE_MODE` (Vercel env, Production only — never
 `NEXT_PUBLIC_*`) redirects every public route to `/under-construction`
-while it is `"true"`. Verified behavior (`src/lib/maintenance.ts`,
-`src/proxy.ts`):
+while it is `"true"` — for everyone except a **server-verified admin**
+(#189). Verified behavior (`src/lib/maintenance.ts`, `src/proxy.ts`,
+`isVerifiedAdminSession` in `src/lib/auth.ts`):
 
+- **Admin bypass:** the proxy verifies the `session` cookie through the
+  real chain — Firebase session-cookie verification (signature, expiry,
+  revocation) plus a live Postgres `admin_users` row — on every gated
+  request. A verified admin browses the public site and `/admin`
+  normally; a forged, expired, revoked, or valid-but-non-admin cookie
+  fails closed to `/under-construction` (cookie presence alone proves
+  nothing — the check runs on the Node.js runtime, same session-verifier
+  the pages use). Removing a staff row from `admin_users` or revoking
+  the Firebase session re-engages the gate on the very next request.
+  `ADMIN_EMAILS` does **not** earn the public-site bypass — `admin_users`
+  is the single revocation point (env-listed accounts normally get a row
+  provisioned at login anyway; the env list remains the emergency
+  bootstrap for `/admin` itself).
 - **Stays reachable:** `/login`, `/admin/*` (still behind the session
   gate — maintenance mode never weakens admin auth), `/api/auth/*`,
   `/api/cron/*` and `/api/webhooks/*` (#216 — reminders, receipt
@@ -308,6 +328,20 @@ while it is `"true"`. Verified behavior (`src/lib/maintenance.ts`,
 2. Trigger a redeploy — env changes do not affect the running
    deployment; only new builds see them (Vercel → Deployments →
    redeploy latest, or push a trivial commit).
+
+**Staff preview while gated (#189):** staff open the site, land on
+`/under-construction`, and use the "sign in" link at the bottom of that
+page (or browse straight to `/login`). Signing in with an `admin_users`
+or `ADMIN_EMAILS` account unlocks the entire site — public pages, `/admin`,
+and `/portal` all work normally for that session; the verified session
+cookie is what the gate checks on every request, so **each staff browser
+session must sign in individually** (the bypass is per-cookie, not
+per-IP or global). Owner and other non-admin accounts do *not* unlock
+the site — they keep working on `/portal` only. Signing out, or letting
+the session expire, returns the browser to `/under-construction`. To
+verify the gate is up, use a private/incognito window or a non-admin
+account — a signed-in admin browser sees the live site even while the
+flag is on.
 
 **Disable:** remove the variable (or set `false`) and redeploy again.
 Verify `/` loads publicly afterward.
@@ -505,11 +539,41 @@ hook config and edit again.
 ## 15. Sentry error monitoring (post-#139/#140)
 
 Sentry collects **unexpected application exceptions** — unhandled
-browser errors, React error-boundary crashes, and server-side
-exceptions in Server Components, route handlers, and `proxy.ts`. It is
-a supplement, not a replacement: Vercel runtime logs remain the
+browser errors, React error-boundary crashes, server-side exceptions
+in Server Components, Server Actions, route handlers, and `proxy.ts`,
+and caught
+operational failures logged through `logError()` (#218: a failed cron
+run, webhook writeback, or Postgres outage inside a try/catch now
+produces a Sentry event, not just a Vercel log line). It is a
+supplement, not a replacement: Vercel runtime logs remain the
 structured operational record (`src/lib/logger.ts`), Cloud Logging
 covers Functions, and GitHub Actions gates deploys.
+
+**Logging convention:** `logError` is reserved for unexpected caught
+failures — it emits the structured console entry and reports the
+exception to Sentry (the real `Error` object, `subsystem`/`operation`
+tags, safe `extra` context). Expected outcomes — auth denials,
+validation, not-found, user cancellation, business-rule rejections —
+use `logWarn`/`logInfo` and never reach Sentry. The same failure is
+never reported twice: code that rethrows for framework instrumentation
+(`onRequestError`, `ErrorFallback`) does not also `logError`, and
+client-side digested placeholders of server errors are skipped.
+
+**Uncaught server delivery (#239):** Next.js invokes
+`instrumentation.ts` `onRequestError` for uncaught Server Action
+errors too (`routeType 'action'` — verified in production mode). The
+hook calls `Sentry.captureRequestError` and then binds the SDK flush
+to the request lifecycle with `after()`. This matters on Vercel's Node
+runtime: the SDK's own flush registration (`vercelWaitUntil`) only
+attaches on the Edge runtime, so an unbound send can be abandoned when
+the function freezes after the error response — the gap that dropped
+`SENTRY_VERIFICATION_EVENT:server`. The flush timeout is derived from
+`@vercel/functions` `getDeadline()` — the invocation deadline Vercel
+computes from `maxDuration`, the same budget `after()`/`waitUntil`
+tasks share — minus a margin reserved for the failure log, capped at
+30s. If the flush still reports undelivered, a `subsystem:"sentry"`
+`logWarn` entry lands in Vercel runtime logs so a dropped event is
+observable instead of silent.
 
 **When to look where:**
 
@@ -522,7 +586,9 @@ covers Functions, and GitHub Actions gates deploys.
   denials, validation, upstream fetch misses), `subsystem`/`operation`
   timelines, and anything too routine to be an exception. A boundary
   crash appears in both places: the Vercel log entry and the Sentry
-  event share the same digest.
+  event share the same digest. A caught operational failure also
+  appears in both — the `logError` console entry and the Sentry event
+  share the same `subsystem`/`operation` pair.
 - **Cloud Logging** — Firebase Functions only; Sentry does not
   instrument Functions (deliberate — #139 scopes Sentry to the Next.js
   app).
@@ -534,18 +600,51 @@ Nothing Sentry-related is committed to the repo.
 
 | Variable | Scope | Kind | Required? |
 |----------|-------|------|-----------|
-| `NEXT_PUBLIC_SENTRY_DSN` | Production + Preview | public runtime config — embedded in the client bundle by design, **not** a secret | yes — without it the SDK never initializes and nothing is sent |
+| `NEXT_PUBLIC_SENTRY_DSN` | Production + Preview | public runtime config — embedded in the client bundle by design, **not** a secret | yes — on Vercel it enables sending; off Vercel it is inert without `SENTRY_ENABLE_LOCAL` |
 | `SENTRY_ORG` | Production (+ Preview for symbolicated preview events) | build-time, not secret | needed only for source-map upload |
 | `SENTRY_PROJECT` | same as `SENTRY_ORG` | build-time, not secret | needed only for source-map upload |
 | `SENTRY_AUTH_TOKEN` | same as `SENTRY_ORG` | build-time **secret** (org auth token) | needed only for source-map upload |
-| `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | — | optional public override | only if the auto value is wrong — defaults to `VERCEL_ENV` then `NODE_ENV` |
+| `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | — | optional public override | only if the auto value is wrong — see the environment model in 15a |
 | `SENTRY_RELEASE` | — | optional build-time override | only to override the auto release (see 15b) |
 
 Recommended scoping: set the DSN for **Production and Preview** — the
-environment tag (`production`/`preview` from `VERCEL_ENV`) keeps the
-streams separable. If you prefer zero preview events, scope the DSN to
-Production only. Source-map variables: Production is required;
-adding Preview lets preview-deploy errors symbolicate too.
+environment tag keeps the streams separable. If you prefer zero
+preview events, scope the DSN to Production only. Source-map
+variables: Production is required; adding Preview lets preview-deploy
+errors symbolicate too.
+
+**Environment model (#235).** One resolver — `resolveSentryRuntime()`
+in `src/lib/sentry.ts` — decides the environment label and whether the
+SDK initializes at all. It is the only place this decision exists:
+the server config consumes it at runtime, and `next.config.ts` injects
+the same resolved result into the client bundle as
+`NEXT_PUBLIC_SENTRY_RESOLVED_ENVIRONMENT` /
+`NEXT_PUBLIC_SENTRY_SEND_EVENTS`, so the browser can never read raw
+`VERCEL_ENV`/override vars directly.
+
+| Context | Signal | `environment` | Sends? |
+|---------|--------|---------------|--------|
+| Vercel production deploy | `VERCEL_DEPLOYMENT_ID`/`VERCEL_REGION` + `VERCEL_ENV=production` | `production` | yes (DSN required) |
+| Vercel preview deploy | deployment marker + `VERCEL_ENV=preview` | `preview` | yes (DSN required) |
+| Local dev (`next dev`/`build`/`start`) | no deployment marker | `development` | **no** unless `SENTRY_ENABLE_LOCAL=true` |
+| Playwright E2E / emulators | `NEXT_PUBLIC_USE_FIREBASE_EMULATOR` or `*_EMULATOR_HOST` | `test` | **no** unless `SENTRY_ENABLE_LOCAL=true` |
+| CI (no deployment context) | `CI`/`NODE_ENV=test`/`VITEST` | `test` | **no** |
+
+`VERCEL_ENV` alone is **not** trusted: `vercel env pull` writes
+`VERCEL_ENV="production"` (and the production DSN/override vars) into a
+developer's `.env.local`. Only Vercel's own infrastructure sets
+`VERCEL_DEPLOYMENT_ID` (build + runtime) or `VERCEL_REGION` (runtime),
+so those are the deployment proof. When sending is off the SDK is
+never initialized — there is nothing to filter.
+
+**Local Sentry debugging:** add `SENTRY_ENABLE_LOCAL=true` to
+`.env.local` — events send under `environment=development` (or `test`
+under the E2E harness). `NEXT_PUBLIC_SENTRY_ENVIRONMENT` may still be
+used to pick a distinct local label, but `production` is unreachable
+off Vercel by construction. Release tags still appear (they are just
+the local git SHA) — release and environment are independent, and a
+local run sharing production's SHA does not make its events
+production.
 
 ### 15b. Releases and source maps
 
@@ -573,28 +672,38 @@ Consequences:
 
 After Chad sets the Sentry/Vercel values and a deployment has gone out:
 
-1. Sign in as an admin and open **`/admin/sentry-check`** (deliberately
-   not in the admin nav — URL only).
+1. Sign in as an admin and open **`/admin/sentry-check`** (nav →
+   System → Sentry Check).
 2. Click **"Throw server test error"** — the panel reports the throw.
-3. Click **"Throw browser test error"** — the page is replaced by the
-   real "Something went wrong" fallback with a Reference digest; note
-   the digest, then click Try again.
-4. In Sentry → Issues, confirm **exactly two** events with messages
-   starting `SENTRY_VERIFICATION_EVENT:` (`:server` and `:browser`).
-   One event per click — no duplicates.
-5. Confirm each event's **environment** is `production`. A preview
+3. Click **"Throw browser test error"** — a warning already on the
+   card explains this is intentional: the synthetic render throw is
+   caught by a dedicated verification boundary which renders the real
+   shared `ErrorFallback` inline (same capture path as
+   `app/error.tsx`, contained to the card). Note the digest if shown,
+   then click Try again to restore the trigger.
+4. Click **"Fire caught test error"** — the action catches and logs
+   through `logError`, so the button reports a normal result while the
+   error reports to Sentry. This exercises the same path cron,
+   webhook, and action failure handlers use.
+5. In Sentry → Issues, confirm **exactly three** events with messages
+   starting `SENTRY_VERIFICATION_EVENT:` (`:server`, `:browser`,
+   `:caught`). One event per click — no duplicates. The `:caught`
+   event carries tags `subsystem=admin`, `operation=sentry-check-caught`.
+6. Confirm each event's **environment** is `production`. A preview
    deploy performing the same steps should show `preview`.
-6. Confirm each event's **release** equals the deployment's commit SHA
+7. Confirm each event's **release** equals the deployment's commit SHA
    (Vercel → Deployments → commit).
-7. Open an event's stack trace — frames resolve to real source
+8. Open an event's stack trace — frames resolve to real source
    locations (e.g. `sentry-check-panel.tsx`, `actions.ts`), not
    minified `_next/static/chunks/...` references.
-8. Inspect the event payload: **no** user identity, email, cookies,
+9. Inspect the event payload: **no** user identity, email, cookies,
    `Authorization`, request body, receipt path, or registration data —
    only method + path under request, redacted messages, safe tags.
-9. For the browser event, search Vercel → Logs (Runtime) for the
-   Reference digest shown on the fallback page — the
-   `subsystem:"ui"` log entry with the same digest should exist.
+10. For the browser event, note that a client-side render throw has
+    no digest (digests exist only for errors Next.js serializes
+    server→client); the same `ErrorFallback` still emits its
+    `subsystem:"ui"` structured log entry — in the browser console for
+    client throws — alongside the one Sentry event.
 
 ### 15d. Troubleshooting
 
@@ -603,9 +712,13 @@ After Chad sets the Sentry/Vercel values and a deployment has gone out:
   redeploy)? Sentry project exists and DSN copied exactly? Ad-blocker/
   CSP blocking `*.ingest.sentry.io` in the browser? Check the Vercel
   runtime log — the error still logs there even when Sentry is absent.
-- **Event in the wrong environment** → `NEXT_PUBLIC_SENTRY_ENVIRONMENT`
-  set unnecessarily (remove it; `VERCEL_ENV` is correct automatically),
-  or the DSN is scoped to the wrong Vercel environment.
+- **Event in the wrong environment** → on Vercel, `VERCEL_ENV` is
+  authoritative (a stray `NEXT_PUBLIC_SENTRY_ENVIRONMENT` cannot
+  outrank it — remove it anyway). If a non-deployment ever reports
+  `environment=production`, that is a bug in the resolver — the
+  deployment markers (`VERCEL_DEPLOYMENT_ID`/`VERCEL_REGION`) cannot
+  appear off Vercel infrastructure. Also check the DSN is scoped to
+  the intended Vercel environments.
 - **Event received but stack trace not symbolicated** → the release on
   the event has no uploaded artifacts: check the deploy's build log for
   the source-map upload step; confirm `SENTRY_ORG`/`SENTRY_PROJECT`/
@@ -616,8 +729,10 @@ After Chad sets the Sentry/Vercel values and a deployment has gone out:
   scope, or org/project slug mismatch. Fix the env values and redeploy;
   the app itself is unaffected either way.
 - **Duplicate events for one failure** → report it — each capture path
-  is designed to fire once (single `captureException` in the shared
-  fallback, framework hooks elsewhere); duplicates indicate a
+  is designed to fire once (`logError` forwards caught errors,
+  `ErrorFallback` captures boundary errors with the digest tag and
+  opts its `logError` out, framework hooks catch the uncaught, and
+  digested client placeholders are skipped); duplicates indicate a
   regression, not configuration.
 - **Sentry event exists but no matching Vercel log** → boundary events
   correlate by the `error_digest` tag / Reference digest; server
@@ -662,8 +777,13 @@ or receipt identifiers in Sentry: treat it as an incident — delete the
 event in Sentry, open a fix that extends the sanitizer to cover that
 carrier, and check whether the same data reached Vercel logs.
 
-**Local development and CI** send nothing: no DSN is configured, so
-the SDK never initializes and no network calls are made.
+**Local development, CI, and E2E** send nothing by default (#235):
+even when a pulled `.env.local` supplies the production DSN, the
+resolver keeps `sendEvents=false` off Vercel infrastructure and the
+SDK never initializes — no network calls are made. `SENTRY_ENABLE_LOCAL`
+is the deliberate opt-in, and it still cannot produce
+`environment=production`. Production alerting should always be scoped
+to `environment:production` (§15e).
 
 ## 16. Consent & analytics (post-#116)
 
@@ -1070,20 +1190,28 @@ covering a scenario soft delete misses at this scale.
 
 ### 18e. Orphan-sweeper interaction (`/api/cron/sweep-receipts`)
 
-The sweeper (Vercel cron, daily) deletes `receipts/<uuid>` objects whose
-Postgres `registration_submissions` row does not exist and which are
-older than one hour. Two properties matter for recovery:
+The sweeper (Vercel cron, daily) covers both private prefixes in one
+pass: `receipts/<uuid>` objects whose `registration_submissions` row
+does not exist, and `vet-docs/<uuid>[.<ext>]` objects whose
+`vet_documents` row does not exist (a clinical upload whose
+registration step never completed — abandoned dialog, lost response).
+Objects younger than one hour are never classified. Two properties
+matter for recovery:
 
 - **Soft-deleted receipts are invisible to the sweeper** — its listing
   sees live objects only. A swept receipt stays recoverable for the
   whole soft-delete window.
 - **Postgres restore ordering hazard:** while a Neon branch restore or
   migration replay is in progress, a receipt can look orphaned if its
-  submission row is temporarily missing. As cheap insurance during any
-  §19/§20 restore or re-import that leaves submissions temporarily
-  absent: **pause the cron first** (Vercel → Settings → Cron Jobs →
-  disable, or temporarily remove the `vercel.json` entry and redeploy),
-  and resume it after the data is verified complete.
+  submission row is temporarily missing — the same hazard applies to a
+  `vet-docs/` object whose `vet_documents` row is temporarily absent.
+  As cheap insurance during any §19/§20 restore or re-import that
+  leaves registry rows temporarily absent: **pause the cron first**
+  (Vercel → Settings → Cron Jobs → disable, or temporarily remove the
+  `vercel.json` entry and redeploy), and resume it after the data is
+  verified complete. `vet_documents.storage_path` plays the same role
+  as `payment_receipt_path` in the combined-incident ordering below —
+  recover the Postgres row first, then the object.
 
 **Combined incident ordering** (submission row + receipt both gone):
 
@@ -1099,16 +1227,17 @@ unrecoverable (re-collect from the registrant).
 
 ### 18f. Privacy & retention boundary
 
-- Soft-deleted `receipts/` objects are PII held for the recovery
-  window only — this is **recovery retention, not business retention**.
-  When #130 defines a registration retention policy, deliberate
-  deletions still age out of soft delete on the same 56-day clock; the
-  mechanism cannot turn a deletion decision into permanent storage.
-  If #130 ever requires immediate PII destruction, an operator must
-  explicitly purge the soft-deleted object — document that in the
-  retention policy.
+- Soft-deleted `receipts/` and `vet-docs/` objects are PII held for the
+  recovery window only — `vet-docs/` additionally carries clinical
+  records — this is **recovery retention, not business retention**.
+  When #130 defines a retention policy, deliberate deletions still age
+  out of soft delete on the same 56-day clock; the mechanism cannot
+  turn a deletion decision into permanent storage. If #130 ever
+  requires immediate PII destruction, an operator must explicitly purge
+  the soft-deleted object — document that in the retention policy.
 - Restore access inherits bucket IAM (project editors/owners) — keep it
-  that way; never grant receipt reads to satisfy a recovery workflow.
+  that way; never grant receipt or clinical-document reads to satisfy a
+  recovery workflow.
 
 ### 18g. Testing status — honest note
 

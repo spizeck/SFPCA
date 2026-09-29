@@ -26,10 +26,13 @@ export function isExpectedAuthError(error: unknown): boolean {
   return typeof code === "string" && EXPECTED_AUTH_ERROR_CODES.has(code);
 }
 
-export async function getCurrentUser() {
-  const cookieStore = await cookies();
-  const sessionCookie = cookieStore.get("session")?.value;
-
+// Cookie-value variant of getCurrentUser: the same Firebase session
+// verification (signature + expiry + revocation), usable from call
+// sites that hold the raw cookie — like proxy.ts, which sees
+// NextRequest.cookies rather than the next/headers store.
+export async function getSessionUser(
+  sessionCookie: string | undefined | null,
+) {
   if (!sessionCookie) {
     return null;
   }
@@ -46,6 +49,11 @@ export async function getCurrentUser() {
     }
     return null;
   }
+}
+
+export async function getCurrentUser() {
+  const cookieStore = await cookies();
+  return getSessionUser(cookieStore.get("session")?.value);
 }
 
 export async function isAdmin(email: string): Promise<{ isAdmin: boolean; role?: "admin" | "editor" }> {
@@ -80,6 +88,34 @@ export async function isAdmin(email: string): Promise<{ isAdmin: boolean; role?:
   }
 
   return { isAdmin: false };
+}
+
+// The maintenance gate's trust decision (#189). A session cookie earns
+// the public-site bypass only when BOTH layers verify: the Firebase
+// session cookie (signature, expiry, revocation) AND a live Postgres
+// admin_users row — deliberately NOT isAdmin()/ADMIN_EMAILS, so staff
+// revocation is a single source of truth: deleting the row re-engages
+// the gate on the next request even for env-bootstrapped accounts.
+// requireAdmin() still honors ADMIN_EMAILS as the emergency bootstrap
+// for /admin itself; only the maintenance bypass is Postgres-only. Any
+// failure, expected or not, returns false: the gate fails closed.
+// Nothing client-controlled is ever trusted on its own.
+export async function isVerifiedAdminSession(
+  sessionCookie: string | undefined | null,
+): Promise<boolean> {
+  const user = await getSessionUser(sessionCookie);
+  if (!user?.email) {
+    return false;
+  }
+  try {
+    return (await findAdminUser(user.email)) !== null;
+  } catch (error) {
+    // Fail closed to no-bypass, but a Postgres outage here silently
+    // gates every staff member during a maintenance window — that must
+    // be diagnosable.
+    logError("auth", "maintenance-admin-lookup", error);
+    return false;
+  }
 }
 
 export async function requireAdmin() {

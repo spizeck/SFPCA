@@ -48,6 +48,26 @@ test("nested public routes are gated when enabled", () => {
   }
 });
 
+// #189: a session cookie on a gated path does NOT itself bypass —
+// presence only earns the verified check (admin-check), which the proxy
+// resolves through the real session+admin chain. Anonymous requests on
+// the same paths get the unconditional redirect without paying for it.
+test("a session cookie on a gated public path requires verified admin", () => {
+  for (const path of ["/", "/animal-adoptions", "/contact", "/faq"]) {
+    assert.equal(getProxyAction(path, true, ON), "admin-check", path);
+  }
+});
+
+test("the admin-check outcome never comes from cookie presence alone", () => {
+  // With maintenance OFF the same request just passes — the check only
+  // exists inside the gate.
+  assert.equal(getProxyAction("/", true, OFF), "allow");
+  // A cookie on an exempt path stays exempt — no verification needed.
+  assert.equal(getProxyAction("/login", true, ON), "allow");
+  assert.equal(getProxyAction("/under-construction", true, ON), "allow");
+  assert.equal(getProxyAction("/api/auth/session", true, ON), "allow");
+});
+
 // --- Maintenance page -----------------------------------------------------
 
 test("/under-construction is allowed (no redirect loop)", () => {

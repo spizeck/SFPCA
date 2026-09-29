@@ -311,6 +311,12 @@ infer one from another.
   a `subsystem` + `operation`, never raw `console.error("x:", err)`.
   Errors are normalized to `errorName`/`errorCode`/`errorMessage`
   (truncated); stacks and attached objects are dropped in production.
+  `logError` also reports the exception to Sentry — it is reserved for
+  genuinely unexpected caught failures; never use it for expected
+  outcomes. Callers must not add their own `Sentry.captureException`
+  around handled errors — pass the real `Error` to `logError` and let
+  the centralized path report it (opt out only when the site captures
+  itself, via `{ sentry: false }`).
 - Functions use `firebase-functions/logger` with the same field shape.
 - Never log: owner PII, registration fields, receipt paths/IDs, doc
   contents, tokens, cookies, `Authorization`, the Vercel hook URL,
@@ -330,16 +336,27 @@ infer one from another.
   `src/lib/sentry.ts` (request data, cookies, tokens, user identity,
   console/DOM breadcrumbs, frame locals, sensitive-named keys stripped;
   emails/receipts paths/Bearer tokens redacted; expected auth
-  rejections dropped). Boundary errors report once from the shared
-  `ErrorFallback` — do not add `captureException` to `error.tsx`/
-  `global-error.tsx` or `logger.ts`. No edge config exists — `proxy.ts`
-  runs on Node.js. Sentry is inactive unless `NEXT_PUBLIC_SENTRY_DSN`
-  is set; never commit real DSN/org/token values. Controlled
-  verification lives at `/admin/sentry-check` (admin-gated, URL-only):
-  a browser throw through the real boundary and a server action that
-  re-checks `requireAdmin()` itself — server actions are POST
-  endpoints, never rely on layout auth. See README's Observability &
-  troubleshooting section and RUNBOOK §15.
+  rejections and "Unauthorized" action denials dropped). Boundary
+  errors report once from the shared `ErrorFallback` — do not add
+  `captureException` to `error.tsx`/`global-error.tsx`; caught
+  operational errors report through `logError` — do not add
+  `captureException` at call sites. No edge config exists — `proxy.ts`
+  runs on Node.js. Sending requires a DSN AND a real Vercel deployment
+  (or `SENTRY_ENABLE_LOCAL=true`): `resolveSentryRuntime()` in
+  `src/lib/sentry.ts` is the single environment/send decision —
+  VERCEL_DEPLOYMENT_ID/VERCEL_REGION prove Vercel infrastructure, so a
+  pulled `.env.local` (VERCEL_ENV="production") can never report as
+  production (#235). next.config.ts injects the resolved result into
+  the client bundle; never let the client read VERCEL_ENV or
+  NEXT_PUBLIC_SENTRY_ENVIRONMENT directly. Never commit real
+  DSN/org/token values. Controlled
+  verification lives at `/admin/sentry-check` (admin-gated, nav →
+  System): a browser throw contained by a dedicated boundary that
+  renders the shared `ErrorFallback` (same capture path as
+  app/error.tsx), a server action that re-checks `requireAdmin()`
+  itself — server actions are POST endpoints, never rely on layout
+  auth — and a caught `logError` path (#218). See README's
+  Observability & troubleshooting section and RUNBOOK §15.
 - Consent & analytics (post-#116): Klaro is the consent layer; GTM is
   the only tag-loading mechanism and is injected only after affirmative
   analytics consent. `src/lib/consent.ts` owns Consent Mode v2
