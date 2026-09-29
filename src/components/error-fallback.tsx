@@ -5,6 +5,7 @@ import Link from "next/link";
 import * as Sentry from "@sentry/nextjs";
 import { Button } from "@/components/ui/button";
 import { logError } from "@/lib/logger";
+import { cn } from "@/lib/utils";
 
 // Shared fallback for App Router error boundaries. Production users
 // must never see raw stacks, Firebase internals, or implementation
@@ -12,12 +13,18 @@ import { logError } from "@/lib/logger";
 // opaque hash (not PII) that correlates this screen with the
 // server-side log entry; showing it gives maintainers something a
 // user can report.
+//
+// `compact` drops the full-viewport sizing so the same fallback — and
+// therefore the same logging + Sentry capture path — can render inside
+// a contained boundary (the /admin/sentry-check verification surface).
 export function ErrorFallback({
   error,
   reset,
+  compact = false,
 }: {
   error: Error & { digest?: string };
   reset?: () => void;
+  compact?: boolean;
 }) {
   useEffect(() => {
     // Client-side render failures only exist in this browser — the
@@ -37,7 +44,12 @@ export function ErrorFallback({
   }, [error]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
+    <div
+      className={cn(
+        "flex items-center justify-center bg-background px-4",
+        compact ? "py-10" : "min-h-screen",
+      )}
+    >
       <div className="max-w-md text-center space-y-4">
         <h1 className="text-2xl font-semibold">Something went wrong</h1>
         <p className="text-muted-foreground">
