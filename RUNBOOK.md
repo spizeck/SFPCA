@@ -540,7 +540,8 @@ hook config and edit again.
 
 Sentry collects **unexpected application exceptions** — unhandled
 browser errors, React error-boundary crashes, server-side exceptions
-in Server Components, route handlers, and `proxy.ts`, and caught
+in Server Components, Server Actions, route handlers, and `proxy.ts`,
+and caught
 operational failures logged through `logError()` (#218: a failed cron
 run, webhook writeback, or Postgres outage inside a try/catch now
 produces a Sentry event, not just a Vercel log line). It is a
@@ -557,6 +558,16 @@ use `logWarn`/`logInfo` and never reach Sentry. The same failure is
 never reported twice: code that rethrows for framework instrumentation
 (`onRequestError`, `ErrorFallback`) does not also `logError`, and
 client-side digested placeholders of server errors are skipped.
+
+**Uncaught server delivery (#239):** Next.js invokes
+`instrumentation.ts` `onRequestError` for uncaught Server Action
+errors too (`routeType 'action'` — verified in production mode). The
+hook calls `Sentry.captureRequestError` and then binds the SDK flush
+to the request lifecycle with `after()`. This matters on Vercel's Node
+runtime: the SDK's own flush registration (`vercelWaitUntil`) only
+attaches on the Edge runtime, so an unbound send can be abandoned when
+the function freezes after the error response — the gap that dropped
+`SENTRY_VERIFICATION_EVENT:server`.
 
 **When to look where:**
 
