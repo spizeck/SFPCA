@@ -16,7 +16,7 @@ import { requireAdmin } from "@/lib/auth";
 import { getRegistryDb } from "@/lib/db/client";
 import { auditEvents } from "@/lib/db/schema";
 import { getVetDocumentStoragePath } from "@/lib/registry/medical";
-import { adminBucket } from "@/lib/firebase-admin";
+import { adminBucket } from "@/lib/firebase-admin-storage";
 import { logError } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
