@@ -237,6 +237,17 @@ function isExpectedAuthError(error: unknown): boolean {
   return typeof code === "string" && EXPECTED_AUTH_ERROR_CODES.has(code);
 }
 
+// Server actions and loaders signal an authorization denial by
+// throwing a plain `new Error("Unauthorized")` — that exact literal is
+// the app-wide convention. A denial is an expected outcome (expired
+// session, unauthenticated probe of an action POST endpoint), not an
+// incident; the throw still propagates to the client as a rejected
+// call. Errors that merely carry 401-shaped detail in a longer message
+// are untouched — the match is exact on purpose.
+function isAuthorizationDenial(error: unknown): boolean {
+  return error instanceof Error && error.message === "Unauthorized";
+}
+
 // Recursively scrub arbitrary event payloads (extra/contexts): strings
 // are redacted, sensitive-named keys removed, depth bounded so a
 // pathological object can't bloat the event.
@@ -266,10 +277,16 @@ export function sentryBeforeSend(
   event: ErrorEvent,
   hint: EventHint,
 ): ErrorEvent | null {
-  // Backstop: expected auth rejections (classified in src/lib/auth.ts)
-  // are caught and logged at warn level by callers — if one ever
-  // escapes into a capture path anyway, it is still not an incident.
-  if (isExpectedAuthError(hint?.originalException)) return null;
+  // Backstop: expected rejections are caught and logged at warn level
+  // by callers — if one escapes into a capture path anyway (expected
+  // auth codes classified in src/lib/auth.ts; "Unauthorized" action
+  // denials reaching onRequestError), it is still not an incident.
+  if (
+    isExpectedAuthError(hint?.originalException) ||
+    isAuthorizationDenial(hint?.originalException)
+  ) {
+    return null;
+  }
 
   const out: ErrorEvent = { ...event };
 

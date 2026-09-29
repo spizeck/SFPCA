@@ -243,6 +243,29 @@ describe("sentryBeforeSend", () => {
     ).not.toBeNull();
   });
 
+  test("drops 'Unauthorized' action denials — an expected outcome, not an incident", () => {
+    // Server actions/loaders signal denial with the plain literal
+    // throw new Error("Unauthorized"); reaching onRequestError they
+    // would otherwise page on every expired session or probe.
+    expect(
+      sentryBeforeSend(baseEvent(), {
+        originalException: new Error("Unauthorized"),
+      }),
+    ).toBeNull();
+    // Near-misses are untouched — only the exact denial literal drops.
+    for (const message of [
+      "Unauthorized: missing role",
+      "unauthorized",
+      "Request failed with status 401 Unauthorized",
+    ]) {
+      expect(
+        sentryBeforeSend(baseEvent(), {
+          originalException: new Error(message),
+        }),
+      ).not.toBeNull();
+    }
+  });
+
   test("strips request headers, cookies, body, and query string", () => {
     const event = {
       ...baseEvent(),

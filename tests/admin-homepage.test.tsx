@@ -53,15 +53,15 @@ const CONTENT = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockLoad.mockResolvedValue(CONTENT);
-  mockSave.mockResolvedValue(undefined);
+  mockLoad.mockResolvedValue({ ok: true, data: CONTENT });
+  mockSave.mockResolvedValue({ ok: true });
 });
 
 describe("admin homepage editor", () => {
   test("failed load shows a retryable error instead of a blank editor", async () => {
     mockLoad
-      .mockRejectedValueOnce(new Error("backend exploded"))
-      .mockResolvedValueOnce(CONTENT);
+      .mockResolvedValueOnce({ ok: false })
+      .mockResolvedValueOnce({ ok: true, data: CONTENT });
 
     render(<HomepageEditor />);
 
@@ -99,7 +99,7 @@ describe("admin homepage editor", () => {
   test("double-clicking Save only calls the server action once", async () => {
     let resolveSave: () => void = () => {};
     mockSave.mockImplementation(
-      () => new Promise<void>((r) => { resolveSave = r; }),
+      () => new Promise<{ ok: true }>((r) => { resolveSave = () => r({ ok: true }); }),
     );
     render(<HomepageEditor />);
     await waitFor(() => screen.getByDisplayValue("Welcome"));
@@ -119,7 +119,7 @@ describe("admin homepage editor", () => {
   });
 
   test("failed save keeps edits and reports a safe error", async () => {
-    mockSave.mockRejectedValue(new Error("deadline exceeded xyz"));
+    mockSave.mockResolvedValue({ ok: false });
     render(<HomepageEditor />);
     await waitFor(() => screen.getByDisplayValue("Welcome"));
 
