@@ -64,8 +64,8 @@ test.describe("admin journeys", () => {
   test("unauthenticated nested admin routes redirect to login", async ({
     page,
   }) => {
-    // /admin/registrations is absent from AdminNav; authorization must
-    // not depend on discoverability.
+    // Authorization must not depend on navigation discoverability —
+    // direct URL access to unlisted/nested routes fails closed too.
     for (const path of ["/admin/registrations", "/admin/settings"]) {
       await page.goto(path);
       await expect(page).toHaveURL(/\/login/);

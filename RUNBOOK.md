@@ -655,12 +655,15 @@ Consequences:
 
 After Chad sets the Sentry/Vercel values and a deployment has gone out:
 
-1. Sign in as an admin and open **`/admin/sentry-check`** (deliberately
-   not in the admin nav — URL only).
+1. Sign in as an admin and open **`/admin/sentry-check`** (nav →
+   System → Sentry Check).
 2. Click **"Throw server test error"** — the panel reports the throw.
-3. Click **"Throw browser test error"** — the page is replaced by the
-   real "Something went wrong" fallback with a Reference digest; note
-   the digest, then click Try again.
+3. Click **"Throw browser test error"** — a warning already on the
+   card explains this is intentional: the synthetic render throw is
+   caught by a dedicated verification boundary which renders the real
+   shared `ErrorFallback` inline (same capture path as
+   `app/error.tsx`, contained to the card). Note the digest if shown,
+   then click Try again to restore the trigger.
 4. Click **"Fire caught test error"** — the action catches and logs
    through `logError`, so the button reports a normal result while the
    error reports to Sentry. This exercises the same path cron,
@@ -679,9 +682,11 @@ After Chad sets the Sentry/Vercel values and a deployment has gone out:
 9. Inspect the event payload: **no** user identity, email, cookies,
    `Authorization`, request body, receipt path, or registration data —
    only method + path under request, redacted messages, safe tags.
-10. For the browser event, search Vercel → Logs (Runtime) for the
-    Reference digest shown on the fallback page — the
-    `subsystem:"ui"` log entry with the same digest should exist.
+10. For the browser event, note that a client-side render throw has
+    no digest (digests exist only for errors Next.js serializes
+    server→client); the same `ErrorFallback` still emits its
+    `subsystem:"ui"` structured log entry — in the browser console for
+    client throws — alongside the one Sentry event.
 
 ### 15d. Troubleshooting
 
