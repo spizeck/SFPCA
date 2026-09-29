@@ -93,8 +93,8 @@ files is not used by production code.
 | `NEXT_PUBLIC_GTM_ID` | Google Tag Manager container; injected only after analytics consent (§16); absent ⇒ no Google traffic | no |
 | `NEXT_PUBLIC_SITE_URL` | Canonical origin for sitemap/OG/canonical | no |
 | `SITE_MAINTENANCE_MODE` | `"true"` gates all public routes (§9) | no, but server-only — never `NEXT_PUBLIC_*` |
-| `NEXT_PUBLIC_SENTRY_DSN` | Sentry runtime DSN — enables error capture; SDK never initializes without it | no — public config by design, not an auth secret |
-| `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | Optional Sentry environment override (defaults `VERCEL_ENV` → `NODE_ENV`) | no |
+| `NEXT_PUBLIC_SENTRY_DSN` | Sentry runtime DSN — required for capture; on Vercel it enables sending, off Vercel it does nothing without `SENTRY_ENABLE_LOCAL` (§15) | no — public config by design, not an auth secret |
+| `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | Optional Sentry environment override — on Vercel only used if `VERCEL_ENV` is missing/unexpected; off Vercel it may relabel but `production` is unreachable (§15) | no |
 | `SENTRY_ORG` | Sentry org slug for source-map upload at build time | no, but not public config |
 | `SENTRY_PROJECT` | Sentry project slug for source-map upload | no, but not public config |
 | `SENTRY_AUTH_TOKEN` | Auth token for source-map upload during build | **yes** — build-time only |
@@ -121,6 +121,12 @@ variables. `npm run seed` additionally needs `FIREBASE_ADMIN_*`.
   `webServer` config; connects the client SDK to emulators.
 - `FIRESTORE_EMULATOR_HOST` / `FIREBASE_AUTH_EMULATOR_HOST` — set by
   `firebase emulators:exec`; make the Admin SDK skip `cert()`.
+
+**Local-only debugging:**
+
+- `SENTRY_ENABLE_LOCAL` — set to `"true"` in `.env.local` to let a
+  local/test run actually send Sentry events (§15). Events still carry
+  `environment=development` or `test` — never `production`.
 
 **CI only** — `.github/workflows/ci.yml` injects `ci-placeholder`
 `NEXT_PUBLIC_FIREBASE_*` values for the build; no real credentials are
@@ -562,18 +568,51 @@ Nothing Sentry-related is committed to the repo.
 
 | Variable | Scope | Kind | Required? |
 |----------|-------|------|-----------|
-| `NEXT_PUBLIC_SENTRY_DSN` | Production + Preview | public runtime config — embedded in the client bundle by design, **not** a secret | yes — without it the SDK never initializes and nothing is sent |
+| `NEXT_PUBLIC_SENTRY_DSN` | Production + Preview | public runtime config — embedded in the client bundle by design, **not** a secret | yes — on Vercel it enables sending; off Vercel it is inert without `SENTRY_ENABLE_LOCAL` |
 | `SENTRY_ORG` | Production (+ Preview for symbolicated preview events) | build-time, not secret | needed only for source-map upload |
 | `SENTRY_PROJECT` | same as `SENTRY_ORG` | build-time, not secret | needed only for source-map upload |
 | `SENTRY_AUTH_TOKEN` | same as `SENTRY_ORG` | build-time **secret** (org auth token) | needed only for source-map upload |
-| `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | — | optional public override | only if the auto value is wrong — defaults to `VERCEL_ENV` then `NODE_ENV` |
+| `NEXT_PUBLIC_SENTRY_ENVIRONMENT` | — | optional public override | only if the auto value is wrong — see the environment model in 15a |
 | `SENTRY_RELEASE` | — | optional build-time override | only to override the auto release (see 15b) |
 
 Recommended scoping: set the DSN for **Production and Preview** — the
-environment tag (`production`/`preview` from `VERCEL_ENV`) keeps the
-streams separable. If you prefer zero preview events, scope the DSN to
-Production only. Source-map variables: Production is required;
-adding Preview lets preview-deploy errors symbolicate too.
+environment tag keeps the streams separable. If you prefer zero
+preview events, scope the DSN to Production only. Source-map
+variables: Production is required; adding Preview lets preview-deploy
+errors symbolicate too.
+
+**Environment model (#235).** One resolver — `resolveSentryRuntime()`
+in `src/lib/sentry.ts` — decides the environment label and whether the
+SDK initializes at all. It is the only place this decision exists:
+the server config consumes it at runtime, and `next.config.ts` injects
+the same resolved result into the client bundle as
+`NEXT_PUBLIC_SENTRY_RESOLVED_ENVIRONMENT` /
+`NEXT_PUBLIC_SENTRY_SEND_EVENTS`, so the browser can never read raw
+`VERCEL_ENV`/override vars directly.
+
+| Context | Signal | `environment` | Sends? |
+|---------|--------|---------------|--------|
+| Vercel production deploy | `VERCEL_DEPLOYMENT_ID`/`VERCEL_REGION` + `VERCEL_ENV=production` | `production` | yes (DSN required) |
+| Vercel preview deploy | deployment marker + `VERCEL_ENV=preview` | `preview` | yes (DSN required) |
+| Local dev (`next dev`/`build`/`start`) | no deployment marker | `development` | **no** unless `SENTRY_ENABLE_LOCAL=true` |
+| Playwright E2E / emulators | `NEXT_PUBLIC_USE_FIREBASE_EMULATOR` or `*_EMULATOR_HOST` | `test` | **no** unless `SENTRY_ENABLE_LOCAL=true` |
+| CI (no deployment context) | `CI`/`NODE_ENV=test`/`VITEST` | `test` | **no** |
+
+`VERCEL_ENV` alone is **not** trusted: `vercel env pull` writes
+`VERCEL_ENV="production"` (and the production DSN/override vars) into a
+developer's `.env.local`. Only Vercel's own infrastructure sets
+`VERCEL_DEPLOYMENT_ID` (build + runtime) or `VERCEL_REGION` (runtime),
+so those are the deployment proof. When sending is off the SDK is
+never initialized — there is nothing to filter.
+
+**Local Sentry debugging:** add `SENTRY_ENABLE_LOCAL=true` to
+`.env.local` — events send under `environment=development` (or `test`
+under the E2E harness). `NEXT_PUBLIC_SENTRY_ENVIRONMENT` may still be
+used to pick a distinct local label, but `production` is unreachable
+off Vercel by construction. Release tags still appear (they are just
+the local git SHA) — release and environment are independent, and a
+local run sharing production's SHA does not make its events
+production.
 
 ### 15b. Releases and source maps
 
@@ -631,9 +670,13 @@ After Chad sets the Sentry/Vercel values and a deployment has gone out:
   redeploy)? Sentry project exists and DSN copied exactly? Ad-blocker/
   CSP blocking `*.ingest.sentry.io` in the browser? Check the Vercel
   runtime log — the error still logs there even when Sentry is absent.
-- **Event in the wrong environment** → `NEXT_PUBLIC_SENTRY_ENVIRONMENT`
-  set unnecessarily (remove it; `VERCEL_ENV` is correct automatically),
-  or the DSN is scoped to the wrong Vercel environment.
+- **Event in the wrong environment** → on Vercel, `VERCEL_ENV` is
+  authoritative (a stray `NEXT_PUBLIC_SENTRY_ENVIRONMENT` cannot
+  outrank it — remove it anyway). If a non-deployment ever reports
+  `environment=production`, that is a bug in the resolver — the
+  deployment markers (`VERCEL_DEPLOYMENT_ID`/`VERCEL_REGION`) cannot
+  appear off Vercel infrastructure. Also check the DSN is scoped to
+  the intended Vercel environments.
 - **Event received but stack trace not symbolicated** → the release on
   the event has no uploaded artifacts: check the deploy's build log for
   the source-map upload step; confirm `SENTRY_ORG`/`SENTRY_PROJECT`/
@@ -690,8 +733,13 @@ or receipt identifiers in Sentry: treat it as an incident — delete the
 event in Sentry, open a fix that extends the sanitizer to cover that
 carrier, and check whether the same data reached Vercel logs.
 
-**Local development and CI** send nothing: no DSN is configured, so
-the SDK never initializes and no network calls are made.
+**Local development, CI, and E2E** send nothing by default (#235):
+even when a pulled `.env.local` supplies the production DSN, the
+resolver keeps `sendEvents=false` off Vercel infrastructure and the
+SDK never initializes — no network calls are made. `SENTRY_ENABLE_LOCAL`
+is the deliberate opt-in, and it still cannot produce
+`environment=production`. Production alerting should always be scoped
+to `environment:production` (§15e).
 
 ## 16. Consent & analytics (post-#116)
 

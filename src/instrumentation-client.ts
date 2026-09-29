@@ -1,8 +1,5 @@
 // Browser-side Sentry initialization. Next.js 15.3+/16 loads this file
 // before any client code (the instrumentation-client convention).
-//
-// Absent NEXT_PUBLIC_SENTRY_DSN the SDK is never initialized, so local
-// development and CI send nothing to Sentry by default.
 import * as Sentry from "@sentry/nextjs";
 import {
   sentryBeforeBreadcrumb,
@@ -20,15 +17,18 @@ import {
 // and tests only.
 const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN || undefined;
 
-// The browser-visible chain is shorter than the server's on purpose:
-// non-public SENTRY_ENVIRONMENT/VERCEL_ENV can never be inlined into a
-// client bundle, so the override falls straight to the inlined NODE_ENV.
+// Environment/sending are RESOLVED at build time by next.config.ts via
+// the shared resolveSentryRuntime() (#235) — the browser never reads
+// VERCEL_ENV or NEXT_PUBLIC_SENTRY_ENVIRONMENT directly, so a
+// `vercel env pull`-generated .env.local cannot make local or E2E
+// sessions report as production. When NEXT_PUBLIC_SENTRY_SEND_EVENTS
+// is not "true" the init call is dead code (skipped entirely — no SDK
+// initialization, no outbound events).
+const sendEvents = process.env.NEXT_PUBLIC_SENTRY_SEND_EVENTS === "true";
 const environment =
-  process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT ||
-  process.env.NODE_ENV ||
-  "development";
+  process.env.NEXT_PUBLIC_SENTRY_RESOLVED_ENVIRONMENT || "development";
 
-if (dsn) {
+if (dsn && sendEvents) {
   Sentry.init({
     dsn,
     environment,

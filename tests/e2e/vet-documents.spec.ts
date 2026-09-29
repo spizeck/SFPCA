@@ -6,7 +6,11 @@
 // Runs against the Firebase emulators + PGlite (seeded by
 // tests/e2e/global-setup) — never production.
 import { expect, test } from "@playwright/test";
-import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./env";
+import {
+  E2E_ADMIN_EMAIL,
+  E2E_ADMIN_PASSWORD,
+  E2E_APP_ORIGIN,
+} from "./env";
 import { dismissConsentNotice } from "./helpers";
 
 async function signInAsAdmin(page: import("@playwright/test").Page) {
@@ -108,7 +112,7 @@ test.describe("clinical documents", () => {
       {
         name: "session",
         value: "forged-not-a-real-session-cookie",
-        url: "http://localhost:3100",
+        url: E2E_APP_ORIGIN,
         httpOnly: true,
       },
     ]);
