@@ -4,19 +4,22 @@
 // is deliberately no sentry.edge.config.ts.
 import * as Sentry from "@sentry/nextjs";
 import {
-  getSentryDsn,
-  getSentryEnvironment,
+  resolveSentryRuntime,
   sentryBeforeBreadcrumb,
   sentryBeforeSend,
   sentryBeforeSendTransaction,
 } from "@/lib/sentry";
 
-const dsn = getSentryDsn();
+// One decision covers DSN presence AND environment legitimacy (#235):
+// off Vercel infrastructure sendEvents is false even when a pulled
+// .env.local supplies a production DSN, so local/E2E runs skip SDK
+// initialization entirely instead of emitting production-tagged events.
+const sentry = resolveSentryRuntime();
 
-if (dsn) {
+if (sentry.sendEvents) {
   Sentry.init({
-    dsn,
-    environment: getSentryEnvironment(),
+    dsn: sentry.dsn,
+    environment: sentry.environment,
 
     // Never attach user identity, IP, request headers, or cookies.
     sendDefaultPii: false,

@@ -52,27 +52,113 @@ const SENSITIVE_KEY_PATTERN =
 // Server/test env resolution only. Browser code must NOT route through
 // these helpers: a defaulted env object defeats Next.js client-bundle
 // inlining, which only substitutes statically analyzable
-// `process.env.NEXT_PUBLIC_*` member expressions (#146). Client
-// initialization reads process.env directly in instrumentation-client.
+// `process.env.NEXT_PUBLIC_*` member expressions (#146). The client
+// bundle receives the RESOLVED decision instead — next.config.ts calls
+// resolveSentryRuntime() at build time and injects the result as
+// NEXT_PUBLIC_SENTRY_RESOLVED_ENVIRONMENT / NEXT_PUBLIC_SENTRY_SEND_EVENTS.
 export function getSentryDsn(
   env: Record<string, string | undefined> = process.env,
 ): string | undefined {
   // The DSN is public configuration (it is embedded in the client
-  // bundle by design) — not an authentication secret. Absent DSN →
-  // Sentry is never initialized and no event can leave the process.
+  // bundle by design) — not an authentication secret. The DSN being
+  // present is necessary but NOT sufficient for events to leave the
+  // process: resolveSentryRuntime().sendEvents is the sending boundary.
   return env.NEXT_PUBLIC_SENTRY_DSN || undefined;
 }
 
-export function getSentryEnvironment(
+// Environment classification (#235). `vercel env pull` copies the
+// production environment into a developer's .env.local — including
+// VERCEL_ENV="production" and NEXT_PUBLIC_SENTRY_ENVIRONMENT="production"
+// — so VERCEL_ENV and NODE_ENV alone can never prove deployment
+// context. The variables below are only populated on Vercel's own
+// infrastructure (VERCEL_DEPLOYMENT_ID at build AND runtime,
+// VERCEL_REGION at runtime) and are never emitted by `env pull`, which
+// makes them the reliable "this process is a real Vercel deployment"
+// signal.
+function isVercelDeployment(
+  env: Record<string, string | undefined>,
+): boolean {
+  return Boolean(env.VERCEL_DEPLOYMENT_ID || env.VERCEL_REGION);
+}
+
+// Test/E2E contexts: the Playwright webServer sets
+// NEXT_PUBLIC_USE_FIREBASE_EMULATOR, `firebase emulators:exec` exports
+// the emulator host vars to the whole process tree, vitest sets
+// NODE_ENV=test / VITEST, and CI (GitHub Actions) is never an
+// operational runtime. Checked only AFTER isVercelDeployment — Vercel
+// also sets CI=1 during builds, and ordering is what keeps a real
+// deployment from being mislabeled.
+function isTestRuntime(env: Record<string, string | undefined>): boolean {
+  return (
+    env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === "true" ||
+    Boolean(env.FIREBASE_AUTH_EMULATOR_HOST) ||
+    Boolean(env.FIRESTORE_EMULATOR_HOST) ||
+    env.NODE_ENV === "test" ||
+    Boolean(env.VITEST) ||
+    Boolean(env.CI)
+  );
+}
+
+function sentryEnvironmentOverride(
+  env: Record<string, string | undefined>,
+): string | undefined {
+  return env.NEXT_PUBLIC_SENTRY_ENVIRONMENT || env.SENTRY_ENVIRONMENT;
+}
+
+// The single environment decision for every runtime. `environment` is
+// a Sentry LABEL, never proof of deployment: off Vercel infrastructure
+// it can resolve to "development" or "test" but NEVER "production" —
+// a pulled .env.local describing the production project cannot
+// reclassify the process that runs it.
+export function resolveSentryEnvironment(
   env: Record<string, string | undefined> = process.env,
 ): string {
-  return (
-    env.NEXT_PUBLIC_SENTRY_ENVIRONMENT ||
-    env.SENTRY_ENVIRONMENT ||
-    env.VERCEL_ENV ||
-    env.NODE_ENV ||
-    "development"
-  );
+  if (isVercelDeployment(env)) {
+    // Real deployment: VERCEL_ENV is authoritative (custom Vercel
+    // environments report "preview"). The explicit override remains as
+    // a documented escape hatch for a missing/unexpected VERCEL_ENV —
+    // it can never run ahead of it, so a mis-scoped override cannot
+    // relabel a preview deployment as production.
+    if (env.VERCEL_ENV === "production") return "production";
+    if (env.VERCEL_ENV === "preview") return "preview";
+    return sentryEnvironmentOverride(env) || "development";
+  }
+  // Off Vercel: honor an explicit override only when it is itself
+  // non-production — this keeps a deliberate local label working for
+  // debugging while making "production" unreachable.
+  const override = sentryEnvironmentOverride(env);
+  if (override && override !== "production") return override;
+  return isTestRuntime(env) ? "test" : "development";
+}
+
+export interface SentryRuntimeDecision {
+  // Present iff a DSN is configured; sendEvents already implies it.
+  dsn: string | undefined;
+  // The environment tag events will carry if sendEvents is true.
+  environment: string;
+  // Whether Sentry may deliver events from this process at all.
+  sendEvents: boolean;
+}
+
+// The single send/no-send decision (#235). On real Vercel deployments
+// the DSN's project-side scoping decides which environments report
+// (Production + Preview is the recommended setup). Everywhere else —
+// local dev, CI, Playwright E2E, emulator runs — outbound delivery is
+// OFF unless SENTRY_ENABLE_LOCAL=true is set deliberately, in which
+// case events still carry the non-production label resolved above.
+// When sendEvents is false the SDK is never initialized at all, rather
+// than initializing and filtering each event afterward.
+export function resolveSentryRuntime(
+  env: Record<string, string | undefined> = process.env,
+): SentryRuntimeDecision {
+  const dsn = getSentryDsn(env);
+  return {
+    dsn,
+    environment: resolveSentryEnvironment(env),
+    sendEvents:
+      Boolean(dsn) &&
+      (isVercelDeployment(env) || env.SENTRY_ENABLE_LOCAL === "true"),
+  };
 }
 
 function redactString(value: string): string {

@@ -333,8 +333,15 @@ infer one from another.
   rejections dropped). Boundary errors report once from the shared
   `ErrorFallback` — do not add `captureException` to `error.tsx`/
   `global-error.tsx` or `logger.ts`. No edge config exists — `proxy.ts`
-  runs on Node.js. Sentry is inactive unless `NEXT_PUBLIC_SENTRY_DSN`
-  is set; never commit real DSN/org/token values. Controlled
+  runs on Node.js. Sending requires a DSN AND a real Vercel deployment
+  (or `SENTRY_ENABLE_LOCAL=true`): `resolveSentryRuntime()` in
+  `src/lib/sentry.ts` is the single environment/send decision —
+  VERCEL_DEPLOYMENT_ID/VERCEL_REGION prove Vercel infrastructure, so a
+  pulled `.env.local` (VERCEL_ENV="production") can never report as
+  production (#235). next.config.ts injects the resolved result into
+  the client bundle; never let the client read VERCEL_ENV or
+  NEXT_PUBLIC_SENTRY_ENVIRONMENT directly. Never commit real
+  DSN/org/token values. Controlled
   verification lives at `/admin/sentry-check` (admin-gated, URL-only):
   a browser throw through the real boundary and a server action that
   re-checks `requireAdmin()` itself — server actions are POST

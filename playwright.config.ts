@@ -1,10 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
 import {
-  E2E_APP_PORT,
+  E2E_APP_ORIGIN,
   E2E_DATABASE_URL,
 } from "./tests/e2e/env";
 
-const baseURL = `http://localhost:${E2E_APP_PORT}`;
+const baseURL = E2E_APP_ORIGIN;
 
 // E2E smoke suite. `npm run test:e2e` wraps this in
 // `firebase emulators:exec`, so FIRESTORE_EMULATOR_HOST /
@@ -58,11 +58,40 @@ export default defineConfig({
       NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "000000000000",
       NEXT_PUBLIC_FIREBASE_APP_ID: "1:000000000000:web:e2e-demo",
       NEXT_PUBLIC_USE_FIREBASE_EMULATOR: "true",
+      // Optional emulator-port overrides for local runs that dodge
+      // occupied default ports (see src/lib/firebase.ts). Unset in CI —
+      // the firebase.json ports apply and these keys stay absent.
+      ...(process.env.NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_URL
+        ? {
+            NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_URL:
+              process.env.NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_URL,
+          }
+        : {}),
+      ...(process.env.NEXT_PUBLIC_FIRESTORE_EMULATOR_PORT
+        ? {
+            NEXT_PUBLIC_FIRESTORE_EMULATOR_PORT:
+              process.env.NEXT_PUBLIC_FIRESTORE_EMULATOR_PORT,
+          }
+        : {}),
+      ...(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_EMULATOR_PORT
+        ? {
+            NEXT_PUBLIC_FIREBASE_STORAGE_EMULATOR_PORT:
+              process.env.NEXT_PUBLIC_FIREBASE_STORAGE_EMULATOR_PORT,
+          }
+        : {}),
       // Fake container for consent-boundary tests — E2E intercepts the
       // request so no traffic ever reaches Google.
       NEXT_PUBLIC_GTM_ID: "GTM-E2ETEST",
       // E2E must exercise the full site, never the maintenance gate.
       SITE_MAINTENANCE_MODE: "false",
+      // E2E must never emit Sentry events (#235). The resolver in
+      // src/lib/sentry.ts already refuses sending off real Vercel
+      // infrastructure; blanking the DSN here is the second layer — a
+      // developer's .env.local carries the production DSN, and an
+      // explicit empty value beats .env.local during `next dev` env
+      // loading.
+      NEXT_PUBLIC_SENTRY_DSN: "",
+      NEXT_PUBLIC_SENTRY_ENVIRONMENT: "",
       // The registry datastore: a PGlite Postgres engine served over the
       // wire protocol by tests/e2e/db-server.ts — the dev server uses
       // the same postgres.js client it would for Neon, against an

@@ -5,6 +5,7 @@ import { expect, test } from "./fixtures";
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
+  E2E_APP_ORIGIN,
   E2E_USER_EMAIL,
   E2E_USER_PASSWORD,
 } from "./env";
@@ -81,7 +82,7 @@ test.describe("admin journeys", () => {
       {
         name: "session",
         value: "forged-not-a-real-session-cookie",
-        url: "http://localhost:3100",
+        url: E2E_APP_ORIGIN,
         httpOnly: true,
       },
     ]);

@@ -24,7 +24,8 @@ vi.mock("@sentry/nextjs", () => ({
 
 import {
   getSentryDsn,
-  getSentryEnvironment,
+  resolveSentryEnvironment,
+  resolveSentryRuntime,
   sentryBeforeBreadcrumb,
   sentryBeforeSend,
   sentryBeforeSendTransaction,
@@ -33,6 +34,7 @@ import { ErrorFallback } from "@/components/error-fallback";
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
 });
 
 const baseEvent = (): ErrorEvent => ({
@@ -51,18 +53,173 @@ describe("environment resolution", () => {
       .toBe("https://k@o1.ingest.sentry.io/2");
   });
 
-  test("environment prefers explicit override, then deploy context", () => {
-    expect(getSentryEnvironment({})).toBe("development");
-    expect(getSentryEnvironment({ NODE_ENV: "production" })).toBe("production");
+  // Real Vercel deployments: VERCEL_DEPLOYMENT_ID exists at build and
+  // runtime, VERCEL_REGION at runtime — `vercel env pull` never emits
+  // either, so they are the proof of deployment context (#235).
+  test("Vercel production deployment resolves production and sends", () => {
+    const env = {
+      NEXT_PUBLIC_SENTRY_DSN: "https://k@o1.ingest.sentry.io/2",
+      VERCEL_DEPLOYMENT_ID: "dpl_abc",
+      VERCEL_ENV: "production",
+      VERCEL: "1",
+      NODE_ENV: "production",
+    };
+    expect(resolveSentryEnvironment(env)).toBe("production");
+    expect(resolveSentryRuntime(env)).toMatchObject({
+      environment: "production",
+      sendEvents: true,
+    });
+  });
+
+  test("Vercel preview deployment resolves preview and sends", () => {
+    const env = {
+      NEXT_PUBLIC_SENTRY_DSN: "https://k@o1.ingest.sentry.io/2",
+      VERCEL_DEPLOYMENT_ID: "dpl_abc",
+      VERCEL_ENV: "preview",
+      NODE_ENV: "production",
+    };
+    expect(resolveSentryEnvironment(env)).toBe("preview");
+    expect(resolveSentryRuntime(env).sendEvents).toBe(true);
+  });
+
+  test("VERCEL_REGION alone proves a Vercel runtime", () => {
     expect(
-      getSentryEnvironment({ VERCEL_ENV: "preview", NODE_ENV: "production" }),
-    ).toBe("preview");
-    expect(
-      getSentryEnvironment({
-        NEXT_PUBLIC_SENTRY_ENVIRONMENT: "staging",
-        VERCEL_ENV: "preview",
+      resolveSentryEnvironment({
+        VERCEL_REGION: "iad1",
+        VERCEL_ENV: "production",
       }),
-    ).toBe("staging");
+    ).toBe("production");
+  });
+
+  // The observed bug: `vercel env pull` writes the production project
+  // environment into .env.local. VERCEL_ENV / NEXT_PUBLIC_SENTRY_ENVIRONMENT
+  // then claim "production" for a process that is not on Vercel at all.
+  test("a pulled production .env.local can never classify as production", () => {
+    const pulledEnv = {
+      NEXT_PUBLIC_SENTRY_DSN: "https://k@o1.ingest.sentry.io/2",
+      NEXT_PUBLIC_SENTRY_ENVIRONMENT: "production",
+      VERCEL: "1",
+      VERCEL_ENV: "production",
+      VERCEL_TARGET_ENV: "production",
+      VERCEL_URL: "saba-sfpca.vercel.app",
+      NODE_ENV: "development",
+    };
+    expect(resolveSentryEnvironment(pulledEnv)).toBe("development");
+    expect(resolveSentryRuntime(pulledEnv).sendEvents).toBe(false);
+    // Same pulled env under `next build`/`next start` (NODE_ENV becomes
+    // production) still cannot claim production.
+    expect(
+      resolveSentryEnvironment({ ...pulledEnv, NODE_ENV: "production" }),
+    ).toBe("development");
+    expect(
+      resolveSentryRuntime({ ...pulledEnv, NODE_ENV: "production" })
+        .sendEvents,
+    ).toBe(false);
+  });
+
+  test("plain local development resolves development and does not send", () => {
+    const env = {
+      NEXT_PUBLIC_SENTRY_DSN: "https://k@o1.ingest.sentry.io/2",
+      NODE_ENV: "development",
+    };
+    expect(resolveSentryEnvironment(env)).toBe("development");
+    expect(resolveSentryRuntime(env).sendEvents).toBe(false);
+  });
+
+  test("Playwright E2E / emulator runs resolve test and do not send", () => {
+    const webServerEnv = {
+      NEXT_PUBLIC_SENTRY_DSN: "https://k@o1.ingest.sentry.io/2",
+      NEXT_PUBLIC_USE_FIREBASE_EMULATOR: "true",
+      NODE_ENV: "development",
+    };
+    expect(resolveSentryEnvironment(webServerEnv)).toBe("test");
+    expect(resolveSentryRuntime(webServerEnv).sendEvents).toBe(false);
+    // Emulator host vars exported by `firebase emulators:exec` classify
+    // the same way even without the Playwright flag.
+    expect(
+      resolveSentryEnvironment({
+        FIREBASE_AUTH_EMULATOR_HOST: "127.0.0.1:9099",
+      }),
+    ).toBe("test");
+  });
+
+  test("CI without deployment context resolves test, never production", () => {
+    const env = {
+      CI: "true",
+      NODE_ENV: "production",
+      NEXT_PUBLIC_SENTRY_DSN: "https://k@o1.ingest.sentry.io/2",
+    };
+    expect(resolveSentryEnvironment(env)).toBe("test");
+    expect(resolveSentryRuntime(env).sendEvents).toBe(false);
+    // Even when CI somehow carries a pulled production VERCEL_ENV.
+    expect(
+      resolveSentryEnvironment({ ...env, VERCEL_ENV: "production" }),
+    ).toBe("test");
+  });
+
+  test("a release SHA never influences environment classification", () => {
+    const env = {
+      NEXT_PUBLIC_SENTRY_DSN: "https://k@o1.ingest.sentry.io/2",
+      SENTRY_RELEASE: "dfe314e",
+      VERCEL_GIT_COMMIT_SHA: "dfe314e",
+      NODE_ENV: "production",
+    };
+    expect(resolveSentryEnvironment(env)).not.toBe("production");
+    expect(resolveSentryRuntime(env).sendEvents).toBe(false);
+  });
+
+  test("SENTRY_ENABLE_LOCAL opts a local run into sending under its resolved label", () => {
+    const env = {
+      NEXT_PUBLIC_SENTRY_DSN: "https://k@o1.ingest.sentry.io/2",
+      SENTRY_ENABLE_LOCAL: "true",
+      NODE_ENV: "development",
+    };
+    expect(resolveSentryRuntime(env)).toMatchObject({
+      environment: "development",
+      sendEvents: true,
+    });
+    // Opted-in test runs still cannot claim production.
+    expect(
+      resolveSentryRuntime({
+        ...env,
+        NEXT_PUBLIC_USE_FIREBASE_EMULATOR: "true",
+      }),
+    ).toMatchObject({ environment: "test", sendEvents: true });
+  });
+
+  test("non-production override labels work off-Vercel; production is unreachable", () => {
+    expect(
+      resolveSentryEnvironment({
+        NEXT_PUBLIC_SENTRY_ENVIRONMENT: "chad-local",
+      }),
+    ).toBe("chad-local");
+    expect(
+      resolveSentryEnvironment({ NEXT_PUBLIC_SENTRY_ENVIRONMENT: "production" }),
+    ).not.toBe("production");
+  });
+
+  test("on Vercel the override cannot outrank VERCEL_ENV", () => {
+    // A Production-scoped override value leaking into a Preview deploy
+    // must not relabel it — VERCEL_ENV is authoritative on real infra.
+    expect(
+      resolveSentryEnvironment({
+        VERCEL_DEPLOYMENT_ID: "dpl_abc",
+        VERCEL_ENV: "preview",
+        NEXT_PUBLIC_SENTRY_ENVIRONMENT: "production",
+      }),
+    ).toBe("preview");
+  });
+
+  test("no DSN means no sending in any context", () => {
+    expect(
+      resolveSentryRuntime({
+        VERCEL_DEPLOYMENT_ID: "dpl_abc",
+        VERCEL_ENV: "production",
+      }).sendEvents,
+    ).toBe(false);
+    expect(
+      resolveSentryRuntime({ SENTRY_ENABLE_LOCAL: "true" }).sendEvents,
+    ).toBe(false);
   });
 });
 
@@ -257,21 +414,50 @@ describe("sentryBeforeSendTransaction", () => {
 describe("SDK initialization gating", () => {
   test("client init is skipped entirely without a DSN", async () => {
     vi.resetModules();
-    delete process.env.NEXT_PUBLIC_SENTRY_DSN;
+    vi.stubEnv("NEXT_PUBLIC_SENTRY_DSN", "");
+    vi.stubEnv("NEXT_PUBLIC_SENTRY_SEND_EVENTS", "true");
+    await import("@/instrumentation-client");
+    expect(init).not.toHaveBeenCalled();
+  });
+
+  test("client init is skipped when the build resolved sending off", async () => {
+    // A DSN alone is not enough — local/E2E builds inject
+    // NEXT_PUBLIC_SENTRY_SEND_EVENTS="false" (#235).
+    vi.resetModules();
+    vi.stubEnv("NEXT_PUBLIC_SENTRY_DSN", "https://k@o1.ingest.sentry.io/2");
+    vi.stubEnv("NEXT_PUBLIC_SENTRY_SEND_EVENTS", "false");
+    vi.stubEnv("NEXT_PUBLIC_SENTRY_RESOLVED_ENVIRONMENT", "development");
     await import("@/instrumentation-client");
     expect(init).not.toHaveBeenCalled();
   });
 
   test("server init is skipped entirely without a DSN", async () => {
     vi.resetModules();
-    delete process.env.NEXT_PUBLIC_SENTRY_DSN;
+    vi.stubEnv("NEXT_PUBLIC_SENTRY_DSN", "");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_abc");
+    vi.stubEnv("VERCEL_ENV", "production");
     await import("@/sentry.server.config");
     expect(init).not.toHaveBeenCalled();
   });
 
-  test("client init applies the privacy boundary when a DSN exists", async () => {
+  test("server init is skipped for a local run carrying a pulled production env", async () => {
+    // Regression for #235: DSN + VERCEL_ENV=production present (the
+    // `vercel env pull` shape) but no Vercel deployment markers — the
+    // SDK must not initialize at all.
     vi.resetModules();
-    process.env.NEXT_PUBLIC_SENTRY_DSN = "https://k@o1.ingest.sentry.io/2";
+    vi.stubEnv("NEXT_PUBLIC_SENTRY_DSN", "https://k@o1.ingest.sentry.io/2");
+    vi.stubEnv("NEXT_PUBLIC_SENTRY_ENVIRONMENT", "production");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    await import("@/sentry.server.config");
+    expect(init).not.toHaveBeenCalled();
+  });
+
+  test("client init applies the privacy boundary when sending is enabled", async () => {
+    vi.resetModules();
+    vi.stubEnv("NEXT_PUBLIC_SENTRY_DSN", "https://k@o1.ingest.sentry.io/2");
+    vi.stubEnv("NEXT_PUBLIC_SENTRY_SEND_EVENTS", "true");
+    vi.stubEnv("NEXT_PUBLIC_SENTRY_RESOLVED_ENVIRONMENT", "production");
     await import("@/instrumentation-client");
     expect(init).toHaveBeenCalledTimes(1);
     const opts = init.mock.calls[0][0];
@@ -279,24 +465,25 @@ describe("SDK initialization gating", () => {
     expect(opts.tracesSampleRate).toBe(0);
     expect(opts.enableLogs).toBe(false);
     expect(opts.dsn).toBe("https://k@o1.ingest.sentry.io/2");
+    expect(opts.environment).toBe("production");
     // Compare against the freshly-imported module — resetModules gives
     // this import a new instance.
     const fresh = await import("@/lib/sentry");
     expect(opts.beforeSend).toBe(fresh.sentryBeforeSend);
     expect(opts.beforeSendTransaction).toBe(fresh.sentryBeforeSendTransaction);
-    delete process.env.NEXT_PUBLIC_SENTRY_DSN;
   });
 
   test("register() loads the server config on the Node runtime and re-exports onRequestError", async () => {
     vi.resetModules();
-    process.env.NEXT_PUBLIC_SENTRY_DSN = "https://k@o1.ingest.sentry.io/2";
-    process.env.NEXT_RUNTIME = "nodejs";
+    vi.stubEnv("NEXT_PUBLIC_SENTRY_DSN", "https://k@o1.ingest.sentry.io/2");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_abc");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("NEXT_RUNTIME", "nodejs");
     const instrumentation = await import("@/instrumentation");
     await instrumentation.register();
     expect(init).toHaveBeenCalledTimes(1);
+    expect(init.mock.calls[0][0].environment).toBe("production");
     expect(instrumentation.onRequestError).toBe(captureRequestError);
-    delete process.env.NEXT_PUBLIC_SENTRY_DSN;
-    delete process.env.NEXT_RUNTIME;
   });
 });
 

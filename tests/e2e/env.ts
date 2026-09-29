@@ -27,7 +27,10 @@ export const E2E_CLAIM_PASSWORD = "e2e-test-only-password";
 export const E2E_FIREBASE_PROJECT_ID = "demo-sfpca";
 
 // The port the dev server listens on (webServer url / baseURL).
-export const E2E_APP_PORT = 3100;
+// Env-overridable for local port conflicts (e.g. another dev server
+// already bound to 3100); committed scripts and CI never set it.
+export const E2E_APP_PORT = Number(process.env.E2E_APP_PORT ?? 3100);
+export const E2E_APP_ORIGIN = `http://localhost:${E2E_APP_PORT}`;
 
 // The PGlite wire-protocol socket the dev server's DATABASE_URL points
 // at. Owned by tests/e2e/db-server.ts — the database accepts connections

@@ -307,9 +307,13 @@ Vercel/Firebase log streams.
 
 Sentry is **error monitoring only**: no Session Replay, no profiling,
 no performance tracing, no feedback widgets, no request-body capture.
-The SDK initializes only when `NEXT_PUBLIC_SENTRY_DSN` is set — without
-it the app behaves exactly as before (no events, no network calls).
-When configured, events pass through a deliberate privacy boundary
+The SDK initializes only when `NEXT_PUBLIC_SENTRY_DSN` is set **and**
+the runtime is a real Vercel deployment (or `SENTRY_ENABLE_LOCAL=true`
+is set for local debugging) — local dev, CI, and E2E runs never send
+events, and off Vercel infrastructure `environment=production` is
+unreachable, so a `vercel env pull`-generated `.env.local` cannot
+masquerade as production (RUNBOOK §15). When sending is enabled,
+events pass through a deliberate privacy boundary
 (`src/lib/sentry.ts`) that strips request headers/cookies/bodies/query
 strings, user identity, server hostnames, breadcrumbs that echo console
 output or form interaction, and any context/extra key that looks
@@ -391,7 +395,8 @@ Nothing below can be committed to the repo — configure in consoles:
 - **Sentry** → create the project, then set `NEXT_PUBLIC_SENTRY_DSN`
   (runtime), `SENTRY_ORG` / `SENTRY_PROJECT` / `SENTRY_AUTH_TOKEN`
   (source-map upload at build time), and optionally
-  `NEXT_PUBLIC_SENTRY_ENVIRONMENT` / `SENTRY_RELEASE` in Vercel env —
+  `NEXT_PUBLIC_SENTRY_ENVIRONMENT` / `SENTRY_RELEASE` in Vercel env.
+  Environment labeling is automatic and deployment-gated (RUNBOOK §15a) —
   see RUNBOOK §15 for scoping and the post-config verification
   procedure (admin-only `/admin/sentry-check` fires controlled
   synthetic errors through the real capture paths). Until configured

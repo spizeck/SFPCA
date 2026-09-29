@@ -10,6 +10,7 @@ import { dbQuery, expect, test } from "./fixtures";
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
+  E2E_APP_ORIGIN,
   E2E_FIREBASE_PROJECT_ID,
   E2E_OWNER_EMAIL,
   E2E_OWNER_PASSWORD,
@@ -62,7 +63,7 @@ test.describe("maintenance mode", () => {
       {
         name: "session",
         value: "forged-not-a-real-session-cookie",
-        url: "http://localhost:3100",
+        url: E2E_APP_ORIGIN,
         httpOnly: true,
       },
     ]);
