@@ -125,7 +125,7 @@ jobs:
                   functions=true ;;
 
                 # Playwright suite/config itself.
-                tests/e2e/*|playwright.config.ts)
+                tests/e2e/*|playwright*.config.ts)
                   e2e=true ;;
 
                 # Unit/component tests (vitest include: tests/**/*.test.*).
@@ -341,6 +341,9 @@ jobs:
 
       - name: Run E2E smoke tests
         run: npm run test:e2e
+
+      - name: Run maintenance-mode E2E
+        run: npm run test:e2e:maintenance
 
       - name: Upload failure artifacts
         if: failure()

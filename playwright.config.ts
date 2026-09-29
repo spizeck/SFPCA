@@ -23,6 +23,9 @@ const baseURL = `http://localhost:${E2E_APP_PORT}`;
 // retries never inherit a failed attempt's mutations.
 export default defineConfig({
   testDir: "tests/e2e",
+  // maintenance.spec.ts requires SITE_MAINTENANCE_MODE=true — it runs
+  // only under playwright.maintenance.config.ts (`test:e2e:maintenance`).
+  testIgnore: "**/maintenance.spec.ts",
   timeout: 60_000,
   // Generous expect bound: `next dev` compiles routes on demand, so the
   // first navigation to each route can take a while on a cold server.
