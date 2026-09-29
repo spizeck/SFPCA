@@ -7,21 +7,25 @@ import { logError } from "@/lib/logger";
 
 export async function saveHomepageData(data: Homepage) {
   const { authorized } = await requireAdmin();
-  
+
   if (!authorized) {
     throw new Error("Unauthorized");
   }
 
   try {
     await adminDb().collection("homepage").doc("main").set(data);
-    return { success: true };
+    return { ok: true };
   } catch (error) {
+    // Failure is reported here once — rethrowing would let
+    // onRequestError capture a second, information-free event.
     logError("admin", "homepage-save", error);
-    throw new Error("Failed to save homepage data");
+    return { ok: false };
   }
 }
 
-export async function loadHomepageData() {
+export async function loadHomepageData(): Promise<
+  { ok: true; data: Homepage | null } | { ok: false }
+> {
   // The data is publicly readable, but every server action under /admin
   // self-authorizes so the boundary stays uniform and can't be weakened
   // by a future action copied from this one.
@@ -33,14 +37,9 @@ export async function loadHomepageData() {
 
   try {
     const docSnap = await adminDb().collection("homepage").doc("main").get();
-    
-    if (docSnap.exists) {
-      return docSnap.data() as Homepage;
-    }
-    
-    return null;
+    return { ok: true, data: docSnap.exists ? (docSnap.data() as Homepage) : null };
   } catch (error) {
     logError("admin", "homepage-load", error);
-    throw new Error("Failed to load homepage data");
+    return { ok: false };
   }
 }

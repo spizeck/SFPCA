@@ -839,10 +839,20 @@ RUNBOOK.md §19.
 
 ## 14. Observability
 
-Registry code uses the existing `src/lib/logger.ts` structured logging
-(`logError(subsystem, operation, err)`) — Sentry picks up the same
-events; no second stack. DB errors are logged by operation name; SQL
-parameters and row data are never logged.
+Registry code uses the `src/lib/logger.ts` structured logging
+convention. `logError(subsystem, operation, err)` means a genuinely
+unexpected failure that code caught and handled: it emits the
+structured console entry AND reports the exception to Sentry through
+the initialized SDK (`captureException`, tags `subsystem`/`operation`,
+context as `extra` — #218). Expected outcomes (auth denials,
+validation, not-found, business-rule rejections) belong on
+`logWarn`/`logInfo` — console only, never Sentry. An error that
+already reached Sentry is not re-forwarded: call sites that capture
+themselves (the shared `ErrorFallback`) pass `{ sentry: false }`, and
+Next.js digested errors serialized to the client are skipped because
+`onRequestError` already captured the real exception server-side.
+DB errors are logged by operation name; SQL parameters and row data
+are never logged.
 
 ## 15. Roadmap notes (#166–#179)
 

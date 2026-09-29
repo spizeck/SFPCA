@@ -71,9 +71,12 @@ export default function HomepageEditor() {
     setLoadError(false);
     try {
       const result = await loadHomepageData();
-      if (result) {
-        setData(result);
-        snapshotRef.current = JSON.stringify(result);
+      if (!result.ok) {
+        // The action already logged the real failure server-side.
+        setLoadError(true);
+      } else if (result.data) {
+        setData(result.data);
+        snapshotRef.current = JSON.stringify(result.data);
       } else {
         // The editor only renders after a successful load, so `data`
         // still equals INITIAL_DATA here — snapshot that constant rather
@@ -96,7 +99,16 @@ export default function HomepageEditor() {
   const handleSave = () => {
     saveMutation.run(async () => {
       try {
-        await saveHomepageData(data);
+        const result = await saveHomepageData(data);
+        if (!result.ok) {
+          toast({
+            title: "Error",
+            description:
+              "Failed to save homepage data. Your changes are still here — try again.",
+            variant: "destructive",
+          });
+          return;
+        }
         snapshotRef.current = JSON.stringify(data);
         toast({
           title: "Success",

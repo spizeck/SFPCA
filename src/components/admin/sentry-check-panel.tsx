@@ -9,7 +9,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { fireSentryVerification } from "@/app/admin/sentry-check/actions";
+import {
+  fireSentryCaughtVerification,
+  fireSentryVerification,
+} from "@/app/admin/sentry-check/actions";
 import {
   SENTRY_VERIFICATION_MARKER,
   sentryVerificationError,
@@ -24,13 +27,18 @@ import {
 //   its Reference digest against Vercel logs.
 // - Server: calls the admin-gated server action → throw propagates →
 //   instrumentation.ts onRequestError → Sentry.
+// - Caught: calls the admin-gated server action → catches the throw →
+//   logError() → console + Sentry (the #218 path every operational
+//   catch block uses). The action still returns a normal result.
 //
 // No direct Sentry calls here — the point is to exercise the real
 // pipeline including the privacy boundary, not to bypass it.
 export function SentryCheckPanel() {
   const [armBrowserError, setArmBrowserError] = useState(false);
   const [serverNote, setServerNote] = useState<string | null>(null);
+  const [caughtNote, setCaughtNote] = useState<string | null>(null);
   const [firing, setFiring] = useState(false);
+  const [firingCaught, setFiringCaught] = useState(false);
 
   if (armBrowserError) {
     throw sentryVerificationError("browser");
@@ -52,6 +60,23 @@ export function SentryCheckPanel() {
       );
     } finally {
       setFiring(false);
+    }
+  };
+
+  const fireCaughtError = async () => {
+    setFiringCaught(true);
+    setCaughtNote(null);
+    try {
+      const result = await fireSentryCaughtVerification();
+      setCaughtNote(
+        result.fired
+          ? "Caught error logged — check Sentry and Vercel runtime logs."
+          : "Not authorized — no event was sent.",
+      );
+    } catch {
+      setCaughtNote("Action call failed — nothing was logged.");
+    } finally {
+      setFiringCaught(false);
     }
   };
 
@@ -107,6 +132,32 @@ export function SentryCheckPanel() {
           </Button>
           {serverNote && (
             <p className="text-sm text-muted-foreground">{serverNote}</p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Caught operational path</CardTitle>
+          <CardDescription>
+            Calls an admin-gated server action that throws, catches the
+            error, and logs it through <code>logError</code> — the same
+            shape as cron, webhook, and action failure handlers. The
+            action returns a normal result while the error reports to
+            Sentry: exactly one event, tagged{" "}
+            <code>admin / sentry-check-caught</code>.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Button
+            variant="destructive"
+            onClick={fireCaughtError}
+            disabled={firingCaught}
+          >
+            {firingCaught ? "Firing…" : "Fire caught test error"}
+          </Button>
+          {caughtNote && (
+            <p className="text-sm text-muted-foreground">{caughtNote}</p>
           )}
         </CardContent>
       </Card>

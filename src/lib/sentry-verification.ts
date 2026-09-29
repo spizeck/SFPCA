@@ -7,7 +7,7 @@
 export const SENTRY_VERIFICATION_MARKER = "SENTRY_VERIFICATION_EVENT";
 
 export function sentryVerificationError(
-  surface: "browser" | "server",
+  surface: "browser" | "server" | "caught",
 ): Error {
   return new Error(
     `${SENTRY_VERIFICATION_MARKER}:${surface} — controlled synthetic test, safe to ignore`,

@@ -539,11 +539,24 @@ hook config and edit again.
 ## 15. Sentry error monitoring (post-#139/#140)
 
 Sentry collects **unexpected application exceptions** — unhandled
-browser errors, React error-boundary crashes, and server-side
-exceptions in Server Components, route handlers, and `proxy.ts`. It is
-a supplement, not a replacement: Vercel runtime logs remain the
+browser errors, React error-boundary crashes, server-side exceptions
+in Server Components, route handlers, and `proxy.ts`, and caught
+operational failures logged through `logError()` (#218: a failed cron
+run, webhook writeback, or Postgres outage inside a try/catch now
+produces a Sentry event, not just a Vercel log line). It is a
+supplement, not a replacement: Vercel runtime logs remain the
 structured operational record (`src/lib/logger.ts`), Cloud Logging
 covers Functions, and GitHub Actions gates deploys.
+
+**Logging convention:** `logError` is reserved for unexpected caught
+failures — it emits the structured console entry and reports the
+exception to Sentry (the real `Error` object, `subsystem`/`operation`
+tags, safe `extra` context). Expected outcomes — auth denials,
+validation, not-found, user cancellation, business-rule rejections —
+use `logWarn`/`logInfo` and never reach Sentry. The same failure is
+never reported twice: code that rethrows for framework instrumentation
+(`onRequestError`, `ErrorFallback`) does not also `logError`, and
+client-side digested placeholders of server errors are skipped.
 
 **When to look where:**
 
@@ -556,7 +569,9 @@ covers Functions, and GitHub Actions gates deploys.
   denials, validation, upstream fetch misses), `subsystem`/`operation`
   timelines, and anything too routine to be an exception. A boundary
   crash appears in both places: the Vercel log entry and the Sentry
-  event share the same digest.
+  event share the same digest. A caught operational failure also
+  appears in both — the `logError` console entry and the Sentry event
+  share the same `subsystem`/`operation` pair.
 - **Cloud Logging** — Firebase Functions only; Sentry does not
   instrument Functions (deliberate — #139 scopes Sentry to the Next.js
   app).
@@ -646,22 +661,27 @@ After Chad sets the Sentry/Vercel values and a deployment has gone out:
 3. Click **"Throw browser test error"** — the page is replaced by the
    real "Something went wrong" fallback with a Reference digest; note
    the digest, then click Try again.
-4. In Sentry → Issues, confirm **exactly two** events with messages
-   starting `SENTRY_VERIFICATION_EVENT:` (`:server` and `:browser`).
-   One event per click — no duplicates.
-5. Confirm each event's **environment** is `production`. A preview
+4. Click **"Fire caught test error"** — the action catches and logs
+   through `logError`, so the button reports a normal result while the
+   error reports to Sentry. This exercises the same path cron,
+   webhook, and action failure handlers use.
+5. In Sentry → Issues, confirm **exactly three** events with messages
+   starting `SENTRY_VERIFICATION_EVENT:` (`:server`, `:browser`,
+   `:caught`). One event per click — no duplicates. The `:caught`
+   event carries tags `subsystem=admin`, `operation=sentry-check-caught`.
+6. Confirm each event's **environment** is `production`. A preview
    deploy performing the same steps should show `preview`.
-6. Confirm each event's **release** equals the deployment's commit SHA
+7. Confirm each event's **release** equals the deployment's commit SHA
    (Vercel → Deployments → commit).
-7. Open an event's stack trace — frames resolve to real source
+8. Open an event's stack trace — frames resolve to real source
    locations (e.g. `sentry-check-panel.tsx`, `actions.ts`), not
    minified `_next/static/chunks/...` references.
-8. Inspect the event payload: **no** user identity, email, cookies,
+9. Inspect the event payload: **no** user identity, email, cookies,
    `Authorization`, request body, receipt path, or registration data —
    only method + path under request, redacted messages, safe tags.
-9. For the browser event, search Vercel → Logs (Runtime) for the
-   Reference digest shown on the fallback page — the
-   `subsystem:"ui"` log entry with the same digest should exist.
+10. For the browser event, search Vercel → Logs (Runtime) for the
+    Reference digest shown on the fallback page — the
+    `subsystem:"ui"` log entry with the same digest should exist.
 
 ### 15d. Troubleshooting
 
@@ -687,8 +707,10 @@ After Chad sets the Sentry/Vercel values and a deployment has gone out:
   scope, or org/project slug mismatch. Fix the env values and redeploy;
   the app itself is unaffected either way.
 - **Duplicate events for one failure** → report it — each capture path
-  is designed to fire once (single `captureException` in the shared
-  fallback, framework hooks elsewhere); duplicates indicate a
+  is designed to fire once (`logError` forwards caught errors,
+  `ErrorFallback` captures boundary errors with the digest tag and
+  opts its `logError` out, framework hooks catch the uncaught, and
+  digested client placeholders are skipped); duplicates indicate a
   regression, not configuration.
 - **Sentry event exists but no matching Vercel log** → boundary events
   correlate by the `error_digest` tag / Reference digest; server

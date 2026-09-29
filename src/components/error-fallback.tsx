@@ -22,8 +22,9 @@ export function ErrorFallback({
   useEffect(() => {
     // Client-side render failures only exist in this browser — the
     // digest is the link to the server-rendered log entry Next.js
-    // already wrote for server-side failures.
-    logError("ui", "render", error, { digest: error.digest });
+    // already wrote for server-side failures. sentry:false — the
+    // captureException below is this error's one report.
+    logError("ui", "render", error, { digest: error.digest }, { sentry: false });
     // Errors reaching App Router boundaries never reach Sentry's global
     // handlers (the boundary swallows them), so they are captured here —
     // the single shared site for error.tsx and global-error.tsx, which
