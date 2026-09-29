@@ -22,7 +22,7 @@ test.describe("communications admin surface", () => {
     await signInAsAdmin(page);
     await page
       .getByRole("navigation")
-      .getByRole("link", { name: "Comms" })
+      .getByRole("link", { name: "Communications" })
       .first()
       .click();
     await expect(page).toHaveURL("/admin/communications");

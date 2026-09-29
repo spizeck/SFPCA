@@ -350,11 +350,13 @@ infer one from another.
   the client bundle; never let the client read VERCEL_ENV or
   NEXT_PUBLIC_SENTRY_ENVIRONMENT directly. Never commit real
   DSN/org/token values. Controlled
-  verification lives at `/admin/sentry-check` (admin-gated, URL-only):
-  a browser throw through the real boundary and a server action that
-  re-checks `requireAdmin()` itself — server actions are POST
-  endpoints, never rely on layout auth. See README's Observability &
-  troubleshooting section and RUNBOOK §15.
+  verification lives at `/admin/sentry-check` (admin-gated, nav →
+  System): a browser throw contained by a dedicated boundary that
+  renders the shared `ErrorFallback` (same capture path as
+  app/error.tsx), a server action that re-checks `requireAdmin()`
+  itself — server actions are POST endpoints, never rely on layout
+  auth — and a caught `logError` path (#218). See README's
+  Observability & troubleshooting section and RUNBOOK §15.
 - Consent & analytics (post-#116): Klaro is the consent layer; GTM is
   the only tag-loading mechanism and is injected only after affirmative
   analytics consent. `src/lib/consent.ts` owns Consent Mode v2

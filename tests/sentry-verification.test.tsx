@@ -3,7 +3,6 @@
 // endpoints, not covered by AdminLayout), and both triggers produce
 // the unmistakable synthetic marker through real capture paths.
 // @sentry/nextjs is mocked — nothing here can contact sentry.io.
-import { Component, type ReactNode } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -29,24 +28,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
-
-// Minimal boundary so the render-thrown browser error can be asserted
-// instead of crashing the test.
-class TestBoundary extends Component<
-  { children: ReactNode; onError: (error: Error) => void },
-  { error: Error | null }
-> {
-  state = { error: null as Error | null };
-  static getDerivedStateFromError(error: Error) {
-    return { error };
-  }
-  componentDidCatch(error: Error) {
-    this.props.onError(error);
-  }
-  render() {
-    return this.state.error ? <div>boundary caught</div> : this.props.children;
-  }
-}
 
 describe("sentryVerificationError", () => {
   test("produces the unmistakable synthetic marker per surface", () => {
@@ -96,23 +77,28 @@ describe("SentryCheckPanel", () => {
     expect(screen.getByText(SENTRY_VERIFICATION_MARKER)).toBeInTheDocument();
   });
 
-  test("browser button throws the synthetic error into the real boundary path", () => {
-    const onError = vi.fn();
-    render(
-      <TestBoundary onError={onError}>
-        <SentryCheckPanel />
-      </TestBoundary>,
-    );
+  test("browser button throws through the contained real ErrorFallback path", () => {
+    render(<SentryCheckPanel />);
     fireEvent.click(
       screen.getByRole("button", { name: /Throw browser test error/ }),
     );
-    // Exactly one thrown error — the boundary renders once per failure,
-    // which is what keeps the #139 capture site to a single event.
-    expect(onError).toHaveBeenCalledTimes(1);
-    expect(onError.mock.calls[0][0].message).toContain(
+    // The synthetic crash is contained by the panel's own boundary and
+    // renders the same shared ErrorFallback visitors hit — one
+    // captureException through the real #139 capture site.
+    expect(screen.getByText("Something went wrong")).toBeInTheDocument();
+    expect(captureException).toHaveBeenCalledTimes(1);
+    expect(captureException.mock.calls[0][0].message).toContain(
       `${SENTRY_VERIFICATION_MARKER}:browser`,
     );
-    expect(screen.getByText("boundary caught")).toBeInTheDocument();
+    // The rest of the panel survived — the other triggers still render.
+    expect(
+      screen.getByRole("button", { name: /Throw server test error/ }),
+    ).toBeInTheDocument();
+    // "Try again" resets the boundary and restores the trigger.
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(
+      screen.getByRole("button", { name: /Throw browser test error/ }),
+    ).toBeInTheDocument();
   });
 
   test("server button reports not-authorized without throwing an event", async () => {
