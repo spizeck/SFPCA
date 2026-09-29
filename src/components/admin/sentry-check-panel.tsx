@@ -30,7 +30,11 @@ import {
 //   replace the whole page through app/error.tsx — the capture path
 //   being verified is identical.
 // - Server: calls the admin-gated server action → throw propagates →
-//   instrumentation.ts onRequestError → Sentry.
+//   instrumentation.ts onRequestError → Sentry (the action POST
+//   intentionally returns HTTP 500; the SDK flush is bound to the
+//   request lifecycle via after() with a timeout derived from the
+//   Vercel invocation deadline, and a failed flush is logged so a
+//   dropped event is observable).
 // - Caught: calls the admin-gated server action → catches the throw →
 //   logError() → console + Sentry (the #218 path every operational
 //   catch block uses). The action still returns a normal result.
@@ -166,10 +170,12 @@ export function SentryCheckPanel() {
         <CardHeader>
           <CardTitle>Server capture path</CardTitle>
           <CardDescription>
-            Calls an admin-gated server action that throws — captured by
-            the server-side request-error hook. The button reports
-            &ldquo;Not authorized&rdquo; without sending anything if the
-            session check fails.
+            Calls an admin-gated server action that throws — the action
+            call intentionally fails (HTTP 500) and the error is
+            captured by the server-side request-error hook
+            (instrumentation <code>onRequestError</code>) exactly once.
+            The button reports &ldquo;Not authorized&rdquo; without
+            sending anything if the session check fails.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">

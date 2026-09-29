@@ -4,18 +4,23 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { Breadcrumb, ErrorEvent } from "@sentry/nextjs";
 
-const { captureException, init, captureRequestError } = vi.hoisted(() => ({
-  captureException: vi.fn(),
-  init: vi.fn(),
-  captureRequestError: vi.fn(),
-  captureRouterTransitionStart: vi.fn(),
-}));
+const { captureException, init, captureRequestError, flush, getClient } =
+  vi.hoisted(() => ({
+    captureException: vi.fn(),
+    init: vi.fn(),
+    captureRequestError: vi.fn(),
+    captureRouterTransitionStart: vi.fn(),
+    flush: vi.fn().mockResolvedValue(false),
+    getClient: vi.fn().mockReturnValue({}),
+  }));
 
 vi.mock("@sentry/nextjs", () => ({
   init,
   captureException,
   captureRequestError,
   captureRouterTransitionStart: vi.fn(),
+  flush,
+  getClient,
   breadcrumbsIntegration: (opts: unknown) => ({
     name: "Breadcrumbs",
     options: opts,
@@ -496,7 +501,7 @@ describe("SDK initialization gating", () => {
     expect(opts.beforeSendTransaction).toBe(fresh.sentryBeforeSendTransaction);
   });
 
-  test("register() loads the server config on the Node runtime and re-exports onRequestError", async () => {
+  test("register() loads the server config on the Node runtime and onRequestError captures", async () => {
     vi.resetModules();
     vi.stubEnv("NEXT_PUBLIC_SENTRY_DSN", "https://k@o1.ingest.sentry.io/2");
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_abc");
@@ -506,7 +511,22 @@ describe("SDK initialization gating", () => {
     await instrumentation.register();
     expect(init).toHaveBeenCalledTimes(1);
     expect(init.mock.calls[0][0].environment).toBe("production");
-    expect(instrumentation.onRequestError).toBe(captureRequestError);
+    // The hook forwards the uncaught error to Sentry's captureRequestError
+    // and binds the flush to the request lifecycle (or a floating flush
+    // outside request scope) so serverless freeze cannot drop the event.
+    instrumentation.onRequestError(
+      new Error("uncaught"),
+      { path: "/admin/sentry-check", method: "POST", headers: {} },
+      {
+        routerKind: "App Router",
+        routePath: "/admin/sentry-check",
+        routeType: "action",
+        renderSource: "react-server-components-payload",
+        revalidateReason: undefined,
+      },
+    );
+    expect(captureRequestError).toHaveBeenCalledTimes(1);
+    expect(flush).toHaveBeenCalled();
   });
 });
 
