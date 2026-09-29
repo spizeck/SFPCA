@@ -91,11 +91,15 @@ export async function isAdmin(email: string): Promise<{ isAdmin: boolean; role?:
 }
 
 // The maintenance gate's trust decision (#189). A session cookie earns
-// the bypass only when the FULL admin chain verifies — Firebase session
-// cookie (signature, expiry, revocation) plus the Postgres admin_users
-// / ADMIN_EMAILS lookup — exactly what requireAdmin() runs on admin
-// pages. Any failure, expected or not, returns false: the gate fails
-// closed. Nothing client-controlled is ever trusted on its own.
+// the public-site bypass only when BOTH layers verify: the Firebase
+// session cookie (signature, expiry, revocation) AND a live Postgres
+// admin_users row — deliberately NOT isAdmin()/ADMIN_EMAILS, so staff
+// revocation is a single source of truth: deleting the row re-engages
+// the gate on the next request even for env-bootstrapped accounts.
+// requireAdmin() still honors ADMIN_EMAILS as the emergency bootstrap
+// for /admin itself; only the maintenance bypass is Postgres-only. Any
+// failure, expected or not, returns false: the gate fails closed.
+// Nothing client-controlled is ever trusted on its own.
 export async function isVerifiedAdminSession(
   sessionCookie: string | undefined | null,
 ): Promise<boolean> {
@@ -103,8 +107,15 @@ export async function isVerifiedAdminSession(
   if (!user?.email) {
     return false;
   }
-  const { isAdmin: userIsAdmin } = await isAdmin(user.email);
-  return userIsAdmin;
+  try {
+    return (await findAdminUser(user.email)) !== null;
+  } catch (error) {
+    // Fail closed to no-bypass, but a Postgres outage here silently
+    // gates every staff member during a maintenance window — that must
+    // be diagnosable.
+    logError("auth", "maintenance-admin-lookup", error);
+    return false;
+  }
 }
 
 export async function requireAdmin() {

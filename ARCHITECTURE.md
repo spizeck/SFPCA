@@ -133,9 +133,13 @@ stack is available there) is the single routing gate. Public paths under
 request carries a session cookie that verifies as an **authorized
 admin** through `isVerifiedAdminSession()`: Firebase
 `verifySessionCookie(cookie, true)` (signature, expiry, revocation) then
-the same `admin_users`/`ADMIN_EMAILS` lookup `requireAdmin()` runs. The
-same chain, invoked at a second enforcement point — not a second auth
-system. Cookie *presence* earns only the check, never the bypass;
+a live Postgres `admin_users` row. The bypass deliberately does **not**
+consult `ADMIN_EMAILS` — `admin_users` is the single revocation point,
+so deleting the row re-engages the gate on the next request even for
+env-bootstrapped accounts (`requireAdmin` keeps the env bootstrap for
+`/admin` itself; the login session route re-provisions the row for
+env-listed users, so this divergence only matters for a row deleted
+post-login). Cookie *presence* earns only the check, never the bypass;
 forged, expired, revoked, and valid-but-non-admin cookies all fail
 closed to the maintenance redirect. `/admin` and `/portal` keep their
 independent page-level `requireAdmin`/`requireOwner` regardless of the

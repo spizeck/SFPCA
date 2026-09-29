@@ -94,8 +94,9 @@ export type ProxyAction = "allow" | "login" | "maintenance" | "admin-check";
 //
 // "admin-check" (#189): a gated public path with a session cookie. Cookie
 // PRESENCE proves nothing — a cookie value is client-controlled — so the
-// proxy must verify the session against the real admin chain (Firebase
-// session-cookie verification + admin_users) before allowing the bypass.
+// proxy must verify the session before allowing the bypass: Firebase
+// session-cookie verification plus a live Postgres admin_users row
+// (ADMIN_EMAILS alone does not bypass — revocation stays single-source).
 // No cookie means the redirect is unconditional, so anonymous visitors
 // never pay the verification cost.
 export function getProxyAction(

@@ -23,6 +23,11 @@ export default {
         ? baseConfig.webServer.env
         : {}),
       SITE_MAINTENANCE_MODE: "true",
+      // Pins the #189 authority split: an env-listed account whose
+      // admin_users row is gone keeps /admin (emergency bootstrap) but
+      // must NOT earn the public-site bypass — admin_users is the single
+      // revocation point for the gate.
+      ADMIN_EMAILS: "e2e-env-admin@example.com",
     },
   },
 };

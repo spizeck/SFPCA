@@ -180,4 +180,39 @@ test.describe("maintenance mode", () => {
     await page.goto("/");
     await expect(page).toHaveURL("/under-construction");
   });
+
+  test("ADMIN_EMAILS alone does not earn the bypass once the row is gone", async ({
+    page,
+  }) => {
+    // The authority split (#189): the env allowlist is the emergency
+    // bootstrap for /admin via requireAdmin → isAdmin, but the
+    // maintenance gate consults admin_users only. This account IS in
+    // ADMIN_EMAILS (playwright.maintenance.config.ts webServer env);
+    // login provisions its admin_users row, so deleting the row
+    // mid-session reproduces the env-only state — and the gate must
+    // re-engage even though /admin stays reachable.
+    const email = "e2e-env-admin@example.com";
+    const password = "e2e-test-only-password";
+    await adminAuth().createUser({ email, password, emailVerified: true });
+
+    await signIn(page, email, password);
+    // Session route provisioned the row (env-listed) → bypass works.
+    await expect(page).toHaveURL("/admin");
+    await page.goto("/");
+    await expect(page).toHaveURL("/");
+
+    // Delete the staff row — the env entry still authorizes /admin…
+    await dbQuery("DELETE FROM admin_users WHERE lower(email) = lower($1)", [
+      email,
+    ]);
+    await page.goto("/admin");
+    await expect(page).toHaveURL("/admin");
+
+    // …but the public-site bypass requires the live row: gated again
+    // on the very next request.
+    await page.goto("/");
+    await expect(page).toHaveURL("/under-construction");
+    await page.goto("/animal-adoptions");
+    await expect(page).toHaveURL("/under-construction");
+  });
 });

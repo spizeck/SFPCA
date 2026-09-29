@@ -289,13 +289,17 @@ while it is `"true"` — for everyone except a **server-verified admin**
 
 - **Admin bypass:** the proxy verifies the `session` cookie through the
   real chain — Firebase session-cookie verification (signature, expiry,
-  revocation) plus the `admin_users`/`ADMIN_EMAILS` lookup — on every
-  gated request. A verified admin browses the public site and `/admin`
+  revocation) plus a live Postgres `admin_users` row — on every gated
+  request. A verified admin browses the public site and `/admin`
   normally; a forged, expired, revoked, or valid-but-non-admin cookie
   fails closed to `/under-construction` (cookie presence alone proves
-  nothing — the check runs on the Node.js runtime, same code path as
-  `requireAdmin`). Removing a staff row from `admin_users` or revoking
+  nothing — the check runs on the Node.js runtime, same session-verifier
+  the pages use). Removing a staff row from `admin_users` or revoking
   the Firebase session re-engages the gate on the very next request.
+  `ADMIN_EMAILS` does **not** earn the public-site bypass — `admin_users`
+  is the single revocation point (env-listed accounts normally get a row
+  provisioned at login anyway; the env list remains the emergency
+  bootstrap for `/admin` itself).
 - **Stays reachable:** `/login`, `/admin/*` (still behind the session
   gate — maintenance mode never weakens admin auth), `/api/auth/*`,
   `/api/cron/*` and `/api/webhooks/*` (#216 — reminders, receipt

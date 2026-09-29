@@ -1,10 +1,12 @@
 // The maintenance gate's trust decision (#189): isVerifiedAdminSession
 // runs the REAL chain — firebase-admin session-cookie verification then
-// the admin_users/ADMIN_EMAILS lookup — with nothing mocked. These
-// tests pin the reject side: anything that cannot be cryptographically
-// verified as a signed-in admin session must fail closed. The accept
-// side is proven end-to-end by tests/e2e/maintenance.spec.ts, where the
-// same function runs inside the proxy against the Auth emulator.
+// the live admin_users row lookup (Postgres-only: ADMIN_EMAILS does not
+// earn the bypass, keeping revocation single-source) — with nothing
+// mocked. These tests pin the reject side: anything that cannot be
+// cryptographically verified as a signed-in admin session must fail
+// closed. The accept side — and the env-only-no-bypass split — is
+// proven end-to-end by tests/e2e/maintenance.spec.ts, where the same
+// function runs inside the proxy against the Auth emulator.
 import { describe, expect, test } from "vitest";
 import { isVerifiedAdminSession } from "@/lib/auth";
 

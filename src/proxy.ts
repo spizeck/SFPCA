@@ -22,10 +22,11 @@ export async function proxy(request: NextRequest) {
     // Verified admin bypass (#189): the proxy runs on the Node.js
     // runtime, so the same auth stack the pages use is available here —
     // Firebase session-cookie verification (signature, expiry,
-    // revocation) followed by the admin_users/ADMIN_EMAILS lookup in
-    // isVerifiedAdminSession. A forged, expired, revoked, or non-admin
-    // cookie falls through to the maintenance redirect; the check fails
-    // closed.
+    // revocation) followed by the admin_users lookup in
+    // isVerifiedAdminSession (Postgres-only by design: ADMIN_EMAILS
+    // bootstrap does not earn the public-site bypass). A forged,
+    // expired, revoked, or non-admin cookie falls through to the
+    // maintenance redirect; the check fails closed.
     const bypass = await isVerifiedAdminSession(sessionCookie);
     return bypass
       ? NextResponse.next()
