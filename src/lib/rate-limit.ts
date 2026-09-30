@@ -94,10 +94,13 @@ export type RateLimitOutcome =
 
 // Count one attempt against a bucket/window for the given subject. The
 // subject is already a salted digest — this module never sees a raw IP.
+// The db handle is resolved inside the try: default-parameter
+// evaluation would run before the fail-open catch, and a getRegistryDb
+// that throws (unconfigured registry) must still degrade to allowed.
 export async function checkRateLimit(
   bucket: RateLimitBucket,
   subject: string,
-  db: RegistryDb = getRegistryDb(),
+  db?: RegistryDb,
   now: Date = new Date(),
 ): Promise<RateLimitOutcome> {
   const rule = rateLimitRules()[bucket];
@@ -108,7 +111,8 @@ export async function checkRateLimit(
   const expiresAt = new Date(windowStart.getTime() + windowMs);
 
   try {
-    const [{ count }] = await db
+    const store = db ?? getRegistryDb();
+    const [{ count }] = await store
       .insert(rateLimitWindows)
       .values({
         bucket,
@@ -132,7 +136,7 @@ export async function checkRateLimit(
     // the table stays proportional to active subjects — not to uptime.
     // lt() (not sql`... < ${now}`) — the raw template passes the Date
     // through unmapped and the PGlite wire bridge rejects it.
-    await db
+    await store
       .delete(rateLimitWindows)
       .where(lt(rateLimitWindows.expiresAt, now));
 

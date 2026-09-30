@@ -10,11 +10,16 @@ import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import * as schema from "@/lib/db/schema";
 import { runMigrationsOnPglite } from "@/lib/db/migrate";
 
-const { logError, logWarn } = vi.hoisted(() => ({
+const { logError, logWarn, getRegistryDb } = vi.hoisted(() => ({
   logError: vi.fn(),
   logWarn: vi.fn(),
+  getRegistryDb: vi.fn(),
 }));
 vi.mock("@/lib/logger", () => ({ logError, logWarn }));
+vi.mock("@/lib/db/client", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  getRegistryDb,
+}));
 
 import {
   checkRateLimit,
@@ -132,6 +137,22 @@ describe("checkRateLimit", () => {
       expect.any(Error),
     );
     expect(logWarn).not.toHaveBeenCalled();
+  });
+
+  test("a getRegistryDb that throws also degrades to allowed", async () => {
+    // DB acquisition happens inside the fail-open boundary: an
+    // unconfigured registry must not break public intake.
+    getRegistryDb.mockImplementation(() => {
+      throw new Error("no DATABASE_URL");
+    });
+    const d = await checkRateLimit("registration.submit", SUBJECT);
+    expect(d.allowed).toBe(true);
+    expect(d.status).toBe("degraded");
+    expect(logError).toHaveBeenCalledWith(
+      "rate-limit",
+      "rate-limit-check",
+      expect.any(Error),
+    );
   });
 });
 
