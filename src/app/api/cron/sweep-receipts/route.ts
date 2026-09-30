@@ -9,7 +9,7 @@
 // the variable is unset so the route is never publicly callable.
 
 import { NextRequest, NextResponse } from "next/server";
-import { adminReceiptBucket } from "@/lib/firebase-admin";
+import { adminReceiptBucket } from "@/lib/firebase-admin-storage";
 import { getRegistryDb } from "@/lib/db/client";
 import { sweepOrphanedReceipts } from "@/lib/registry/receipt-sweep";
 import { sweepOrphanedVetDocuments } from "@/lib/registry/vet-document-sweep";

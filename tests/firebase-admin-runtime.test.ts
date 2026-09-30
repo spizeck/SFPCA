@@ -18,6 +18,7 @@ const ADMIN_MODULES = [
   "firebase-admin/app",
   "firebase-admin/auth",
   "firebase-admin/firestore",
+  "firebase-admin/storage",
 ] as const;
 
 // Spawning Node and loading firebase-admin takes a few seconds — allow

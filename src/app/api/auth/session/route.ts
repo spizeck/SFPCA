@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminAuth } from "@/lib/firebase-admin";
+import { adminAuth } from "@/lib/firebase-admin-auth";
 import { isAdmin, isExpectedAuthError } from "@/lib/auth";
 import { provisionAdminUser } from "@/lib/registry/admin-users";
 import { upsertAuthIdentity } from "@/lib/registry/persons";

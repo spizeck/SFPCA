@@ -88,7 +88,7 @@ async function main() {
 
   // Lazy import so missing Firebase env fails with the Admin SDK's
   // explicit missing-var error rather than at module load.
-  const { adminBucket } = await import("../src/lib/firebase-admin");
+  const { adminBucket } = await import("../src/lib/firebase-admin-storage");
   const bucket = adminBucket();
 
   const t1 = Date.now();

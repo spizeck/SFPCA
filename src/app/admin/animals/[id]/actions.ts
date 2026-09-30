@@ -99,7 +99,7 @@ import {
   getAnimalMergeInfo,
   type AnimalMergeInfo,
 } from "@/lib/registry/merge";
-import { adminBucket } from "@/lib/firebase-admin";
+import { adminBucket } from "@/lib/firebase-admin-storage";
 import { isVetDocumentFile, VET_DOC_PATH_RE } from "@/lib/medical";
 import { logError, type LogSubsystem } from "@/lib/logger";
 

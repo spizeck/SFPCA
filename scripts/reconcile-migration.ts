@@ -90,7 +90,7 @@ async function main() {
       `db=${target.pathname.slice(1)}`,
   );
 
-  const { adminDb } = await import("../src/lib/firebase-admin");
+  const { adminDb } = await import("../src/lib/firebase-admin-db");
   const fs = adminDb();
   const pg = postgres(dbUrl!, { max: 1, prepare: false });
   const db = drizzle(pg);

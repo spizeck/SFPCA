@@ -26,7 +26,7 @@ const {
   mockProvisionOwnerLink: vi.fn(),
 }));
 
-vi.mock("@/lib/firebase-admin", () => ({
+vi.mock("@/lib/firebase-admin-auth", () => ({
   adminAuth: () => ({
     verifyIdToken: mockVerifyIdToken,
     createSessionCookie: mockCreateSessionCookie,

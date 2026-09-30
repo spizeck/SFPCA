@@ -1,6 +1,6 @@
 "use server";
 
-import { adminDb } from "@/lib/firebase-admin";
+import { adminDb } from "@/lib/firebase-admin-db";
 import { requireAdmin } from "@/lib/auth";
 import { Homepage } from "@/lib/types";
 import { logError } from "@/lib/logger";

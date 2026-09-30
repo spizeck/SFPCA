@@ -1,7 +1,4 @@
 import { initializeApp, getApps, cert, App } from "firebase-admin/app";
-import { getAuth } from "firebase-admin/auth";
-import { getFirestore } from "firebase-admin/firestore";
-import { getStorage } from "firebase-admin/storage";
 
 let adminApp: App;
 
@@ -19,7 +16,7 @@ export function missingAdminEnvVars(
   return REQUIRED_ADMIN_ENV.filter((name) => !env[name]);
 }
 
-function getAdminApp() {
+export function getAdminApp() {
   if (getApps().length === 0) {
     // Emulator hosts signal a local/E2E run: no credentials are needed or
     // used, and a demo-* project ID can never reach production services.
@@ -56,20 +53,3 @@ function getAdminApp() {
   }
   return adminApp;
 }
-
-export const adminAuth = () => getAuth(getAdminApp());
-export const adminDb = () => getFirestore(getAdminApp());
-export const adminStorage = () => getStorage(getAdminApp());
-
-// Receipt objects live under receipts/<submissionId> in the default
-// bucket. Signed URLs are minted here (never via the client SDK) so
-// admin review can read private receipts without public-read rules.
-export const adminReceiptBucket = () => adminBucket();
-
-// Generic default-bucket accessor — used by the db-backup scripts for
-// the db-backups/ prefix (deny-all client rules; Admin SDK bypasses).
-export const adminBucket = () =>
-  adminStorage().bucket(
-    process.env.FIREBASE_ADMIN_STORAGE_BUCKET ??
-      process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  );
