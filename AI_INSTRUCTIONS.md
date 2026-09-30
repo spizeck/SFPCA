@@ -304,6 +304,22 @@ infer one from another.
   `whileInView`/`exit` must stay identical between server and first client
   render or hydration mismatches leave content hidden (see
   `src/lib/animations.ts`)
+- Tailwind CSS v4, CSS-first: `src/app/globals.css` is the entire styling
+  configuration — there is no `tailwind.config.*`. The `:root`/`.dark`
+  HSL-triplet variables are the single source of truth for semantic
+  tokens; the `@theme inline` block at the top maps each to a
+  `--color-*`/`--radius-*` key, so `bg-background`, `text-destructive`,
+  `ring-ring/50`, `rounded-md` etc. resolve `hsl(var(--…))` at runtime and
+  follow the `.dark` re-declarations. To add/change a semantic token:
+  declare the triplet in `:root` and `.dark`, then add the `--color-*`
+  bridge in `@theme inline`. Never hard-code palette values for semantic
+  usage. Dark mode is class-based via `@custom-variant dark` — `dark:`
+  utilities follow next-themes' `.dark` class on `<html>`, not
+  `prefers-color-scheme`. Enter/exit animations on Radix surfaces come
+  from `tw-animate-css` (`@import` in globals.css; suppressed under
+  `prefers-reduced-motion` there). PostCSS wiring is
+  `postcss.config.js` → `@tailwindcss/postcss`; content detection is
+  automatic — do not re-add a config file or a safelist.
 
 ## Observability (canonical)
 

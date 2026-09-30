@@ -75,7 +75,7 @@ function CaseRow({ c }: { c: LostFoundCaseRecord }) {
           {c.status === "cancelled" ? " · cancelled" : ""}
         </p>
       </div>
-      <Button size="sm" variant="outline" asChild className="flex-shrink-0">
+      <Button size="sm" variant="outline" asChild className="shrink-0">
         <Link href={`/admin/lost-found/${c.id}`}>
           {c.status === "open" ? "Work case" : "View"}
         </Link>

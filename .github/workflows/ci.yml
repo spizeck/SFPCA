@@ -145,7 +145,7 @@ jobs:
                   run_all ;;
 
                 # Build/toolchain config that can change shipped output.
-                next.config.ts|tsconfig.json|tailwind.config.ts|postcss.config.js)
+                next.config.ts|tsconfig.json|postcss.config.js)
                   app=true; e2e=true ;;
 
                 # Lint/unit-test config: app job only.

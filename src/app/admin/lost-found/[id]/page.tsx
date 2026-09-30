@@ -371,10 +371,10 @@ export default function LostFoundCasePage() {
                 <img
                   src={c.animalPhotoUrl}
                   alt={c.animalName ?? ""}
-                  className="h-16 w-16 rounded-md object-cover flex-shrink-0"
+                  className="h-16 w-16 rounded-md object-cover shrink-0"
                 />
               ) : (
-                <div className="h-16 w-16 rounded-md bg-muted flex items-center justify-center flex-shrink-0">
+                <div className="h-16 w-16 rounded-md bg-muted flex items-center justify-center shrink-0">
                   <PawPrint className="h-6 w-6 text-muted-foreground" />
                 </div>
               )}

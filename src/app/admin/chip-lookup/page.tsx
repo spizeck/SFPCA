@@ -355,7 +355,7 @@ function MatchCard({
             <img
               src={animal.photoUrl}
               alt=""
-              className="h-16 w-16 rounded-md object-cover flex-shrink-0"
+              className="h-16 w-16 rounded-md object-cover shrink-0"
             />
           )}
           <div className="min-w-0">
@@ -384,7 +384,7 @@ function MatchCard({
             role="alert"
             className="flex gap-2 rounded-md border border-amber-500/50 bg-amber-50 dark:bg-amber-950/30 p-3"
           >
-            <TriangleAlert className="h-4 w-4 mt-0.5 flex-shrink-0 text-amber-600" />
+            <TriangleAlert className="h-4 w-4 mt-0.5 shrink-0 text-amber-600" />
             <p>
               The registry lists this animal as{" "}
               <strong>{animal.lifecycleStatus}</strong>
@@ -402,7 +402,7 @@ function MatchCard({
             role="alert"
             className="flex gap-2 rounded-md border border-amber-500/50 bg-amber-50 dark:bg-amber-950/30 p-3"
           >
-            <TriangleAlert className="h-4 w-4 mt-0.5 flex-shrink-0 text-amber-600" />
+            <TriangleAlert className="h-4 w-4 mt-0.5 shrink-0 text-amber-600" />
             <p>
               This chip number appears on{" "}
               <strong>{disputedAnimals.length} animals</strong>:{" "}
@@ -417,7 +417,7 @@ function MatchCard({
             role="alert"
             className="flex gap-2 rounded-md border border-amber-500/50 bg-amber-50 dark:bg-amber-950/30 p-3"
           >
-            <TriangleAlert className="h-4 w-4 mt-0.5 flex-shrink-0 text-amber-600" />
+            <TriangleAlert className="h-4 w-4 mt-0.5 shrink-0 text-amber-600" />
             <p>
               This chip number has an unresolved conflict (
               {match.openConflicts.length} open). Resolve it on the animal
@@ -794,7 +794,7 @@ function ConflictsSection() {
                   size="sm"
                   variant="outline"
                   asChild
-                  className="flex-shrink-0"
+                  className="shrink-0"
                 >
                   <Link href={`/admin/animals/${c.claimedAnimalId}`}>
                     Resolve

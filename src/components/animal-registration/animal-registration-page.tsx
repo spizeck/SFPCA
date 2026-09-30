@@ -278,7 +278,7 @@ export function AnimalRegistration({
             <p className="text-xl md:text-2xl mb-8 text-white/90">
               {content.heroDescription}
             </p>
-            <div className="bg-black/40 backdrop-blur-sm rounded-lg p-6 max-w-2xl mx-auto">
+            <div className="bg-black/40 backdrop-blur-xs rounded-lg p-6 max-w-2xl mx-auto">
               <h2 className="text-xl font-semibold mb-2 text-white">Registration Fees</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
                 <div className="bg-white/10 rounded p-3">

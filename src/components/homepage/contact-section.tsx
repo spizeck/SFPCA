@@ -166,7 +166,7 @@ export function ContactSection({ contact, mapEmbedUrl, whereWeAre }: ContactSect
               }}
               className={card.wide ? "md:col-span-2 lg:col-span-2" : ""}
             >
-              <Card className="bg-white/10 backdrop-blur-sm border-white/20">
+              <Card className="bg-white/10 backdrop-blur-xs border-white/20">
                 <CardHeader>
                   <div className="flex items-center gap-3">
                     {card.icon}
