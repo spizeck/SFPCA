@@ -754,12 +754,14 @@ Binary objects stay in Firebase Storage. Postgres stores only object
 *paths* (`payment_receipt_path`, `photo_urls`) — paths are references,
 not authorization. Post-#219 receipt access: the public form can no
 longer write Storage directly — `storage.rules` denies every client
-write to `receipts/` — so a submission that passed the honeypot and
-rate limit gets a path-bound signed URL for `receipts/<submissionId>`
-(15-minute TTL) or the server-save fallback via `finalizeReceiptAction`;
-staff view via short-lived signed URLs from `getReceiptUrlAction` and
-orphan cleanup runs server-side in the cron sweeper. Vet documents
-follow the same pattern.
+write to `receipts/` — so uploads flow through
+`POST /api/receipts/<submissionId>`, which enforces the receipt rate
+limit, an atomic row-level claim (one-time entitlement; concurrent
+uploads can't both win), a bounded 5 MB stream read, magic-byte type
+validation, and a create-only storage write (`ifGenerationMatch: 0`).
+Staff view via short-lived signed URLs from `getReceiptUrlAction` and
+orphan/claim cleanup runs server-side in the cron sweeper. Vet
+documents follow the same pattern.
 
 ## 10. Backup / recovery (Postgres side)
 

@@ -8,23 +8,22 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { mockSubmitAction, mockFinalizeAction, mockToast, mockFetch } =
-  vi.hoisted(() => ({
-    mockSubmitAction: vi.fn(),
-    mockFinalizeAction: vi.fn(),
-    mockToast: vi.fn(),
-    mockFetch: vi.fn(),
-  }));
+const { mockSubmitAction, mockToast, mockFetch } = vi.hoisted(() => ({
+  mockSubmitAction: vi.fn(),
+  mockToast: vi.fn(),
+  mockFetch: vi.fn(),
+}));
 
 vi.mock("@/app/animal-registration/actions", () => ({
   submitRegistrationAction: mockSubmitAction,
-  finalizeReceiptAction: mockFinalizeAction,
 }));
 
 vi.mock("@/hooks/use-toast", () => ({
   useToast: () => ({ toast: mockToast }),
 }));
 
+// The receipt upload route — the browser POSTs the file after the row
+// lands; the route owns authorization, validation, and the write.
 vi.stubGlobal("fetch", mockFetch);
 
 import { AnimalRegistration } from "@/components/animal-registration/animal-registration-page";
@@ -73,10 +72,8 @@ beforeEach(() => {
       Promise.resolve({
         ok: true,
         submissionId: input.submissionId,
-        receiptUpload: input.wantsReceipt ? { mode: "server-save" } : null,
       }),
     );
-  mockFinalizeAction.mockReset().mockResolvedValue({ ok: true });
   mockFetch.mockReset().mockResolvedValue({ ok: true, status: 200 });
   mockToast.mockReset();
 });
@@ -89,7 +86,6 @@ describe("AnimalRegistration form", () => {
 
     await waitFor(() => expect(mockSubmitAction).toHaveBeenCalledTimes(1));
     const [input] = mockSubmitAction.mock.calls[0];
-    expect(input.receiptPath).toBeNull();
     expect(input.submissionId).toMatch(/^[0-9a-f-]{36}$/i);
     expect(input.website).toBe(""); // honeypot always present, always empty
     expect(input.wantsReceipt).toBe(false);
@@ -128,7 +124,6 @@ describe("AnimalRegistration form", () => {
           resolve({
             ok: true,
             submissionId: "11111111-2222-4333-8444-555555555555",
-            receiptUpload: null,
           });
       }),
     );
@@ -193,11 +188,10 @@ describe("AnimalRegistration form", () => {
     );
     expect(screen.getByLabelText(/^Full Name/)).toHaveValue("  Jane Doe  ");
     // No entitlement or receipt work should follow a throttle.
-    expect(mockFinalizeAction).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  test("receipt upload follows the server grant — server-save mode", async () => {
+  test("receipt upload POSTs to the bounded server route", async () => {
     render(<AnimalRegistration />);
     await fillValidForm();
     attachReceipt();
@@ -207,57 +201,25 @@ describe("AnimalRegistration form", () => {
     const [input] = mockSubmitAction.mock.calls[0];
     expect(input.wantsReceipt).toBe(true);
 
-    // The file goes to finalizeReceiptAction bound to the same
-    // client-generated submission id — the object path is derived
-    // server-side (receipts/<submissionId>), never client-supplied.
+    // The file goes to /api/receipts/<submissionId> — the route owns
+    // the object path server-side; the browser only names the row.
     await waitFor(() =>
-      expect(mockFinalizeAction).toHaveBeenCalledWith({
-        submissionId: input.submissionId,
-        file: expect.any(File),
-      }),
+      expect(mockFetch).toHaveBeenCalledWith(
+        `/api/receipts/${input.submissionId}`,
+        expect.objectContaining({
+          method: "POST",
+          headers: { "Content-Type": "image/png" },
+          body: expect.any(File),
+        }),
+      ),
     );
     expect(mockToast).toHaveBeenCalledWith(
       expect.objectContaining({ title: "Registration Submitted" }),
     );
   });
 
-  test("receipt upload follows the server grant — signed-url mode", async () => {
-    mockSubmitAction.mockImplementation((input) =>
-      Promise.resolve({
-        ok: true,
-        submissionId: input.submissionId,
-        receiptUpload: {
-          mode: "signed-url",
-          url: "https://storage.example/signed-put",
-        },
-      }),
-    );
-    render(<AnimalRegistration />);
-    await fillValidForm();
-    attachReceipt();
-    submit();
-
-    const [input] = await waitFor(() => {
-      expect(mockSubmitAction).toHaveBeenCalledTimes(1);
-      return mockSubmitAction.mock.calls[0];
-    });
-    await waitFor(() =>
-      expect(mockFetch).toHaveBeenCalledWith(
-        "https://storage.example/signed-put",
-        expect.objectContaining({ method: "PUT" }),
-      ),
-    );
-    // After the PUT lands, finalize binds the path — no file payload.
-    await waitFor(() =>
-      expect(mockFinalizeAction).toHaveBeenCalledWith({
-        submissionId: input.submissionId,
-        file: null,
-      }),
-    );
-  });
-
   test("a failed receipt upload still submits the registration", async () => {
-    mockFinalizeAction.mockResolvedValue({ ok: false, reason: "error" });
+    mockFetch.mockResolvedValue({ ok: false, status: 500 });
     render(<AnimalRegistration />);
     await fillValidForm();
     attachReceipt();
@@ -287,7 +249,6 @@ describe("AnimalRegistration form", () => {
     expect(mockToast).not.toHaveBeenCalledWith(
       expect.objectContaining({ title: "Registration Submitted" }),
     );
-    expect(mockFinalizeAction).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
     expect(screen.getByLabelText(/^Full Name/)).toHaveValue("  Jane Doe  ");
   });
@@ -299,7 +260,6 @@ describe("AnimalRegistration form", () => {
         Promise.resolve({
           ok: true,
           submissionId: input.submissionId,
-          receiptUpload: { mode: "server-save" },
         }),
       );
     render(<AnimalRegistration />);
@@ -324,9 +284,9 @@ describe("AnimalRegistration form", () => {
 
     expect(mockSubmitAction).toHaveBeenCalledTimes(2);
     // The failed first attempt performs no receipt work at all — the
-    // entitlement only exists after a successful submission, which is
-    // what prevents orphaned receipt objects on write failure.
-    expect(mockFinalizeAction).toHaveBeenCalledTimes(1);
+    // upload route only entitles rows that exist, which is what
+    // prevents orphaned receipt objects on write failure.
+    expect(mockFetch).toHaveBeenCalledTimes(1);
     const [first, second] = mockSubmitAction.mock.calls.map((c) => c[0]);
     expect(second.submissionId).not.toBe(first.submissionId);
   });
@@ -346,7 +306,6 @@ describe("AnimalRegistration form", () => {
     await waitFor(() => expect(mockSubmitAction).toHaveBeenCalledTimes(1));
     const [input] = mockSubmitAction.mock.calls[0];
     expect(input.wantsReceipt).toBe(false);
-    expect(mockFinalizeAction).not.toHaveBeenCalled();
     expect(mockFetch).not.toHaveBeenCalled();
   });
 });

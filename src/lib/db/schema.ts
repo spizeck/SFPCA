@@ -519,8 +519,17 @@ export const registrationSubmissions = pgTable(
       onDelete: "set null",
     }),
     // Firebase Storage object path (receipts/<id>) — a reference, never
-    // the object itself; binary data does not live in Postgres.
+    // the object itself; binary data does not live in Postgres. The
+    // upload route claims this slot atomically (see
+    // claimReceiptSlot in registry/registrations.ts) before any bytes
+    // are persisted (#219 review): only a NULL path can be claimed, so
+    // a submission can never gain a second receipt or be overwritten.
     paymentReceiptPath: text("payment_receipt_path"),
+    // The submitter's declared intent to attach a receipt, recorded at
+    // intake. The upload route refuses submissions that never asked for
+    // one — a known submission id alone must not entitle a caller to
+    // attach an object to somebody else's record.
+    receiptRequested: boolean("receipt_requested").notNull().default(false),
     totalFeeCents: integer("total_fee_cents").notNull().default(0),
     currency: text("currency").notNull().default("USD"),
     status: text("status").notNull().default("pending"),

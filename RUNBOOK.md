@@ -2192,13 +2192,22 @@ platform.
   retries, and shared NAT/mobile egress must not hit them. The limiter
   stops abusive bursts, not per-person uniqueness.
 - **Receipt gating** — `storage.rules` denies ALL client writes to
-  `receipts/`. Upload happens only after the server action accepts a
-  submission: a path-bound v4 signed URL for exactly
-  `receipts/<submissionId>` (15-minute TTL) minted via Admin SDK, or —
-  under the Storage emulator/dev or on mint failure — the file is
-  posted back to `finalizeReceiptAction`, which validates and saves it
-  server-side and binds the derived path to the row. Arbitrary
-  unauthenticated clients can no longer create receipt objects.
+  `receipts/`; the only byte-acceptance boundary is
+  `POST /api/receipts/<submissionId>`
+  (`src/app/api/receipts/[submissionId]/route.ts`). The route, in
+  order: validates the id format → counts the `receipt.finalize` rate
+  limit before reading bytes → atomically claims the slot
+  (`claimReceiptSlot`: row must exist, be `pending`, have
+  `receiptRequested`, and hold no receipt — two concurrent uploads can
+  never both claim) → reads the body with a hard 5 MB ceiling on the
+  wire → validates content type by magic bytes (declared
+  `Content-Type` may only agree) → writes create-only
+  (`ifGenerationMatch: 0`). Any post-claim failure releases the claim;
+  claims orphaned by process death are cleared by the daily sweeper
+  past the grace window. A v4 signed-PUT grant was deliberately
+  rejected — it cannot enforce size/type/create-only conditions — and
+  a Server Action cannot carry a 5 MB body (default 1 MB cap), so the
+  route handler is the single transport.
 
 **Trusted client identity (the boundary that matters):** the limiter
 subject is a salted SHA-256 of the client IP taken ONLY from
@@ -2233,8 +2242,8 @@ public forms. Not needed at current scale; the controls above have no
 UX cost.
 
 **Residual risk:** per-subject limits don't cap *aggregate* volume
-across many distinct IPs. Signed-URL minting is itself rate-limited by
-the enclosing action, but a determined distributed actor could still
-submit at up to N-per-IP. Acceptable for SFPCA; revisit with #130
-retention work if `rate_limit_windows` retention needs a formal
-policy.
+across many distinct IPs. Receipt upload is rate-limited at the byte
+boundary itself (`receipt.finalize` is counted before a byte is
+read), but a determined distributed actor could still submit at up to
+N-per-IP. Acceptable for SFPCA; revisit with #130 retention work if
+`rate_limit_windows` retention needs a formal policy.

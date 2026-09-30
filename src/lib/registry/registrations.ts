@@ -17,6 +17,7 @@ import {
   eq,
   gt,
   inArray,
+  isNotNull,
   isNull,
   lte,
   or,
@@ -127,15 +128,19 @@ export async function listRegistrationSubmissions(
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const RECEIPT_PATH_RE = /^receipts\/[0-9a-f-]{36}$/i;
 
 export interface SubmissionInput extends RegistrationFormInput {
-  // Client-generated uuid — also the receipt object name, so the form
-  // can upload the receipt before the row exists and a retry of a
-  // possibly-failed insert is idempotent (same id → conflict → success).
+  // Client-generated uuid — also the receipt object name, so a retry
+  // of a possibly-failed insert is idempotent (same id → conflict →
+  // success) and the upload route derives the object path from it.
   submissionId: string;
-  // Storage object path or null when no receipt was provided.
-  receiptPath: string | null;
+  // The submitter's declared intent to attach a receipt (#219 review).
+  // Persisted so the upload route can refuse submissions that never
+  // asked for one — knowing a submission id is not itself an
+  // entitlement to attach objects to it. payment_receipt_path itself
+  // is never set at insert: only the upload route's atomic claim
+  // writes it.
+  receiptRequested: boolean;
 }
 
 export type CreateSubmissionResult =
@@ -154,11 +159,6 @@ export async function createRegistrationSubmission(
   if (Object.keys(validateRegistration(input)).length > 0) {
     return { ok: false, reason: "invalid" };
   }
-  const receiptPath = input.receiptPath?.trim() || null;
-  if (receiptPath !== null && !RECEIPT_PATH_RE.test(receiptPath)) {
-    return { ok: false, reason: "invalid" };
-  }
-
   const totalFee = calculateRegistrationFee(input.animals);
   try {
     await db.insert(registrationSubmissions).values({
@@ -173,7 +173,7 @@ export async function createRegistrationSubmission(
         sex: a.sex,
         isFixed: a.isFixed,
       })),
-      paymentReceiptPath: receiptPath,
+      receiptRequested: input.receiptRequested === true,
       totalFeeCents: Math.round(totalFee * 100),
       currency: "USD",
       status: REGISTRATION_INITIAL_STATUS,
@@ -265,34 +265,131 @@ export async function registrationSubmissionExists(
   return !!row;
 }
 
-export type AttachReceiptResult =
-  | { ok: true; attached: boolean }
-  | { ok: false };
+// --- Receipt upload entitlement (#219 review) --------------------------------
+//
+// The public upload route (src/app/api/receipts/[submissionId]) uses
+// claim → write → release-on-failure:
+//
+//   claimReceiptSlot() atomically flips payment_receipt_path from NULL
+//   to the derived path — ONLY for a pending submission that declared
+//   receiptRequested at intake and has no receipt yet. The conditional
+//   UPDATE is the one-time entitlement: the database itself decides who
+//   wins, so two concurrent uploads can never both claim a submission.
+//   The path is derived from the id, so no caller can aim the claim at
+//   an arbitrary object name.
+//
+//   If body validation or the storage write then fails,
+//   releaseReceiptSlot() clears the claim again — conditional on the
+//   exact path so a retry can never erase someone else's later claim.
+//   A claim abandoned by process death leaves a dangling path; the
+//   receipt sweeper clears those once they age past the grace window
+//   (receipt-sweep.ts).
 
-// Bind the receipt object to an existing submission row (#219). The path
-// is derived — receipts/<submissionId> — so the caller can never point a
-// row at an unrelated object. Only a NULL path is filled: a retry after
-// a dropped response converges instead of erroring, and nothing can
-// re-bind a submission that already has a receipt.
-export async function attachReceiptToSubmission(
+export type ClaimReceiptResult =
+  | { ok: true }
+  | { ok: false; reason: "not-found" | "unavailable" };
+
+export async function claimReceiptSlot(
   id: string,
   db: RegistryDb = getRegistryDb(),
-): Promise<AttachReceiptResult> {
-  if (!UUID_RE.test(id)) return { ok: false };
-  const updated = await db
+): Promise<ClaimReceiptResult> {
+  if (!UUID_RE.test(id)) return { ok: false, reason: "not-found" };
+  const claimed = await db
     .update(registrationSubmissions)
-    .set({ paymentReceiptPath: `receipts/${id}` })
+    .set({
+      paymentReceiptPath: `receipts/${id}`,
+      updatedAt: new Date(),
+    })
     .where(
       and(
         eq(registrationSubmissions.id, id),
+        eq(registrationSubmissions.status, "pending"),
+        eq(registrationSubmissions.receiptRequested, true),
         isNull(registrationSubmissions.paymentReceiptPath),
       ),
     )
     .returning();
-  if (updated.length > 0) return { ok: true, attached: true };
+  if (claimed.length > 0) return { ok: true };
   return (await registrationSubmissionExists(id, db))
-    ? { ok: true, attached: false }
-    : { ok: false };
+    ? { ok: false, reason: "unavailable" }
+    : { ok: false, reason: "not-found" };
+}
+
+// Undo a claim after the upload it entitled has failed. Conditional on
+// the derived path — a fresh claim or staff-side change is never
+// clobbered.
+export async function releaseReceiptSlot(
+  id: string,
+  db: RegistryDb = getRegistryDb(),
+): Promise<void> {
+  if (!UUID_RE.test(id)) return;
+  await db
+    .update(registrationSubmissions)
+    .set({ paymentReceiptPath: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(registrationSubmissions.id, id),
+        eq(registrationSubmissions.paymentReceiptPath, `receipts/${id}`),
+      ),
+    );
+}
+
+// Sweeper queries: an object is a live receipt iff a submission row
+// claims this exact path — merely "a submission row exists" is not
+// enough, or an attacker-written object at a known id would survive.
+export async function submissionClaimsReceipt(
+  id: string,
+  db: RegistryDb = getRegistryDb(),
+): Promise<boolean> {
+  if (!UUID_RE.test(id)) return false;
+  const [row] = await db
+    .select({ id: registrationSubmissions.id })
+    .from(registrationSubmissions)
+    .where(
+      and(
+        eq(registrationSubmissions.id, id),
+        eq(
+          registrationSubmissions.paymentReceiptPath,
+          `receipts/${id}`,
+        ),
+      ),
+    )
+    .limit(1);
+  return !!row;
+}
+
+export interface ReceiptClaim {
+  id: string;
+  paymentReceiptPath: string;
+  claimedAt: Date;
+}
+
+// Rows currently holding a receipt claim — used by the sweeper both to
+// whitelist live receipts and to find claims whose object never landed.
+export async function listReceiptClaims(
+  db: RegistryDb = getRegistryDb(),
+): Promise<ReceiptClaim[]> {
+  const rows = await db
+    .select({
+      id: registrationSubmissions.id,
+      paymentReceiptPath: registrationSubmissions.paymentReceiptPath,
+      claimedAt: registrationSubmissions.updatedAt,
+    })
+    .from(registrationSubmissions)
+    .where(isNotNull(registrationSubmissions.paymentReceiptPath));
+  return rows.filter(
+    (r): r is ReceiptClaim =>
+      r.paymentReceiptPath !== null && r.claimedAt !== null,
+  );
+}
+
+// Clear a claim whose object is confirmed absent — the sweeper's
+// self-healing path for uploads abandoned between claim and write.
+export async function clearReceiptClaim(
+  id: string,
+  db: RegistryDb = getRegistryDb(),
+): Promise<void> {
+  await releaseReceiptSlot(id, db);
 }
 
 // === Authoritative registrations (#169) ======================================

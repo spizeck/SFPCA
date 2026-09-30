@@ -13,10 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash } from "lucide-react";
 import { AnimalRegistrationData } from "@/lib/types";
-import {
-  finalizeReceiptAction,
-  submitRegistrationAction,
-} from "@/app/animal-registration/actions";
+import { submitRegistrationAction } from "@/app/animal-registration/actions";
 import { HoneypotField } from "@/components/forms/honeypot-field";
 import { logError } from "@/lib/logger";
 import {
@@ -137,12 +134,12 @@ export function AnimalRegistration({
       // submission is idempotent rather than a duplicate.
       const submissionId = crypto.randomUUID();
 
-      // Submit first — the server mints the upload entitlement only for
-      // a validated row that passed the rate limit (#219). Receipts no
-      // longer write directly to Storage from the browser.
+      // Submit first — the row records the receipt intent, and upload
+      // goes through a bounded server route that claims the receipt
+      // slot before accepting bytes (#219). Receipts never write
+      // directly to Storage from the browser.
       const result = await submitRegistrationAction({
         submissionId,
-        receiptPath: null,
         ownerName: trimmed.ownerName,
         ownerAddress: trimmed.ownerAddress,
         ownerPhone: trimmed.ownerPhone,
@@ -165,27 +162,31 @@ export function AnimalRegistration({
         throw new Error(`submission rejected: ${result.reason}`);
       }
 
-      // Deliver the receipt through the granted channel: a path-bound
-      // signed URL, or the server-save fallback (emulator/dev/mint
-      // failure). A failed upload must not block the registration —
-      // the row already landed.
+      // Deliver the receipt through the bounded upload route: the
+      // server claims the submission's receipt slot, enforces the
+      // size/type contract on the bytes, and writes create-only. A
+      // failed upload must not block the registration — the row
+      // already landed.
       let receiptDelivered = true;
       if (formData.paymentReceipt) {
         try {
-          const grant = result.receiptUpload;
-          if (grant?.mode === "signed-url") {
-            const upload = await fetch(grant.url, {
-              method: "PUT",
-              headers: { "Content-Type": formData.paymentReceipt.type },
-              body: formData.paymentReceipt,
-            });
-            if (!upload.ok) throw new Error(`upload ${upload.status}`);
-          }
-          const attach = await finalizeReceiptAction({
-            submissionId,
-            file: grant?.mode === "signed-url" ? null : formData.paymentReceipt,
+          const upload = await fetch(`/api/receipts/${submissionId}`, {
+            method: "POST",
+            headers: { "Content-Type": formData.paymentReceipt.type },
+            body: formData.paymentReceipt,
           });
-          if (!attach.ok) throw new Error(`finalize rejected: ${attach.reason}`);
+          if (!upload.ok) {
+            if (upload.status !== 429) {
+              // Expected throttling (429) is not an error event; real
+              // transport/storage failures are.
+              logError(
+                "registration",
+                "receipt-upload",
+                new Error(`upload ${upload.status}`),
+              );
+            }
+            receiptDelivered = false;
+          }
         } catch (uploadError) {
           receiptDelivered = false;
           logError("registration", "receipt-upload", uploadError);

@@ -9,9 +9,7 @@ const {
   checkRateLimit,
   warnThrottled,
   createRegistrationSubmission,
-  attachReceiptToSubmission,
   submitPublicSighting,
-  adminReceiptBucket,
   logError,
   logWarn,
   captureException,
@@ -21,9 +19,7 @@ const {
   checkRateLimit: vi.fn(),
   warnThrottled: vi.fn(),
   createRegistrationSubmission: vi.fn(),
-  attachReceiptToSubmission: vi.fn(),
   submitPublicSighting: vi.fn(),
-  adminReceiptBucket: vi.fn(),
   logError: vi.fn(),
   logWarn: vi.fn(),
   captureException: vi.fn(),
@@ -37,22 +33,16 @@ vi.mock("next/headers", () => ({
 vi.mock("@/lib/rate-limit", () => ({ checkRateLimit, warnThrottled }));
 vi.mock("@/lib/registry/registrations", () => ({
   createRegistrationSubmission,
-  attachReceiptToSubmission,
 }));
 vi.mock("@/lib/registry/lost-found", () => ({ submitPublicSighting }));
-vi.mock("@/lib/firebase-admin-storage", () => ({ adminReceiptBucket }));
 vi.mock("@/lib/logger", () => ({ logError, logWarn }));
 vi.mock("@sentry/nextjs", () => ({ captureException, captureRequestError }));
 
-import {
-  finalizeReceiptAction,
-  submitRegistrationAction,
-} from "@/app/animal-registration/actions";
+import { submitRegistrationAction } from "@/app/animal-registration/actions";
 import { submitSightingAction } from "@/app/lost-pets/actions";
 
 const validInput = {
   submissionId: "11111111-2222-4333-8444-555555555555",
-  receiptPath: null,
   ownerName: "Jane Owner",
   ownerAddress: "Windwardside, Saba",
   ownerPhone: "+599 416 0000",
@@ -71,8 +61,6 @@ beforeEach(() => {
     submissionId: validInput.submissionId,
   });
   submitPublicSighting.mockResolvedValue({ ok: true });
-  attachReceiptToSubmission.mockResolvedValue({ ok: true, attached: true });
-  delete process.env.FIREBASE_STORAGE_EMULATOR_HOST;
 });
 
 describe("submitRegistrationAction guards", () => {
@@ -94,7 +82,6 @@ describe("submitRegistrationAction guards", () => {
     expect(r).toEqual({
       ok: true,
       submissionId: validInput.submissionId,
-      receiptUpload: null,
     });
     expect(createRegistrationSubmission).not.toHaveBeenCalled();
     expect(checkRateLimit).not.toHaveBeenCalled();
@@ -119,31 +106,18 @@ describe("submitRegistrationAction guards", () => {
     expect(captureException).not.toHaveBeenCalled();
   });
 
-  test("receipt entitlement is minted only after a validated insert", async () => {
-    const getSignedUrl = vi
-      .fn()
-      .mockResolvedValue(["https://storage.example/signed"]);
-    adminReceiptBucket.mockReturnValue({
-      file: () => ({ getSignedUrl }),
-    });
-    const r = await submitRegistrationAction({
-      ...validInput,
-      wantsReceipt: true,
-    });
-    expect(r.ok && r.receiptUpload).toEqual({
-      mode: "signed-url",
-      url: "https://storage.example/signed",
-    });
-    expect(getSignedUrl).toHaveBeenCalledTimes(1);
-  });
-
-  test("the emulator takes the server-save path instead of signed URLs", async () => {
-    process.env.FIREBASE_STORAGE_EMULATOR_HOST = "127.0.0.1:9199";
-    const r = await submitRegistrationAction({
-      ...validInput,
-      wantsReceipt: true,
-    });
-    expect(r.ok && r.receiptUpload).toEqual({ mode: "server-save" });
+  test("receipt intent is persisted on the row for the upload route", async () => {
+    // The upload entitlement is durable: /api/receipts/[id] refuses
+    // submissions whose row never declared receiptRequested, so a
+    // known submission id alone cannot entitle an attach.
+    await submitRegistrationAction({ ...validInput, wantsReceipt: true });
+    expect(createRegistrationSubmission).toHaveBeenCalledWith(
+      expect.objectContaining({ receiptRequested: true }),
+    );
+    await submitRegistrationAction({ ...validInput, wantsReceipt: false });
+    expect(createRegistrationSubmission).toHaveBeenLastCalledWith(
+      expect.objectContaining({ receiptRequested: false }),
+    );
   });
 });
 
@@ -174,69 +148,5 @@ describe("submitSightingAction guards", () => {
     expect(r).toEqual({ ok: false, reason: "throttled" });
     expect(submitPublicSighting).not.toHaveBeenCalled();
     expect(logError).not.toHaveBeenCalled();
-  });
-});
-
-describe("finalizeReceiptAction", () => {
-  const submissionId = validInput.submissionId;
-
-  function bucketWith(metadata?: { size: number; contentType: string }) {
-    const file = {
-      save: vi.fn().mockResolvedValue(undefined),
-      getMetadata: vi.fn().mockResolvedValue([metadata]),
-      delete: vi.fn().mockResolvedValue(undefined),
-    };
-    adminReceiptBucket.mockReturnValue({ file: vi.fn(() => file) });
-    return file;
-  }
-
-  test("server-save path validates the file and binds the derived path", async () => {
-    const file = bucketWith();
-    const receipt = new File([new Uint8Array(10)], "r.png", {
-      type: "image/png",
-    });
-    const r = await finalizeReceiptAction({ submissionId, file: receipt });
-    expect(r).toEqual({ ok: true });
-    expect(file.save).toHaveBeenCalledTimes(1);
-    expect(attachReceiptToSubmission).toHaveBeenCalledWith(submissionId);
-  });
-
-  test("signed-url path verifies the landed object before binding", async () => {
-    const file = bucketWith({ size: 1024, contentType: "image/png" });
-    const r = await finalizeReceiptAction({ submissionId });
-    expect(r).toEqual({ ok: true });
-    expect(file.save).not.toHaveBeenCalled();
-    expect(file.delete).not.toHaveBeenCalled();
-    expect(attachReceiptToSubmission).toHaveBeenCalledWith(submissionId);
-  });
-
-  test("an invalid landed object is deleted and never bound", async () => {
-    const file = bucketWith({ size: 1024, contentType: "text/html" });
-    const r = await finalizeReceiptAction({ submissionId });
-    expect(r.ok).toBe(false);
-    expect(file.delete).toHaveBeenCalledTimes(1);
-    expect(attachReceiptToSubmission).not.toHaveBeenCalled();
-  });
-
-  test("oversized landed objects are rejected", async () => {
-    bucketWith({ size: 5 * 1024 * 1024 + 1, contentType: "image/png" });
-    const r = await finalizeReceiptAction({ submissionId });
-    expect(r.ok).toBe(false);
-    expect(attachReceiptToSubmission).not.toHaveBeenCalled();
-  });
-
-  test("receipt finalize is throttled on its own bucket", async () => {
-    checkRateLimit.mockResolvedValue({
-      allowed: false,
-      status: "ok",
-      retryAfterSeconds: 10,
-    });
-    const r = await finalizeReceiptAction({ submissionId });
-    expect(r).toEqual({ ok: false, reason: "throttled" });
-    expect(checkRateLimit).toHaveBeenCalledWith(
-      "receipt.finalize",
-      expect.any(String),
-    );
-    expect(attachReceiptToSubmission).not.toHaveBeenCalled();
   });
 });
