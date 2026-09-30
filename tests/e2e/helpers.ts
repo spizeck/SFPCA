@@ -32,6 +32,25 @@ export async function dismissConsentNotice(page: Page): Promise<void> {
   await expect(notice).toBeHidden();
 }
 
+// Signs in through the real /login form against the Auth emulator —
+// the only supported way to establish a session (the login POSTs the
+// ID token to /api/auth/session, which mints the session cookie that
+// server components authorize on). Callers assert the post-login
+// landing themselves: owners land on /portal, admins on /admin.
+// To switch users mid-test, page.context().clearCookies() then signIn
+// again — the cookie is the server-side authority and Firebase's
+// persisted client user is replaced on the next sign-in.
+export async function signIn(
+  page: Page,
+  email: string,
+  password: string,
+): Promise<void> {
+  await page.goto("/login");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+}
+
 // A freshly mounted Radix dialog animates in (~200ms translate/scale).
 // Playwright's actionability check can pass during a janky frame pair
 // under load, then the dispatched pointer events land where the button

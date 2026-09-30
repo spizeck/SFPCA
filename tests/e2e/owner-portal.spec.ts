@@ -5,6 +5,7 @@
 // staff approval is the only path from sign-in to another person's
 // records. Fixtures are seeded by tests/e2e/fixtures.ts.
 import { expect, test, type Page } from "./fixtures";
+import { signIn } from "./helpers";
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
@@ -13,13 +14,6 @@ import {
   E2E_OWNER_EMAIL,
   E2E_OWNER_PASSWORD,
 } from "./env";
-
-async function signIn(page: Page, email: string, password: string) {
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
-}
 
 // Switching users mid-test: the session cookie is the server-side
 // authority, so clearing it is sufficient — the next signIn replaces
