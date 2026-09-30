@@ -82,7 +82,9 @@ describe("sweepOrphanedReceipts", () => {
     const referenced = fakeFile("known-id");
     const recent = fakeFile("inflight-id", 5 * 60 * 1000);
     const nested = { name: "receipts/nested/path" } as SweepFile;
-    mockClaims.mockImplementation(async (id: string) => id === "known-id");
+    mockClaims.mockImplementation(
+      async (path: string) => path === "receipts/known-id",
+    );
 
     const counts = await sweepOrphanedReceipts({
       bucket: fakeBucket([orphan, referenced, recent, nested]),
@@ -129,6 +131,28 @@ describe("sweepOrphanedReceipts", () => {
     expect(counts.deleted).toBe(1);
   });
 
+  test("a migrated legacy-named receipt survives when its row claims the path", async () => {
+    // Pre-#219 rows carry paths like receipts/scan-001.pdf — not
+    // receipts/<uuid>. The claim lookup matches the stored path, so a
+    // legacy-named object a row still references is never swept.
+    const log = fakeLog();
+    const legacy = fakeFile("scan-001.pdf");
+    mockClaims.mockImplementation(
+      async (path: string) => path === "receipts/scan-001.pdf",
+    );
+
+    const counts = await sweepOrphanedReceipts({
+      bucket: fakeBucket([legacy]),
+      db,
+      nowMs: NOW,
+      log,
+    });
+
+    expect(legacy.deleted).toBe(false);
+    expect(counts.deleted).toBe(0);
+    expect(mockClaims).toHaveBeenCalledWith("receipts/scan-001.pdf", db);
+  });
+
   test("a claim whose object never landed is cleared past the grace window", async () => {
     // Upload route writes claim → object; a claim older than grace with
     // no matching object is a wedged submission — clear it so retries
@@ -152,7 +176,9 @@ describe("sweepOrphanedReceipts", () => {
       },
     ]);
     const live = fakeFile("live-id");
-    mockClaims.mockImplementation(async (id: string) => id === "live-id");
+    mockClaims.mockImplementation(
+      async (path: string) => path === "receipts/live-id",
+    );
 
     const counts = await sweepOrphanedReceipts({
       bucket: fakeBucket([live]),

@@ -60,7 +60,7 @@ describe("claimReceiptSlot", () => {
   test("claims the receipt slot of a willing pending submission", async () => {
     const id = await submission(true);
     expect(await claimReceiptSlot(id, db)).toEqual({ ok: true });
-    expect(await submissionClaimsReceipt(id, db)).toBe(true);
+    expect(await submissionClaimsReceipt(`receipts/${id}`, db)).toBe(true);
     const [row] = await (db as PgliteDatabase<typeof schema>)
       .select({ path: registrationSubmissions.paymentReceiptPath })
       .from(registrationSubmissions)
@@ -94,7 +94,7 @@ describe("claimReceiptSlot", () => {
       ok: false,
       reason: "unavailable",
     });
-    expect(await submissionClaimsReceipt(id, db)).toBe(false);
+    expect(await submissionClaimsReceipt(`receipts/${id}`, db)).toBe(false);
   });
 
   test("a nonexistent or malformed id is not claimable", async () => {
@@ -127,8 +127,23 @@ describe("claimReceiptSlot", () => {
     const id = await submission(true);
     expect(await claimReceiptSlot(id, db)).toEqual({ ok: true });
     await releaseReceiptSlot(id, db);
-    expect(await submissionClaimsReceipt(id, db)).toBe(false);
+    expect(await submissionClaimsReceipt(`receipts/${id}`, db)).toBe(false);
     expect(await claimReceiptSlot(id, db)).toEqual({ ok: true });
+  });
+
+  test("a migrated legacy receipt path is still a live claim", async () => {
+    // Pre-#219 rows can carry paths like receipts/scan-001.pdf rather
+    // than receipts/<uuid>. The sweep must treat them as claimed or it
+    // would delete attached receipts.
+    const id = await submission(false);
+    await (db as PgliteDatabase<typeof schema>)
+      .update(registrationSubmissions)
+      .set({ paymentReceiptPath: "receipts/scan-001.pdf" })
+      .where(eq(registrationSubmissions.id, id));
+    expect(await submissionClaimsReceipt("receipts/scan-001.pdf", db)).toBe(
+      true,
+    );
+    expect(await submissionClaimsReceipt(`receipts/${id}`, db)).toBe(false);
   });
 
   test("listReceiptClaims reports only rows holding a claim", async () => {

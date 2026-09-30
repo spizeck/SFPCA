@@ -247,4 +247,68 @@ describe("POST /api/receipts/[submissionId]", () => {
       expect.any(Error),
     );
   });
+
+  test("a client abort mid-upload releases the claim", async () => {
+    // reader.read() rejects when the client drops the connection —
+    // without the release guarantee the slot stays wedged until the
+    // daily sweep clears it, and every legit retry gets 409.
+    const { file } = fakeBucket();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(PNG.subarray(0, 8));
+        controller.error(new Error("client aborted"));
+      },
+    });
+    const req = new Request(`http://test/api/receipts/${SUBMISSION_ID}`, {
+      method: "POST",
+      headers: { "content-type": "image/png" },
+      body: stream,
+      // Node's fetch requires this for streaming request bodies.
+      duplex: "half",
+    } as RequestInit);
+    const res = await POST(req, ctx(SUBMISSION_ID));
+    // A dropped connection is routine — clean rejection, no error event.
+    expect(res.status).toBe(400);
+    expect(releaseReceiptSlot).toHaveBeenCalledWith(SUBMISSION_ID);
+    expect(file.save).not.toHaveBeenCalled();
+    expect(logError).not.toHaveBeenCalled();
+  });
+
+  test("an ISO BMFF video is rejected even under an image declaration", async () => {
+    // ftyp/mp41 is an MP4 video container — matching the box alone
+    // would admit arbitrary video as "image/heic".
+    const { file } = fakeBucket();
+    const mp4 = Buffer.concat([
+      Buffer.alloc(4),
+      Buffer.from("ftyp"),
+      Buffer.from("mp41"),
+      Buffer.alloc(32),
+    ]);
+    const res = await POST(
+      uploadRequest(mp4, "image/heic"),
+      ctx(SUBMISSION_ID),
+    );
+    expect(res.status).toBe(415);
+    expect(file.save).not.toHaveBeenCalled();
+    expect(releaseReceiptSlot).toHaveBeenCalledWith(SUBMISSION_ID);
+  });
+
+  test("a real HEIC brand is accepted", async () => {
+    const { file } = fakeBucket();
+    const heic = Buffer.concat([
+      Buffer.alloc(4),
+      Buffer.from("ftyp"),
+      Buffer.from("heic"),
+      Buffer.alloc(32),
+    ]);
+    const res = await POST(
+      uploadRequest(heic, "image/heic"),
+      ctx(SUBMISSION_ID),
+    );
+    expect(res.status).toBe(200);
+    expect(file.save).toHaveBeenCalledWith(
+      heic,
+      expect.objectContaining({ contentType: "image/heic" }),
+    );
+  });
 });

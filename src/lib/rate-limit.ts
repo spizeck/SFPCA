@@ -150,8 +150,10 @@ export async function checkRateLimit(
   } catch (error) {
     // Limiter infrastructure failure is a real operational fault — it
     // follows the normal caught-error convention (→ Sentry) so a broken
-    // limiter pages someone, while the intake path stays available.
-    logError("registration", "rate-limit-check", error);
+    // limiter pages someone, while the intake path stays available. The
+    // subsystem is "rate-limit" regardless of which intake path called:
+    // the fault is in the limiter, and the runbook monitors that name.
+    logError("rate-limit", "rate-limit-check", error);
     return { allowed: true, status: "degraded" };
   }
 }

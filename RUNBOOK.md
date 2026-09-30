@@ -2216,9 +2216,12 @@ peer and strips from inbound client requests
 (`src/lib/request-identity.ts`). A client cannot spoof it; generic
 `x-forwarded-for` is deliberately not trusted. Off-Vercel the subject
 is the loopback literal. Raw IPs are never logged or sent to Sentry;
-the digest plus a server-side `RATE_LIMIT_SALT` (defaults to a
-build-time constant — set a real secret in production) is all that is
-persisted, and rows expire with their window.
+the digest plus a server-side salt is all that is persisted, and rows
+expire with their window. Salt resolution (`identitySalt` in
+`src/lib/request-identity.ts`): `RATE_LIMIT_SALT` → a value derived
+from `FIREBASE_ADMIN_PRIVATE_KEY` → a fixed local-only constant. Set
+`RATE_LIMIT_SALT` explicitly in production so subjects survive a key
+rotation.
 
 **Failure mode:** if the limiter store errors, the request is allowed
 and the failure is logged normally (`logError` on the `rate-limit`

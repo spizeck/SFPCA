@@ -17,7 +17,7 @@ export interface BoundedReadResult {
   ok: boolean;
   buffer?: Buffer;
   /** why a read was rejected — caller maps to a status code */
-  reason?: "empty" | "too-large";
+  reason?: "empty" | "too-large" | "aborted";
 }
 
 // Drain request.body with a hard byte ceiling. Returns without the
@@ -55,6 +55,10 @@ export async function readBoundedBody(
       }
       chunks.push(value);
     }
+  } catch {
+    // Client dropped the connection mid-upload — a routine network
+    // event, not a server fault: clean rejection, no error telemetry.
+    return { ok: false, reason: "aborted" };
   } finally {
     reader.releaseLock();
   }
@@ -108,12 +112,19 @@ function sniff(buffer: Buffer): string | null {
       buffer[3] === 0x2a)
   )
     return "image/tiff";
-  // ISO BMFF family (HEIC/HEIF/AVIF) — `ftyp` brand box at offset 4.
+  // ISO BMFF family — `ftyp` at offset 4, brand at offset 8. The brand
+  // is checked, not just the box: MP4/MOV are the same container, and
+  // an `image/*` declaration must not admit a video file.
   if (
     buffer.length >= 12 &&
     buffer.subarray(4, 8).toString("latin1") === "ftyp"
-  )
-    return "image/heic";
+  ) {
+    const brand = buffer.subarray(8, 12).toString("latin1");
+    if (["heic", "heix", "hevc", "heim", "heis"].includes(brand))
+      return "image/heic";
+    if (["mif1", "msf1"].includes(brand)) return "image/heif";
+    if (brand === "avif") return "image/avif";
+  }
   return null;
 }
 

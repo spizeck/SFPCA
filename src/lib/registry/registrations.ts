@@ -337,23 +337,17 @@ export async function releaseReceiptSlot(
 // Sweeper queries: an object is a live receipt iff a submission row
 // claims this exact path — merely "a submission row exists" is not
 // enough, or an attacker-written object at a known id would survive.
+// The match is on the stored path itself, not a UUID-derived name:
+// migrated legacy receipts keep paths like receipts/abc.pdf and must
+// survive the sweep exactly like receipts/<uuid> objects.
 export async function submissionClaimsReceipt(
-  id: string,
+  receiptPath: string,
   db: RegistryDb = getRegistryDb(),
 ): Promise<boolean> {
-  if (!UUID_RE.test(id)) return false;
   const [row] = await db
     .select({ id: registrationSubmissions.id })
     .from(registrationSubmissions)
-    .where(
-      and(
-        eq(registrationSubmissions.id, id),
-        eq(
-          registrationSubmissions.paymentReceiptPath,
-          `receipts/${id}`,
-        ),
-      ),
-    )
+    .where(eq(registrationSubmissions.paymentReceiptPath, receiptPath))
     .limit(1);
   return !!row;
 }

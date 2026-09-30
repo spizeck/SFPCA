@@ -29,17 +29,20 @@ export function clientIpFromHeaders(
   h: Pick<Headers, "get">,
   env: Record<string, string | undefined> = process.env,
 ): string | null {
+  // A deployment-configured trusted proxy header wins: off-Vercel,
+  // nothing strips a client-supplied x-vercel-forwarded-for, so reading
+  // it first would let a caller mint arbitrary limiter subjects.
+  const trustedHeader = env.PUBLIC_INTAKE_IP_HEADER;
+  if (trustedHeader) {
+    const value = h.get(trustedHeader)?.split(",")[0]?.trim();
+    if (value) return value;
+  }
   const vercel = h.get("x-vercel-forwarded-for");
   if (vercel) {
     // Chain form is client,…,proxies — the leftmost entry is the
     // originating client as observed by the platform.
     const client = vercel.split(",")[0]?.trim();
     if (client) return client;
-  }
-  const trustedHeader = env.PUBLIC_INTAKE_IP_HEADER;
-  if (trustedHeader) {
-    const value = h.get(trustedHeader)?.split(",")[0]?.trim();
-    if (value) return value;
   }
   return null;
 }

@@ -127,7 +127,7 @@ describe("checkRateLimit", () => {
     // Mechanism failure is an operational error (→ Sentry via logError),
     // NOT a warn — and it carries no subject material.
     expect(logError).toHaveBeenCalledWith(
-      "registration",
+      "rate-limit",
       "rate-limit-check",
       expect.any(Error),
     );

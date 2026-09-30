@@ -50,7 +50,9 @@ describe("clientIpFromHeaders", () => {
         PUBLIC_INTAKE_IP_HEADER: "x-corp-client-ip",
       }),
     ).toBe("192.0.2.55");
-    // ...but it is never consulted while the platform header exists.
+    // The configured header wins over x-vercel-forwarded-for: off-Vercel
+    // nothing strips a client-supplied copy of the latter, so preferring
+    // it would let a caller mint arbitrary limiter subjects.
     const both = h({
       "x-vercel-forwarded-for": "203.0.113.7",
       "x-corp-client-ip": "192.0.2.55",
@@ -59,7 +61,7 @@ describe("clientIpFromHeaders", () => {
       clientIpFromHeaders(both, {
         PUBLIC_INTAKE_IP_HEADER: "x-corp-client-ip",
       }),
-    ).toBe("203.0.113.7");
+    ).toBe("192.0.2.55");
   });
 });
 

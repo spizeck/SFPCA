@@ -88,20 +88,27 @@ export async function POST(
     return NextResponse.json({ ok: false, reason }, { status });
   };
 
-  const body = await readBoundedBody(request, RECEIPT_MAX_BYTES);
-  if (!body.ok) {
-    return fail(body.reason === "too-large" ? 413 : 400, body.reason!);
-  }
-
-  const contentType = detectReceiptContentType(
-    body.buffer!,
-    request.headers.get("content-type"),
-  );
-  if (!contentType) {
-    return fail(415, "unsupported-media");
-  }
-
+  // Everything past the claim runs under a release guarantee: a thrown
+  // read (client aborts mid-upload) or a failed write must free the
+  // slot immediately, not leave it for the daily sweeper to clear past
+  // the grace window — a stuck claim turns every legit retry into 409.
   try {
+    const body = await readBoundedBody(request, RECEIPT_MAX_BYTES);
+    if (!body.ok) {
+      return await fail(
+        body.reason === "too-large" ? 413 : 400,
+        body.reason!,
+      );
+    }
+
+    const contentType = detectReceiptContentType(
+      body.buffer!,
+      request.headers.get("content-type"),
+    );
+    if (!contentType) {
+      return await fail(415, "unsupported-media");
+    }
+
     await adminReceiptBucket()
       .file(`receipts/${submissionId}`)
       .save(body.buffer!, {

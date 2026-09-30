@@ -115,9 +115,11 @@ export async function sweepOrphanedReceipts({
     // failure, keep going, and let the caller mark the run failed.
     // An object is a live receipt only when a submission row claims
     // this exact path — a row that merely exists is not enough, or an
-    // object pushed to a known id would survive forever.
+    // object pushed to a known id would survive forever. Matching the
+    // stored path (not the uuid-derived name) also keeps migrated
+    // legacy receipts (receipts/<name>.pdf) alive.
     try {
-      if (!(await submissionClaimsReceipt(submissionId, db))) {
+      if (!(await submissionClaimsReceipt(file.name, db))) {
         await file.delete();
         counts.deleted++;
       }
