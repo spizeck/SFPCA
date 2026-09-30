@@ -7,8 +7,9 @@
 // instead of failing the build, so the suite stays meaningful without
 // becoming a brittle pseudo-compliance gate.
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test } from "./fixtures";
-import { dismissConsentNotice } from "./helpers";
+import { dbQuery, expect, test } from "./fixtures";
+import { dismissConsentNotice, signIn } from "./helpers";
+import { E2E_OWNER_EMAIL, E2E_OWNER_PASSWORD } from "./env";
 
 const PUBLIC_ROUTES = [
   "/",
@@ -17,6 +18,8 @@ const PUBLIC_ROUTES = [
   "/animal-adoptions",
   "/animal-registration",
   "/vet-services",
+  "/statistics",
+  "/lost-pets",
   "/under-construction",
   "/login",
 ] as const;
@@ -56,6 +59,25 @@ async function gotoAndSettle(
       page.getByRole("heading", { name: "Max" }).first(),
     ).toBeVisible();
   }
+  if (route === "/statistics") {
+    // Assert the populated render, not the "temporarily unavailable"
+    // fallback the page degrades to when the report query throws. The
+    // phrase also appears in the "About these numbers" glossary, so
+    // scope to the stat-card label.
+    await expect(
+      page
+        .getByText("Active animals known to SFPCA", { exact: true })
+        .first(),
+    ).toBeVisible();
+  }
+  if (route === "/lost-pets") {
+    // Publishing a case is an explicit staff opt-in, so the seeded
+    // baseline is the empty state — this route scan measures exactly
+    // that. The populated listing gets its own dedicated scan below.
+    await expect(
+      page.getByText("no animals listed as missing"),
+    ).toBeVisible();
+  }
 }
 
 async function scan(page: import("@playwright/test").Page) {
@@ -91,6 +113,68 @@ test.describe("public accessibility", () => {
       ).toEqual([]);
     });
   }
+
+  test("axe scan: /lost-pets with a published missing case", async ({
+    page,
+  }) => {
+    // Publishing is an explicit staff opt-in, so the seeded baseline is
+    // the empty state the route scan above covers. Open + publish a
+    // missing case on Daisy (the dedicated #176 fixture animal) through
+    // the same datastore channel the suite uses for mid-test seeding,
+    // then scan the populated listing users actually see — the animal
+    // card, its metadata, and the sighting button.
+    const [daisy] = await dbQuery<{ id: string }>(
+      `select id from animals where name = 'Daisy'`,
+    );
+    await dbQuery(
+      `insert into lost_found_cases
+         (case_type, animal_id, reported_via, last_seen_on,
+          last_seen_location, public_note, published_at, published_by)
+       values ('missing', $1, 'staff', '2026-09-28', 'Windwardside',
+               'Answers to Daisy — do not chase', now(), 'e2e-accessibility')`,
+      [daisy.id],
+    );
+
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/lost-pets", { waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: "Daisy" }),
+    ).toBeVisible();
+    await dismissConsentNotice(page);
+
+    const { results, highImpact } = await scan(page);
+    await test.info().attach("axe-violations-_lost-pets-populated.json", {
+      body: JSON.stringify(results.violations, null, 2),
+      contentType: "application/json",
+    });
+    expect(
+      highImpact.map(
+        (v) =>
+          `${v.id} (${v.impact}): ${v.nodes.map((n) => n.target.join(" ")).join(" | ")}`,
+      ),
+      "critical/serious axe violations on /lost-pets (populated)",
+    ).toEqual([]);
+
+    // The sighting form is the page's interactive surface — scan it
+    // open too (this also exercises the honeypot's aria-hidden wrapper).
+    await page
+      .getByRole("button", { name: "I've seen this animal" })
+      .click();
+    await expect(page.getByLabel("Where did you see it?")).toBeVisible();
+    const { results: formResults, highImpact: formViolations } =
+      await scan(page);
+    await test.info().attach("axe-violations-_lost-pets-sighting-form.json", {
+      body: JSON.stringify(formResults.violations, null, 2),
+      contentType: "application/json",
+    });
+    expect(
+      formViolations.map(
+        (v) =>
+          `${v.id} (${v.impact}): ${v.nodes.map((n) => n.target.join(" ")).join(" | ")}`,
+      ),
+      "critical/serious axe violations on the /lost-pets sighting form",
+    ).toEqual([]);
+  });
 
   test("axe scan: homepage in dark theme", async ({ page }) => {
     await page.emulateMedia({ colorScheme: "dark" });
@@ -318,5 +402,39 @@ test.describe("public accessibility", () => {
     await expect(video).toBeAttached();
     await expect(video).toHaveAttribute("aria-hidden", "true");
     await expect(video).not.toHaveAttribute("autoplay", "");
+  });
+});
+
+test.describe("authenticated accessibility", () => {
+  test("axe scan: owner portal", async ({ page }) => {
+    // The representative signed-in owner state — the real login flow
+    // against the Auth emulator, landing on the pre-linked owner the
+    // #166 fixtures seed (animals via both person and household
+    // ownership, contact form, requests). This is the populated portal,
+    // not the login redirect or the pending-claim shell.
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await signIn(page, E2E_OWNER_EMAIL, E2E_OWNER_PASSWORD);
+    await expect(page).toHaveURL("/portal");
+    await expect(
+      page.getByRole("heading", { name: "Owner Portal" }),
+    ).toBeVisible();
+    await expect(page.getByText("Signed in as E2E Owner")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Rexley" }),
+    ).toBeVisible();
+    await dismissConsentNotice(page);
+
+    const { results, highImpact } = await scan(page);
+    await test.info().attach("axe-violations-_portal-owner.json", {
+      body: JSON.stringify(results.violations, null, 2),
+      contentType: "application/json",
+    });
+    expect(
+      highImpact.map(
+        (v) =>
+          `${v.id} (${v.impact}): ${v.nodes.map((n) => n.target.join(" ")).join(" | ")}`,
+      ),
+      "critical/serious axe violations on /portal (signed-in owner)",
+    ).toEqual([]);
   });
 });

@@ -12,6 +12,7 @@
 //   985222000333444. A dedicated animal so case state can't collide
 //   with other suites' lifecycle changes.
 import { expect, test, type Page } from "./fixtures";
+import { signIn } from "./helpers";
 import {
   E2E_ADMIN_EMAIL,
   E2E_ADMIN_PASSWORD,
@@ -20,18 +21,12 @@ import {
 } from "./env";
 
 async function signInAsAdmin(page: Page) {
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(E2E_ADMIN_EMAIL);
-  await page.getByLabel("Password").fill(E2E_ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await signIn(page, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);
   await expect(page).toHaveURL("/admin");
 }
 
 async function signInAsOwner(page: Page) {
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(E2E_OWNER_EMAIL);
-  await page.getByLabel("Password").fill(E2E_OWNER_PASSWORD);
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await signIn(page, E2E_OWNER_EMAIL, E2E_OWNER_PASSWORD);
   await expect(page).toHaveURL("/portal");
 }
 
