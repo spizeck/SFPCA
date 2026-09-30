@@ -13,9 +13,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash } from "lucide-react";
 import { AnimalRegistrationData } from "@/lib/types";
-import { ref, uploadBytes } from "firebase/storage";
-import { storage } from "@/lib/firebase";
-import { submitRegistrationAction } from "@/app/animal-registration/actions";
+import {
+  finalizeReceiptAction,
+  submitRegistrationAction,
+} from "@/app/animal-registration/actions";
+import { HoneypotField } from "@/components/forms/honeypot-field";
 import { logError } from "@/lib/logger";
 import {
   calculateRegistrationFee,
@@ -42,6 +44,8 @@ export function AnimalRegistration({
   // handler runs, so a fast double-submit could slip past a state check.
   const submittingRef = useRef(false);
   const [receiptError, setReceiptError] = useState<string | null>(null);
+  // Honeypot state — stays empty for every real user (#219).
+  const [honeypot, setHoneypot] = useState("");
   const { toast } = useToast();
   
   const [formData, setFormData] = useState({
@@ -133,42 +137,65 @@ export function AnimalRegistration({
       // submission is idempotent rather than a duplicate.
       const submissionId = crypto.randomUUID();
 
-      // Upload the optional receipt first so its storage path is stored
-      // with the submission. A failed upload must not block the
-      // registration itself.
-      let receiptPath: string | null = null;
-      if (formData.paymentReceipt) {
-        try {
-          const path = `receipts/${submissionId}`;
-          await uploadBytes(ref(storage, path), formData.paymentReceipt, {
-            contentType: formData.paymentReceipt.type,
-          });
-          receiptPath = path;
-        } catch (uploadError) {
-          logError("registration", "receipt-upload", uploadError);
-        }
-      }
-
+      // Submit first — the server mints the upload entitlement only for
+      // a validated row that passed the rate limit (#219). Receipts no
+      // longer write directly to Storage from the browser.
       const result = await submitRegistrationAction({
         submissionId,
-        receiptPath,
+        receiptPath: null,
         ownerName: trimmed.ownerName,
         ownerAddress: trimmed.ownerAddress,
         ownerPhone: trimmed.ownerPhone,
         ownerEmail: trimmed.ownerEmail,
         animals: trimmed.animals,
+        website: honeypot,
+        wantsReceipt: !!formData.paymentReceipt,
       });
       if (!result.ok) {
-        // A receipt uploaded for a row that never landed is an orphan —
-        // the scheduled sweep cleans it up; the user gets an honest
-        // retryable failure either way.
+        if (result.reason === "throttled") {
+          // Expected outcome, not a crash — keep every field as typed.
+          toast({
+            title: "Please wait a moment",
+            description:
+              "We're receiving a lot of submissions right now. Please wait a few minutes and try again — your entries are preserved.",
+            variant: "destructive",
+          });
+          return;
+        }
         throw new Error(`submission rejected: ${result.reason}`);
+      }
+
+      // Deliver the receipt through the granted channel: a path-bound
+      // signed URL, or the server-save fallback (emulator/dev/mint
+      // failure). A failed upload must not block the registration —
+      // the row already landed.
+      let receiptDelivered = true;
+      if (formData.paymentReceipt) {
+        try {
+          const grant = result.receiptUpload;
+          if (grant?.mode === "signed-url") {
+            const upload = await fetch(grant.url, {
+              method: "PUT",
+              headers: { "Content-Type": formData.paymentReceipt.type },
+              body: formData.paymentReceipt,
+            });
+            if (!upload.ok) throw new Error(`upload ${upload.status}`);
+          }
+          const attach = await finalizeReceiptAction({
+            submissionId,
+            file: grant?.mode === "signed-url" ? null : formData.paymentReceipt,
+          });
+          if (!attach.ok) throw new Error(`finalize rejected: ${attach.reason}`);
+        } catch (uploadError) {
+          receiptDelivered = false;
+          logError("registration", "receipt-upload", uploadError);
+        }
       }
 
       toast({
         title: "Registration Submitted",
         description:
-          formData.paymentReceipt && !receiptPath
+          formData.paymentReceipt && !receiptDelivered
             ? `Your registration for ${formData.animals.length} animal(s) was submitted, but the receipt could not be uploaded. You can bring it to our office instead.`
             : `Your registration for ${formData.animals.length} animal(s) has been submitted. The total fee is $${totalFee}. Please allow 24-48 hours for verification.`,
       });
@@ -286,6 +313,13 @@ export function AnimalRegistration({
               </CardHeader>
               <CardContent>
                 <form onSubmit={handleSubmit} className="space-y-6">
+                  {/* Bots that fill every field get a generic success and
+                      no write; real users never see this. (#219) */}
+                  <HoneypotField
+                    id="registration-website"
+                    value={honeypot}
+                    onChange={setHoneypot}
+                  />
                   {/* Owner Information */}
                   <div className="space-y-4">
                     <h3 className="text-lg font-semibold">Owner Information</h3>

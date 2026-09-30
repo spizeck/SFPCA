@@ -349,41 +349,32 @@ test("storage paths outside known prefixes are denied by default", async () => {
 });
 
 // ---------- Payment receipts (private submission data) ----------
-// Post-#183 posture: public constrained create is the ONLY client-side
-// operation. Reads/updates/deletes are denied for every principal —
-// staff view receipts through server-minted signed URLs and orphan
-// cleanup runs through the Admin SDK, both of which bypass rules.
+// Post-#219 posture: NO client-side operation is allowed at all. The
+// public form writes through a server-minted signed URL or the Admin
+// SDK server-save path (both bypass rules); reads stay denied for every
+// principal; orphan cleanup runs through the Admin SDK sweep.
 
-test("public can upload an image or PDF receipt", async () => {
-  await assertSucceeds(
-    publicStorage()
-      .ref("receipts/new-receipt-1")
-      .put(pngBytes(), { contentType: "image/png" }),
-  );
-  await assertSucceeds(
-    publicStorage()
-      .ref("receipts/new-receipt-2")
-      .put(new Uint8Array([37, 80, 68, 70]), {
-        contentType: "application/pdf",
-      }),
-  );
-});
-
-test("public cannot upload non-image/PDF or oversized receipts", async () => {
-  await assertFails(
-    publicStorage()
-      .ref("receipts/evil")
-      .put(new Uint8Array([60, 104, 116, 109, 108]), {
-        contentType: "text/html",
-      }),
-  );
-  await assertFails(
-    publicStorage()
-      .ref("receipts/huge")
-      .put(new Uint8Array(5 * 1024 * 1024 + 1), {
-        contentType: "image/png",
-      }),
-  );
+test("no client principal can create a receipt object", async () => {
+  for (const storage of [
+    publicStorage(),
+    userStorage(),
+    noClaimStorage(),
+    spoofedStorage(),
+    adminStorage(),
+  ]) {
+    await assertFails(
+      storage
+        .ref("receipts/new-receipt")
+        .put(pngBytes(), { contentType: "image/png" }),
+    );
+    await assertFails(
+      storage
+        .ref("receipts/new-receipt-pdf")
+        .put(new Uint8Array([37, 80, 68, 70]), {
+          contentType: "application/pdf",
+        }),
+    );
+  }
 });
 
 test("receipts are not readable by any client principal", async () => {
@@ -412,17 +403,9 @@ test("nobody can overwrite an existing receipt object", async () => {
 });
 
 test("no client principal can delete a receipt — cleanup is server-side only", async () => {
-  // The old anonymous orphan-delete path is gone: Firebase Storage rules
-  // cannot query Postgres, so deletion is exclusively an Admin SDK
-  // operation (the scheduled sweep). Every client delete is denied,
-  // including for claimed admins and would-be orphans.
-  // A brand-new upload can't be self-deleted either — it waits for
-  // the sweep to classify it against Postgres.
-  await assertSucceeds(
-    publicStorage()
-      .ref("receipts/new-undeletable")
-      .put(pngBytes(), { contentType: "image/png" }),
-  );
+  // Deletion is exclusively an Admin SDK operation (the scheduled
+  // sweep). Every client delete is denied, including for claimed admins
+  // and would-be orphans.
   for (const storage of [
     publicStorage(),
     userStorage(),
@@ -432,7 +415,6 @@ test("no client principal can delete a receipt — cleanup is server-side only",
   ]) {
     await assertFails(storage.ref("receipts/reg-1").delete());
     await assertFails(storage.ref("receipts/existing").delete());
-    await assertFails(storage.ref("receipts/new-undeletable").delete());
   }
 });
 

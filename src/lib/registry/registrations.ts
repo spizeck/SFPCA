@@ -265,6 +265,36 @@ export async function registrationSubmissionExists(
   return !!row;
 }
 
+export type AttachReceiptResult =
+  | { ok: true; attached: boolean }
+  | { ok: false };
+
+// Bind the receipt object to an existing submission row (#219). The path
+// is derived — receipts/<submissionId> — so the caller can never point a
+// row at an unrelated object. Only a NULL path is filled: a retry after
+// a dropped response converges instead of erroring, and nothing can
+// re-bind a submission that already has a receipt.
+export async function attachReceiptToSubmission(
+  id: string,
+  db: RegistryDb = getRegistryDb(),
+): Promise<AttachReceiptResult> {
+  if (!UUID_RE.test(id)) return { ok: false };
+  const updated = await db
+    .update(registrationSubmissions)
+    .set({ paymentReceiptPath: `receipts/${id}` })
+    .where(
+      and(
+        eq(registrationSubmissions.id, id),
+        isNull(registrationSubmissions.paymentReceiptPath),
+      ),
+    )
+    .returning();
+  if (updated.length > 0) return { ok: true, attached: true };
+  return (await registrationSubmissionExists(id, db))
+    ? { ok: true, attached: false }
+    : { ok: false };
+}
+
 // === Authoritative registrations (#169) ======================================
 // `registrations` is the durable per-animal-per-year record. Animal
 // existence/lifecycle (#167), registration status, and payment state

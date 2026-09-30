@@ -1,36 +1,33 @@
 // Component tests for the public animal-registration form. The server
-// action and Storage are mocked at the module boundary — these tests pin
-// down the submitted payload shape, the re-entrancy guard (double-submit
-// protection), receipt upload binding, and that entered data survives a
-// failed write. Server-side validation and idempotency are covered by
-// tests/db (PGlite) and the domain service.
+// actions are mocked at the module boundary — these tests pin down the
+// submitted payload shape, the re-entrancy guard (double-submit
+// protection), the post-submit receipt-entitlement flow (#219), the
+// honeypot field, and that entered data survives a failed write.
+// Server-side validation and idempotency are covered by tests/db
+// (PGlite) and the domain service.
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { mockSubmitAction, mockUploadBytes, mockToast } = vi.hoisted(() => ({
-  mockSubmitAction: vi.fn(),
-  mockUploadBytes: vi.fn(),
-  mockToast: vi.fn(),
-}));
+const { mockSubmitAction, mockFinalizeAction, mockToast, mockFetch } =
+  vi.hoisted(() => ({
+    mockSubmitAction: vi.fn(),
+    mockFinalizeAction: vi.fn(),
+    mockToast: vi.fn(),
+    mockFetch: vi.fn(),
+  }));
 
 vi.mock("@/app/animal-registration/actions", () => ({
   submitRegistrationAction: mockSubmitAction,
+  finalizeReceiptAction: mockFinalizeAction,
 }));
-
-vi.mock("firebase/storage", () => ({
-  ref: vi.fn((_storage: unknown, path: string) => ({ path })),
-  uploadBytes: mockUploadBytes,
-}));
-
-vi.mock("@/lib/firebase", () => ({ storage: {} }));
 
 vi.mock("@/hooks/use-toast", () => ({
   useToast: () => ({ toast: mockToast }),
 }));
 
-import { AnimalRegistration } from "@/components/animal-registration/animal-registration-page";
+vi.stubGlobal("fetch", mockFetch);
 
-const UUID_PATH = /^receipts\/[0-9a-f-]{36}$/i;
+import { AnimalRegistration } from "@/components/animal-registration/animal-registration-page";
 
 async function fillValidForm() {
   fireEvent.change(screen.getByLabelText(/^Full Name/), {
@@ -70,8 +67,17 @@ function submit() {
 }
 
 beforeEach(() => {
-  mockSubmitAction.mockReset().mockResolvedValue({ ok: true });
-  mockUploadBytes.mockReset().mockResolvedValue({});
+  mockSubmitAction
+    .mockReset()
+    .mockImplementation((input: { submissionId: string; wantsReceipt?: boolean }) =>
+      Promise.resolve({
+        ok: true,
+        submissionId: input.submissionId,
+        receiptUpload: input.wantsReceipt ? { mode: "server-save" } : null,
+      }),
+    );
+  mockFinalizeAction.mockReset().mockResolvedValue({ ok: true });
+  mockFetch.mockReset().mockResolvedValue({ ok: true, status: 200 });
   mockToast.mockReset();
 });
 
@@ -85,6 +91,8 @@ describe("AnimalRegistration form", () => {
     const [input] = mockSubmitAction.mock.calls[0];
     expect(input.receiptPath).toBeNull();
     expect(input.submissionId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(input.website).toBe(""); // honeypot always present, always empty
+    expect(input.wantsReceipt).toBe(false);
     expect(input).toMatchObject({
       ownerName: "Jane Doe",
       ownerAddress: "Windwardside, Saba",
@@ -100,11 +108,28 @@ describe("AnimalRegistration form", () => {
     );
   });
 
+  test("the honeypot field is invisible and unreachable by keyboard", () => {
+    render(<AnimalRegistration />);
+    const field = document.querySelector<HTMLInputElement>(
+      'input[name="website"]',
+    );
+    expect(field).not.toBeNull();
+    expect(field!.tabIndex).toBe(-1);
+    expect(field!.closest("[aria-hidden]")).not.toBeNull();
+    // Filling it posts the value verbatim — the server decides.
+    fireEvent.change(field!, { target: { value: "spam.example" } });
+  });
+
   test("a second submit during the write cannot create a duplicate", async () => {
     let resolveWrite!: () => void;
     mockSubmitAction.mockReturnValue(
-      new Promise<{ ok: true }>((resolve) => {
-        resolveWrite = () => resolve({ ok: true });
+      new Promise<Record<string, unknown>>((resolve) => {
+        resolveWrite = () =>
+          resolve({
+            ok: true,
+            submissionId: "11111111-2222-4333-8444-555555555555",
+            receiptUpload: null,
+          });
       }),
     );
     render(<AnimalRegistration />);
@@ -148,34 +173,97 @@ describe("AnimalRegistration form", () => {
     expect(screen.getByLabelText(/Animal's Name/)).toHaveValue("Rex");
   });
 
-  test("an attached receipt uploads to the path bound to the submission id", async () => {
+  test("a throttled submission gets a calm message and keeps the form", async () => {
+    mockSubmitAction.mockResolvedValue({ ok: false, reason: "throttled" });
+    render(<AnimalRegistration />);
+    await fillValidForm();
+    submit();
+
+    await waitFor(() =>
+      expect(mockToast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Please wait a moment",
+          description: expect.stringContaining("entries are preserved"),
+        }),
+      ),
+    );
+    // Nothing was framed as a crash and nothing was cleared.
+    expect(mockToast).not.toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Error" }),
+    );
+    expect(screen.getByLabelText(/^Full Name/)).toHaveValue("  Jane Doe  ");
+    // No entitlement or receipt work should follow a throttle.
+    expect(mockFinalizeAction).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  test("receipt upload follows the server grant — server-save mode", async () => {
     render(<AnimalRegistration />);
     await fillValidForm();
     attachReceipt();
     submit();
 
     await waitFor(() => expect(mockSubmitAction).toHaveBeenCalledTimes(1));
-    expect(mockUploadBytes).toHaveBeenCalledTimes(1);
-    // The upload target and the stored reference must both be
-    // receipts/<submissionId> — the binding the sweep uses to classify
-    // orphans.
-    const uploadRef = mockUploadBytes.mock.calls[0][0] as { path: string };
     const [input] = mockSubmitAction.mock.calls[0];
-    expect(uploadRef.path).toBe(`receipts/${input.submissionId}`);
-    expect(input.receiptPath).toBe(`receipts/${input.submissionId}`);
-    expect(uploadRef.path).toMatch(UUID_PATH);
+    expect(input.wantsReceipt).toBe(true);
+
+    // The file goes to finalizeReceiptAction bound to the same
+    // client-generated submission id — the object path is derived
+    // server-side (receipts/<submissionId>), never client-supplied.
+    await waitFor(() =>
+      expect(mockFinalizeAction).toHaveBeenCalledWith({
+        submissionId: input.submissionId,
+        file: expect.any(File),
+      }),
+    );
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Registration Submitted" }),
+    );
+  });
+
+  test("receipt upload follows the server grant — signed-url mode", async () => {
+    mockSubmitAction.mockImplementation((input) =>
+      Promise.resolve({
+        ok: true,
+        submissionId: input.submissionId,
+        receiptUpload: {
+          mode: "signed-url",
+          url: "https://storage.example/signed-put",
+        },
+      }),
+    );
+    render(<AnimalRegistration />);
+    await fillValidForm();
+    attachReceipt();
+    submit();
+
+    const [input] = await waitFor(() => {
+      expect(mockSubmitAction).toHaveBeenCalledTimes(1);
+      return mockSubmitAction.mock.calls[0];
+    });
+    await waitFor(() =>
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://storage.example/signed-put",
+        expect.objectContaining({ method: "PUT" }),
+      ),
+    );
+    // After the PUT lands, finalize binds the path — no file payload.
+    await waitFor(() =>
+      expect(mockFinalizeAction).toHaveBeenCalledWith({
+        submissionId: input.submissionId,
+        file: null,
+      }),
+    );
   });
 
   test("a failed receipt upload still submits the registration", async () => {
-    mockUploadBytes.mockRejectedValue(new Error("storage/unauthorized"));
+    mockFinalizeAction.mockResolvedValue({ ok: false, reason: "error" });
     render(<AnimalRegistration />);
     await fillValidForm();
     attachReceipt();
     submit();
 
     await waitFor(() => expect(mockSubmitAction).toHaveBeenCalledTimes(1));
-    const [input] = mockSubmitAction.mock.calls[0];
-    expect(input.receiptPath).toBeNull();
     expect(mockToast).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "Registration Submitted",
@@ -184,9 +272,7 @@ describe("AnimalRegistration form", () => {
     );
   });
 
-  test("a failed submission after a successful upload reports the error honestly", async () => {
-    // The orphan receipt is left for the scheduled sweep — the form must
-    // NOT report a false success.
+  test("a failed submission reports the error honestly — no receipt work", async () => {
     mockSubmitAction.mockResolvedValue({ ok: false, reason: "error" });
     render(<AnimalRegistration />);
     await fillValidForm();
@@ -201,11 +287,21 @@ describe("AnimalRegistration form", () => {
     expect(mockToast).not.toHaveBeenCalledWith(
       expect.objectContaining({ title: "Registration Submitted" }),
     );
+    expect(mockFinalizeAction).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
     expect(screen.getByLabelText(/^Full Name/)).toHaveValue("  Jane Doe  ");
   });
 
-  test("a retry after failure uses a fresh submission id and receipt path", async () => {
-    mockSubmitAction.mockResolvedValueOnce({ ok: false, reason: "error" });
+  test("a retry after failure uses a fresh submission id", async () => {
+    mockSubmitAction
+      .mockResolvedValueOnce({ ok: false, reason: "error" })
+      .mockImplementation((input) =>
+        Promise.resolve({
+          ok: true,
+          submissionId: input.submissionId,
+          receiptUpload: { mode: "server-save" },
+        }),
+      );
     render(<AnimalRegistration />);
     await fillValidForm();
     attachReceipt();
@@ -227,13 +323,15 @@ describe("AnimalRegistration form", () => {
     );
 
     expect(mockSubmitAction).toHaveBeenCalledTimes(2);
-    expect(mockUploadBytes).toHaveBeenCalledTimes(2);
+    // The failed first attempt performs no receipt work at all — the
+    // entitlement only exists after a successful submission, which is
+    // what prevents orphaned receipt objects on write failure.
+    expect(mockFinalizeAction).toHaveBeenCalledTimes(1);
     const [first, second] = mockSubmitAction.mock.calls.map((c) => c[0]);
     expect(second.submissionId).not.toBe(first.submissionId);
-    expect(second.receiptPath).toBe(`receipts/${second.submissionId}`);
   });
 
-  test("a disallowed receipt file is rejected before upload", async () => {
+  test("a disallowed receipt file is rejected before any upload", async () => {
     render(<AnimalRegistration />);
     const bad = new File(["<html>"], "page.html", { type: "text/html" });
     fireEvent.change(screen.getByLabelText(/Upload Payment Receipt/), {
@@ -246,6 +344,9 @@ describe("AnimalRegistration form", () => {
     await fillValidForm();
     submit();
     await waitFor(() => expect(mockSubmitAction).toHaveBeenCalledTimes(1));
-    expect(mockUploadBytes).not.toHaveBeenCalled();
+    const [input] = mockSubmitAction.mock.calls[0];
+    expect(input.wantsReceipt).toBe(false);
+    expect(mockFinalizeAction).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });

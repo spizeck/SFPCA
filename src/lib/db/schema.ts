@@ -1977,3 +1977,32 @@ export const householdMerges = pgTable(
     ),
   ],
 );
+
+// --- Public-intake abuse throttling (#219) ---------------------------------
+// Fixed-window counters backing the server-side rate limiter for the
+// unauthenticated intake surfaces (public registration, public sighting
+// reports, receipt finalization). `subject` is a salted SHA-256 digest of
+// the client IP — never the raw address — so this table is not a request
+// log and a dump cannot be mapped back to a visitor without the
+// server-side salt. Rows are deleted once their window expires, so
+// retention is bounded by the longest configured window.
+export const rateLimitWindows = pgTable(
+  "rate_limit_windows",
+  {
+    bucket: text("bucket").notNull(),
+    subject: text("subject").notNull(),
+    windowStart: timestamp("window_start", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+    count: integer("count").notNull(),
+    expiresAt: timestamp("expires_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.bucket, t.subject, t.windowStart] }),
+    index("rate_limit_windows_expiry_idx").on(t.expiresAt),
+  ],
+);
