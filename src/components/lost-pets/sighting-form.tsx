@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 import { submitSightingAction } from "@/app/lost-pets/actions";
+import { HoneypotField } from "@/components/forms/honeypot-field";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,7 +21,9 @@ export function SightingForm({ caseId }: { caseId: string }) {
   const [contact, setContact] = useState("");
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<"error" | "throttled" | null>(null);
+  // Honeypot state — stays empty for every real user (#219).
+  const [honeypot, setHoneypot] = useState("");
 
   if (sent) {
     return (
@@ -44,19 +47,25 @@ export function SightingForm({ caseId }: { caseId: string }) {
       onSubmit={async (e) => {
         e.preventDefault();
         setBusy(true);
-        setError(false);
+        setError(null);
         const r = await submitSightingAction({
           caseId,
           location: location || null,
           note: note || null,
           reporterName: name || null,
           reporterContact: contact || null,
+          website: honeypot,
         });
         setBusy(false);
         if (r.ok) setSent(true);
-        else setError(true);
+        else setError(r.reason === "throttled" ? "throttled" : "error");
       }}
     >
+      <HoneypotField
+        id={`sighting-website-${caseId}`}
+        value={honeypot}
+        onChange={setHoneypot}
+      />
       <div className="space-y-1">
         <Label htmlFor={`sighting-where-${caseId}`}>Where did you see it?</Label>
         <Input
@@ -97,7 +106,13 @@ export function SightingForm({ caseId }: { caseId: string }) {
           />
         </div>
       </div>
-      {error && (
+      {error === "throttled" && (
+        <p className="text-sm text-destructive">
+          Too many reports in a short time — please wait a few minutes and
+          try again. Your note is still here.
+        </p>
+      )}
+      {error === "error" && (
         <p className="text-sm text-destructive">
           Something went wrong — please try again or contact SFPCA directly.
         </p>

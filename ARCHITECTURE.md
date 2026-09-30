@@ -752,12 +752,16 @@ launch-time data load, but nothing in the running app reads it.
 
 Binary objects stay in Firebase Storage. Postgres stores only object
 *paths* (`payment_receipt_path`, `photo_urls`) — paths are references,
-not authorization. Post-#183 receipt access: the public form creates
-objects under `receipts/<submission uuid>` (constrained create only);
-no client-side read/update/delete exists for any principal — staff view
-via short-lived signed URLs from `getReceiptUrlAction` and orphan
-cleanup runs server-side in the cron sweeper. Future vet documents
-follow the same pattern.
+not authorization. Post-#219 receipt access: the public form can no
+longer write Storage directly — `storage.rules` denies every client
+write to `receipts/` — so uploads flow through
+`POST /api/receipts/<submissionId>`, which enforces the receipt rate
+limit, an atomic row-level claim (one-time entitlement; concurrent
+uploads can't both win), a bounded 5 MB stream read, magic-byte type
+validation, and a create-only storage write (`ifGenerationMatch: 0`).
+Staff view via short-lived signed URLs from `getReceiptUrlAction` and
+orphan/claim cleanup runs server-side in the cron sweeper. Vet
+documents follow the same pattern.
 
 ## 10. Backup / recovery (Postgres side)
 

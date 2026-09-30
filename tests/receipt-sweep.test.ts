@@ -1,13 +1,20 @@
-// Unit tests for the Postgres-aware orphan-receipt sweeper (#183).
-// The submission-existence check is mocked; the scan/delete decision
-// matrix (grace period, malformed names, per-object failure isolation,
-// log privacy) is real.
+// Unit tests for the Postgres-aware orphan-receipt sweeper (#183,
+// claim-aware per #219 review). The claim/existence seam is mocked;
+// the scan/delete/clear decision matrix (grace period, malformed
+// names, per-object failure isolation, dangling claims, log privacy)
+// is real.
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { mockExists } = vi.hoisted(() => ({ mockExists: vi.fn() }));
+const { mockClaims, mockListClaims, mockClearClaim } = vi.hoisted(() => ({
+  mockClaims: vi.fn(),
+  mockListClaims: vi.fn(),
+  mockClearClaim: vi.fn(),
+}));
 
 vi.mock("@/lib/registry/registrations", () => ({
-  registrationSubmissionExists: mockExists,
+  submissionClaimsReceipt: mockClaims,
+  listReceiptClaims: mockListClaims,
+  clearReceiptClaim: mockClearClaim,
 }));
 
 import {
@@ -59,21 +66,25 @@ function fakeFile(
 }
 
 // The sweeper never dereferences the db argument itself — the mocked
-// existence seam owns it.
+// claim seam owns it.
 const db = {} as Parameters<typeof sweepOrphanedReceipts>[0]["db"];
 
 beforeEach(() => {
-  mockExists.mockReset().mockResolvedValue(false);
+  mockClaims.mockReset().mockResolvedValue(false);
+  mockListClaims.mockReset().mockResolvedValue([]);
+  mockClearClaim.mockReset().mockResolvedValue(undefined);
 });
 
 describe("sweepOrphanedReceipts", () => {
-  test("deletes orphans, keeps referenced and recent objects", async () => {
+  test("deletes orphans, keeps claimed and recent objects", async () => {
     const log = fakeLog();
     const orphan = fakeFile("orphan-id");
     const referenced = fakeFile("known-id");
     const recent = fakeFile("inflight-id", 5 * 60 * 1000);
     const nested = { name: "receipts/nested/path" } as SweepFile;
-    mockExists.mockImplementation(async (id: string) => id === "known-id");
+    mockClaims.mockImplementation(
+      async (path: string) => path === "receipts/known-id",
+    );
 
     const counts = await sweepOrphanedReceipts({
       bucket: fakeBucket([orphan, referenced, recent, nested]),
@@ -91,6 +102,7 @@ describe("sweepOrphanedReceipts", () => {
       deleted: 1,
       skippedRecent: 1,
       skippedMalformed: 1,
+      danglingCleared: 0,
       failed: 0,
     });
     expect(log.calls.info[0]).toMatchObject({ outcome: "ok" });
@@ -98,6 +110,90 @@ describe("sweepOrphanedReceipts", () => {
     for (const name of ["orphan-id", "known-id", "inflight-id"]) {
       expect(log.all()).not.toContain(name);
     }
+  });
+
+  test("an object at a known submission id is still deleted when the row does not claim it", async () => {
+    // The #219 fix: a submission row existing is no longer sufficient —
+    // the row must claim THIS path. An attacker-written object at a
+    // legitimate id gets swept like any other orphan.
+    const log = fakeLog();
+    const squat = fakeFile("squatted-id");
+    mockClaims.mockResolvedValue(false);
+
+    const counts = await sweepOrphanedReceipts({
+      bucket: fakeBucket([squat]),
+      db,
+      nowMs: NOW,
+      log,
+    });
+
+    expect(squat.deleted).toBe(true);
+    expect(counts.deleted).toBe(1);
+  });
+
+  test("a migrated legacy-named receipt survives when its row claims the path", async () => {
+    // Pre-#219 rows carry paths like receipts/scan-001.pdf — not
+    // receipts/<uuid>. The claim lookup matches the stored path, so a
+    // legacy-named object a row still references is never swept.
+    const log = fakeLog();
+    const legacy = fakeFile("scan-001.pdf");
+    mockClaims.mockImplementation(
+      async (path: string) => path === "receipts/scan-001.pdf",
+    );
+
+    const counts = await sweepOrphanedReceipts({
+      bucket: fakeBucket([legacy]),
+      db,
+      nowMs: NOW,
+      log,
+    });
+
+    expect(legacy.deleted).toBe(false);
+    expect(counts.deleted).toBe(0);
+    expect(mockClaims).toHaveBeenCalledWith("receipts/scan-001.pdf", db);
+  });
+
+  test("a claim whose object never landed is cleared past the grace window", async () => {
+    // Upload route writes claim → object; a claim older than grace with
+    // no matching object is a wedged submission — clear it so retries
+    // can proceed.
+    const log = fakeLog();
+    mockListClaims.mockResolvedValue([
+      {
+        id: "dangling-id",
+        paymentReceiptPath: "receipts/dangling-id",
+        claimedAt: new Date(NOW - 2 * HOUR),
+      },
+      {
+        id: "fresh-id",
+        paymentReceiptPath: "receipts/fresh-id",
+        claimedAt: new Date(NOW - 5 * 60 * 1000),
+      },
+      {
+        id: "live-id",
+        paymentReceiptPath: "receipts/live-id",
+        claimedAt: new Date(NOW - 2 * HOUR),
+      },
+    ]);
+    const live = fakeFile("live-id");
+    mockClaims.mockImplementation(
+      async (path: string) => path === "receipts/live-id",
+    );
+
+    const counts = await sweepOrphanedReceipts({
+      bucket: fakeBucket([live]),
+      db,
+      nowMs: NOW,
+      log,
+    });
+
+    expect(counts.danglingCleared).toBe(1);
+    expect(mockClearClaim).toHaveBeenCalledWith("dangling-id", db);
+    // Fresh claims (still inside the grace window) and claims whose
+    // object exists are untouched.
+    expect(mockClearClaim).not.toHaveBeenCalledWith("fresh-id", db);
+    expect(mockClearClaim).not.toHaveBeenCalledWith("live-id", db);
+    expect(live.deleted).toBe(false);
   });
 
   test("per-object failure is counted, the run continues, error logged", async () => {
@@ -119,9 +215,9 @@ describe("sweepOrphanedReceipts", () => {
     expect(log.all()).not.toContain("bad-id");
   });
 
-  test("an existence-check error counts as failure without deleting", async () => {
+  test("a claim-check error counts as failure without deleting", async () => {
     const log = fakeLog();
-    mockExists.mockRejectedValue(new Error("db down"));
+    mockClaims.mockRejectedValue(new Error("db down"));
     const file = fakeFile("any-id");
 
     const counts = await sweepOrphanedReceipts({

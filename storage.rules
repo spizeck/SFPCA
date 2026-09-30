@@ -29,15 +29,6 @@ service firebase.storage {
           && (request.resource == null || isImageUpload());
     }
 
-    // Payment-receipt uploads from the public registration form: image or
-    // PDF, max 5 MB (mirrors isReceiptFile in src/lib/animal-registration.ts).
-    function isReceiptUpload() {
-      return request.resource.size < 5 * 1024 * 1024
-          && request.resource.size > 0
-          && (request.resource.contentType.matches("image/.*")
-              || request.resource.contentType == "application/pdf");
-    }
-
     // Clinical-document uploads from the admin medical record: image or
     // PDF, max 5 MB (mirrors isVetDocumentFile in src/lib/medical.ts).
     function isVetDocUpload() {
@@ -69,24 +60,25 @@ service firebase.storage {
 
     // Payment receipts attached to registration submissions - private
     // data stored at receipts/<submission uuid>. The submission id is
-    // generated client-side before upload so the object path is bound
-    // to the Postgres registration_submissions row.
+    // generated client-side so the object path is bound to the Postgres
+    // registration_submissions row.
     //
-    // The public form uploads unauthenticated, so create is open but
-    // constrained to small image/PDF files; the resource == null check
-    // keeps an anonymous uploader from overwriting an existing object
-    // even where a PUT to an occupied path is classified as a create.
+    // Client SDK access is fully denied (#219). The public form writes
+    // through a short-lived signed URL minted by the submission server
+    // action after validation + rate limiting (GCS-level authorization,
+    // rules-bypassing), or through the Admin SDK server-save path on
+    // emulators — arbitrary unauthenticated clients can no longer create
+    // receipt objects directly. Size/type are verified server-side at
+    // finalize time before the row stores the path.
     //
-    // There is no client-side read/update/delete at all — not even for
-    // admins. Staff view receipts through short-lived signed URLs minted
-    // by a server action, and orphan cleanup runs through the Admin SDK
-    // in the scheduled sweep — both bypass rules entirely. A receipt
-    // object is therefore unreachable via the client SDK for every
-    // principal, and retired Firestore collections are never consulted
-    // for authorization.
+    // Staff view receipts through short-lived signed read URLs minted by
+    // a server action, and orphan cleanup runs through the Admin SDK in
+    // the scheduled sweep — both bypass rules entirely. A receipt object
+    // is therefore unreachable via the client SDK for every principal,
+    // and retired Firestore collections are never consulted for
+    // authorization.
     match /receipts/{receiptId} {
-      allow create: if resource == null && isReceiptUpload();
-      allow read, update, delete: if false;
+      allow read, write: if false;
     }
 
     // Clinical documents attached to the veterinary record (#192) —

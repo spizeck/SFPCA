@@ -41,7 +41,7 @@ const VALID_ANIMAL = {
 
 const VALID_SUBMISSION = {
   submissionId: "11111111-2222-4333-8444-555555555555",
-  receiptPath: null,
+  receiptRequested: false,
   ownerName: "Jane Doe",
   ownerAddress: "Windwardside, Saba",
   ownerPhone: "+599 416 0000",
@@ -230,16 +230,6 @@ describe("registration submissions", () => {
     expect(
       await createRegistrationSubmission(
         { ...VALID_SUBMISSION, ownerName: "" },
-        db,
-      ),
-    ).toEqual({ ok: false, reason: "invalid" });
-    expect(
-      await createRegistrationSubmission(
-        {
-          ...VALID_SUBMISSION,
-          submissionId: "33333333-3333-4333-8444-555555555555",
-          receiptPath: "receipts/../../etc/passwd",
-        },
         db,
       ),
     ).toEqual({ ok: false, reason: "invalid" });

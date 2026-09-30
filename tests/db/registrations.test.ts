@@ -251,7 +251,7 @@ describe("createRegistration — assessment + snapshot", () => {
     const sub = await createRegistrationSubmission(
       {
         submissionId: "11111111-2222-3333-4444-555555555555",
-        receiptPath: null,
+        receiptRequested: false,
         ownerName: "Submitter",
         ownerAddress: "The Bottom",
         ownerPhone: "+5994161234",
@@ -644,7 +644,7 @@ describe("current-period eligibility + staff queues", () => {
     await createRegistrationSubmission(
       {
         submissionId: "99999999-8888-7777-6666-555555555555",
-        receiptPath: null,
+        receiptRequested: false,
         ownerName: "Intake",
         ownerAddress: "Windwardside",
         ownerPhone: "+5994161234",

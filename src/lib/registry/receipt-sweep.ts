@@ -9,7 +9,11 @@
 
 import "server-only";
 
-import { registrationSubmissionExists } from "./registrations";
+import {
+  clearReceiptClaim,
+  listReceiptClaims,
+  submissionClaimsReceipt,
+} from "./registrations";
 import type { RegistryDb } from "./public-animals";
 
 // Orphans younger than this are left alone: a receipt whose submission
@@ -39,6 +43,12 @@ export interface SweepCounts {
   failed: number;
 }
 
+// The receipt sweep additionally clears row-side claims whose object
+// never landed; vet-document sweep shares the base shape.
+export interface ReceiptSweepCounts extends SweepCounts {
+  danglingCleared: number;
+}
+
 interface SweepLogger {
   info(obj: object): void;
   warn(obj: object): void;
@@ -59,7 +69,7 @@ export async function sweepOrphanedReceipts({
   graceMs?: number;
   log?: SweepLogger;
   runId?: string;
-}): Promise<SweepCounts> {
+}): Promise<ReceiptSweepCounts> {
   const base = {
     subsystem: "receipt-cleanup",
     operation: "sweep",
@@ -68,13 +78,16 @@ export async function sweepOrphanedReceipts({
   const cutoff = nowMs - graceMs;
   const [files] = await bucket.getFiles({ prefix: RECEIPT_PREFIX });
 
-  const counts: SweepCounts = {
+  const counts: ReceiptSweepCounts = {
     scanned: 0,
     deleted: 0,
     skippedRecent: 0,
     skippedMalformed: 0,
+    danglingCleared: 0,
     failed: 0,
   };
+
+  const objectNames = new Set(files.map((f) => f.name));
 
   for (const file of files) {
     const submissionId = file.name.slice(RECEIPT_PREFIX.length);
@@ -100,8 +113,13 @@ export async function sweepOrphanedReceipts({
 
     // One bad object must not abort the whole sweep: account for the
     // failure, keep going, and let the caller mark the run failed.
+    // An object is a live receipt only when a submission row claims
+    // this exact path — a row that merely exists is not enough, or an
+    // object pushed to a known id would survive forever. Matching the
+    // stored path (not the uuid-derived name) also keeps migrated
+    // legacy receipts (receipts/<name>.pdf) alive.
     try {
-      if (!(await registrationSubmissionExists(submissionId, db))) {
+      if (!(await submissionClaimsReceipt(file.name, db))) {
         await file.delete();
         counts.deleted++;
       }
@@ -116,6 +134,35 @@ export async function sweepOrphanedReceipts({
             : ((error as { name?: string })?.name ?? "unknown"),
       });
     }
+  }
+
+  // Dangling-claim pass: the upload route claims payment_receipt_path
+  // BEFORE writing the object, so a claim orphaned by process death
+  // (write never ran, release never ran) would otherwise wedge the
+  // submission — a legit retry could never attach. Rows whose claim is
+  // older than the grace window and whose object never landed get the
+  // claim cleared so the submitter can try again. Claims never hold
+  // user data; clearing is a status fix, not a deletion of content.
+  try {
+    for (const claim of await listReceiptClaims(db)) {
+      if (
+        claim.claimedAt.getTime() <= cutoff &&
+        !objectNames.has(claim.paymentReceiptPath)
+      ) {
+        await clearReceiptClaim(claim.id, db);
+        counts.danglingCleared++;
+      }
+    }
+  } catch (error) {
+    counts.failed++;
+    log.warn({
+      ...base,
+      outcome: "dangling-claims-failed",
+      errorCode:
+        typeof (error as { code?: unknown })?.code === "string"
+          ? (error as { code: string }).code
+          : ((error as { name?: string })?.name ?? "unknown"),
+    });
   }
 
   const summary = { ...base, ...counts };

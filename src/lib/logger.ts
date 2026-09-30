@@ -32,6 +32,7 @@ export type LogSubsystem =
   | "session"
   | "registration"
   | "receipt"
+  | "rate-limit"
   | "admin"
   | "animals"
   | "vaccinations"

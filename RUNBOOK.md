@@ -316,10 +316,10 @@ while it is `"true"` — for everyone except a **server-verified admin**
 - **SEO while gated:** `robots.txt` disallows everything and the sitemap
   is empty; both revert automatically when the flag lifts.
 - **Scope:** this gates public interactive traffic to the Next.js app
-  only. It does **not** change Firestore/Storage rules — public receipt
-  uploads to `receipts/` are still accepted by the rules layer —
-  Firebase Functions keep running normally, and authenticated cron +
-  webhook infrastructure continues operating.
+  only. It does **not** change Firestore/Storage rules — receipt intake
+  stays server-mediated (#219) — Firebase Functions keep running
+  normally, and authenticated cron + webhook infrastructure continues
+  operating.
 
 **Enable before risky work:**
 
@@ -2166,3 +2166,87 @@ the page fails closed rather than publishing partial figures.
 next to it; the full metric dictionary is ARCHITECTURE.md §18. If a
 metric looks wrong, fix the underlying registry data — reports are
 derived and have no separate state to repair.
+
+## 29. Public intake abuse controls (#219)
+
+The two unauthenticated write surfaces — `submitRegistrationAction`
+(`/animal-registration`) and `submitSightingAction` (`/lost-pets`) —
+plus receipt object creation are defended in depth. This is a
+proportionate first layer for SFPCA's scale, not an anti-abuse
+platform.
+
+**Controls in use:**
+
+- **Honeypot** — a hidden `website` field
+  (`src/components/forms/honeypot-field.tsx`) rendered off-viewport,
+  `tabIndex={-1}`, `aria-hidden`, never labelled. A filled value marks
+  automation; the action returns a generic success shape, writes
+  nothing, and emits one `logWarn` — indistinguishable from real
+  success, so the field can't be probed as a bot oracle.
+- **Rate limit** — `src/lib/rate-limit.ts`: fixed-window counters in
+  the `rate_limit_windows` Postgres table, keyed `(bucket, subject,
+  window_start)`. Buckets and values live in `RATE_LIMIT_DEFAULTS` in
+  `src/lib/rate-limit.ts`; override per-environment with the
+  `RATE_LIMIT_CONFIG` env JSON (E2E sets tiny windows). Defaults are
+  deliberately generous — households registering several animals,
+  retries, and shared NAT/mobile egress must not hit them. The limiter
+  stops abusive bursts, not per-person uniqueness.
+- **Receipt gating** — `storage.rules` denies ALL client writes to
+  `receipts/`; the only byte-acceptance boundary is
+  `POST /api/receipts/<submissionId>`
+  (`src/app/api/receipts/[submissionId]/route.ts`). The route, in
+  order: validates the id format → counts the `receipt.finalize` rate
+  limit before reading bytes → atomically claims the slot
+  (`claimReceiptSlot`: row must exist, be `pending`, have
+  `receiptRequested`, and hold no receipt — two concurrent uploads can
+  never both claim) → reads the body with a hard 5 MB ceiling on the
+  wire → validates content type by magic bytes (declared
+  `Content-Type` may only agree) → writes create-only
+  (`ifGenerationMatch: 0`). Any post-claim failure releases the claim;
+  claims orphaned by process death are cleared by the daily sweeper
+  past the grace window. A v4 signed-PUT grant was deliberately
+  rejected — it cannot enforce size/type/create-only conditions — and
+  a Server Action cannot carry a 5 MB body (default 1 MB cap), so the
+  route handler is the single transport.
+
+**Trusted client identity (the boundary that matters):** the limiter
+subject is a salted SHA-256 of the client IP taken ONLY from
+`x-vercel-forwarded-for` — the header Vercel itself sets from the TCP
+peer and strips from inbound client requests
+(`src/lib/request-identity.ts`). A client cannot spoof it; generic
+`x-forwarded-for` is deliberately not trusted. Off-Vercel the subject
+is the loopback literal. Raw IPs are never logged or sent to Sentry;
+the digest plus a server-side salt is all that is persisted, and rows
+expire with their window. Salt resolution (`identitySalt` in
+`src/lib/request-identity.ts`): `RATE_LIMIT_SALT` → a value derived
+from `FIREBASE_ADMIN_PRIVATE_KEY` → a fixed local-only constant. Set
+`RATE_LIMIT_SALT` explicitly in production so subjects survive a key
+rotation.
+
+**Failure mode:** if the limiter store errors, the request is allowed
+and the failure is logged normally (`logError` on the `rate-limit`
+subsystem) — fail-open, because intake availability beats perfect
+counting at this scale. Throttling itself is an expected outcome: a
+`logWarn`, never `logError`, never a Sentry event.
+
+**Changing limits safely:** edit `RATE_LIMIT_DEFAULTS` (central, named) or set
+`RATE_LIMIT_CONFIG`. Loosen before tightening — a window reset is
+self-healing, but a blocked legitimate islander isn't. Verify with the
+`tests/rate-limit.test.ts` suite.
+
+**Monitor if abuse grows:** watch `subsystem:"rate-limit"` and
+honeypot `logWarn` volume in Vercel logs, `rate_limit_windows` row
+counts, and junk submissions in `/admin/registrations`.
+
+**When CAPTCHA/Turnstile becomes justified:** if throttled + honeypot
+volume still produces staff-triage burden — e.g., distributed botnets
+cycling IPs under the per-subject limits — add Turnstile to the two
+public forms. Not needed at current scale; the controls above have no
+UX cost.
+
+**Residual risk:** per-subject limits don't cap *aggregate* volume
+across many distinct IPs. Receipt upload is rate-limited at the byte
+boundary itself (`receipt.finalize` is counted before a byte is
+read), but a determined distributed actor could still submit at up to
+N-per-IP. Acceptable for SFPCA; revisit with #130 retention work if
+`rate_limit_windows` retention needs a formal policy.

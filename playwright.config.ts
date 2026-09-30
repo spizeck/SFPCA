@@ -92,6 +92,14 @@ export default defineConfig({
       // loading.
       NEXT_PUBLIC_SENTRY_DSN: "",
       NEXT_PUBLIC_SENTRY_ENVIRONMENT: "",
+      // Small deterministic intake limits so throttle E2E coverage
+      // trips quickly without sleeping (#219). Per-test Postgres resets
+      // clear rate_limit_windows like every other table.
+      RATE_LIMIT_CONFIG: JSON.stringify({
+        "registration.submit": { max: 2, windowSeconds: 3600 },
+        "sighting.submit": { max: 2, windowSeconds: 3600 },
+        "receipt.finalize": { max: 4, windowSeconds: 3600 },
+      }),
       // The registry datastore: a PGlite Postgres engine served over the
       // wire protocol by tests/e2e/db-server.ts — the dev server uses
       // the same postgres.js client it would for Neon, against an

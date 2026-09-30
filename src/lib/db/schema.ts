@@ -519,8 +519,17 @@ export const registrationSubmissions = pgTable(
       onDelete: "set null",
     }),
     // Firebase Storage object path (receipts/<id>) — a reference, never
-    // the object itself; binary data does not live in Postgres.
+    // the object itself; binary data does not live in Postgres. The
+    // upload route claims this slot atomically (see
+    // claimReceiptSlot in registry/registrations.ts) before any bytes
+    // are persisted (#219 review): only a NULL path can be claimed, so
+    // a submission can never gain a second receipt or be overwritten.
     paymentReceiptPath: text("payment_receipt_path"),
+    // The submitter's declared intent to attach a receipt, recorded at
+    // intake. The upload route refuses submissions that never asked for
+    // one — a known submission id alone must not entitle a caller to
+    // attach an object to somebody else's record.
+    receiptRequested: boolean("receipt_requested").notNull().default(false),
     totalFeeCents: integer("total_fee_cents").notNull().default(0),
     currency: text("currency").notNull().default("USD"),
     status: text("status").notNull().default("pending"),
@@ -1975,5 +1984,34 @@ export const householdMerges = pgTable(
       "household_merges_not_self_check",
       sql`${t.retiredHouseholdId} <> ${t.survivorHouseholdId}`,
     ),
+  ],
+);
+
+// --- Public-intake abuse throttling (#219) ---------------------------------
+// Fixed-window counters backing the server-side rate limiter for the
+// unauthenticated intake surfaces (public registration, public sighting
+// reports, receipt finalization). `subject` is a salted SHA-256 digest of
+// the client IP — never the raw address — so this table is not a request
+// log and a dump cannot be mapped back to a visitor without the
+// server-side salt. Rows are deleted once their window expires, so
+// retention is bounded by the longest configured window.
+export const rateLimitWindows = pgTable(
+  "rate_limit_windows",
+  {
+    bucket: text("bucket").notNull(),
+    subject: text("subject").notNull(),
+    windowStart: timestamp("window_start", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+    count: integer("count").notNull(),
+    expiresAt: timestamp("expires_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.bucket, t.subject, t.windowStart] }),
+    index("rate_limit_windows_expiry_idx").on(t.expiresAt),
   ],
 );
