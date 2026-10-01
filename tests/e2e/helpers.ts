@@ -61,7 +61,7 @@ export async function openAddAnimalDialog(page: Page): Promise<Locator> {
   const button = page.getByRole("button", { name: "Add Animal" });
   const dialog = page.getByRole("dialog");
   await expect(async () => {
-    await button.click();
+    await button.click({ timeout: 5_000 });
     await expect(dialog).toBeVisible({ timeout: 5_000 });
   }).toPass({ timeout: 30_000 });
   return dialog;
