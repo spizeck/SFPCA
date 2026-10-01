@@ -112,6 +112,18 @@ describe("isVetDocumentFile / vetDocStoragePath", () => {
     ).toBe(false);
   });
 
+  test("rejects a file at exactly the limit — the Storage rule is strict (<)", () => {
+    // The vet-docs rule rejects `size < 5 * 1024 * 1024`; the validator
+    // must match or an exactly-5-MiB file passes the dialog, fails
+    // uploadBytes, and surfaces as a generic "Upload failed".
+    expect(
+      isVetDocumentFile({ type: "image/png", size: 5 * 1024 * 1024 }),
+    ).toBe(false);
+    expect(
+      isVetDocumentFile({ type: "image/png", size: 5 * 1024 * 1024 - 1 }),
+    ).toBe(true);
+  });
+
   test("built paths satisfy the shared path regex and carry the extension", () => {
     const path = vetDocStoragePath("Lab Report.PDF");
     expect(VET_DOC_PATH_RE.test(path)).toBe(true);
