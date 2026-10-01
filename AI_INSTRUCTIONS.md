@@ -40,20 +40,25 @@ when the token is unset.
 ## Architectural invariants — do not casually violate
 
 - **Server-side authorization is authoritative.** `requireAdmin()` in
-  `src/app/admin/layout.tsx` verifies the session cookie (revocation
-  checked) AND re-checks the `admins` collection. The edge proxy
-  (`src/proxy.ts`) only checks cookie presence as a fast gate — a session
-  cookie alone does not grant admin.
-- **`admins/<email>` documents are the staff identity.** Document ID is
-  the exact token email (rules look it up verbatim — never normalize it
-  before the doc lookup). `ADMIN_EMAILS` is a bootstrap env allowlist,
-  matched case-insensitively; the session route reconciles env-listed
-  users into `admins/` docs so the security rules see them.
+  `src/lib/auth.ts` verifies the session cookie (revocation
+  checked) AND re-checks the Postgres `admin_users` table. The edge
+  proxy (`src/proxy.ts`) only checks cookie presence as a fast gate — a
+  session cookie alone does not grant admin.
+- **Postgres `admin_users` rows are the staff identity.** Emails are
+  normalized (`trim().toLowerCase()`) and matched case-insensitively —
+  `findAdminUser` compares against `lower(admin_users.email)`, which a
+  `lower(email)` unique index keeps unambiguous. `ADMIN_EMAILS` is a
+  bootstrap env allowlist, matched case-insensitively; the session
+  route reconciles env-listed users into `admin_users` rows
+  (insert-only — a provisioned row's role is staff-managed and never
+  rewritten by env config) and sets the `admin`/`adminRole` custom
+  claims that Firestore/Storage rules consult for client-SDK writes.
+  The Firestore `admins` collection is retired/deny-all.
 - **Verified email is required** at session creation and inside
   Firestore/Storage rules. Never trust an unverified email claim.
 - **Security rules are an independent boundary.** Client-side hiding is
-  not authorization; rules enforce verified-email + `admins` doc
-  independently of the app.
+  not authorization; rules enforce verified-email + the `admin` custom
+  claim independently of the app.
 - **Every privileged server action self-authorizes.** `use server`
   exports are HTTP-callable; each must call `requireAdmin()` itself —
   never rely on the route/UI being unreachable.
@@ -61,7 +66,7 @@ when the token is unset.
   `sameSite=Lax`. `/api/auth/session` rejects mutating requests whose
   `Origin` doesn't match the host (login/logout CSRF). Logout clears the
   cookie only — it does not revoke the Firebase session.
-- **Roles are recorded, not enforced.** `admins/` docs carry `role`
+- **Roles are recorded, not enforced.** `admin_users` rows carry `role`
   (`admin`/`editor`); nothing distinguishes them today — authorization
   is binary. Don't pretend granularity that doesn't exist.
 - **Two authorities, by domain.** Firestore remains the CMS/content
@@ -71,9 +76,10 @@ when the token is unset.
   vaccinations, veterinary records (encounters, procedures, medications,
   alerts, weights, documents), follow-ups, communications, audit. The boundary and migration
   plan are in `ARCHITECTURE.md`. New registry-domain data goes to
-  `src/lib/db`/`src/lib/registry` — **never into Firestore**. During the
-  staged cutover (Phases C–G) Firestore `animals`/`animalRegistrations`/
-  `admins` remain authoritative until their explicit cutover issues land.
+  `src/lib/db`/`src/lib/registry` — **never into Firestore**. The
+  Firestore `animals`/`animalRegistrations`/`admins` collections are
+  fully retired: deny-all for every principal in `firestore.rules`, no
+  read or write path exists in the app.
   `scripts/seed-data.json` is the fixture for local/test seeding.
 - **Owner reminders are a real pipeline (#172).** `communications` is
   the authoritative ledger: evaluators (`src/lib/registry/reminders.ts`)
@@ -101,9 +107,13 @@ when the token is unset.
 
 `/login` signs in (email/password or Google) → browser posts the ID token
 to `/api/auth/session` → server verifies the token, requires
-`email_verified` and `isAdmin()` (env allowlist or `admins` doc) → issues
-a 5-day HTTP-only session cookie. `/admin` layout re-verifies cookie +
-admin status on every request.
+`email_verified`, resolves `isAdmin()` (env allowlist or Postgres
+`admin_users`), and issues a 5-day HTTP-only session cookie. Admins get
+an `admin_users` row provisioned and `admin`/`adminRole` custom claims
+set (non-admins get the claim cleared so a removed admin's rules-side
+access ends on the next token refresh); every verified login also
+materializes an `auth_identities` row and runs owner-link provisioning.
+`/admin` layout re-verifies cookie + admin status on every request.
 
 ## Data model (collections, from `firestore.rules`/`src/lib/types.ts`)
 
@@ -119,26 +129,37 @@ admin status on every request.
   below). The public detail route `/animal-adoptions/[id]` renders
   per-request and 404s any non-public animal — never reveal that a
   private animal exists
-- `animalRegistrations` — private submissions. Public **create**
-  (unauthenticated, shape-validated, forced `status="pending"`); admin
-  read/update/delete. See the submission section below
+- `animalRegistrations` — **retired/deny-all** for every principal.
+  Registration intake lives in Postgres (`registration_submissions`)
+  via the `submitRegistrationAction` server action — never write to
+  this collection. See the submission section below
 - `animalRegistration` — *different collection* from the plural:
   page-content doc read by the public registration page. Singular vs
   plural matters — do not confuse them
-- `admins` — admin-only read/write
-- Storage: `team-photos/` public read; admin-only image uploads
+- `admins` — **retired/deny-all**. Staff identity is Postgres
+  `admin_users`; rules-side client writes ride on the `admin` custom
+  claim the session route sets
+- Storage: `team-photos/` public read; admin-claim-only image uploads
   (<5 MB, `image/*`). `images/` has **no** rule — no active workflow
   ever owned the prefix and the production namespace was verified
   empty, so it is default-deny for everyone like `animals/` below.
   `animals/` has **no** rule — animal photos
-  are plain URLs on the Firestore doc and nothing uploads there, so the
-  prefix is default-deny for everyone; a future animal-photo upload
-  feature must add lifecycle-aware Storage rules deliberately (never
-  public read of non-public animals' media). `receipts/` is private
-  submission data — public create-only of small image/PDF files, admin
-  read/update/delete, plus one narrow exception: an anonymous delete is
-  permitted only while no `animalRegistrations/<id>` doc exists for the
-  object at `receipts/<id>` (the orphan-cleanup path — see below).
+  are plain URLs on the Postgres `animals` row and nothing uploads
+  there, so the prefix is default-deny for everyone; a future
+  animal-photo upload feature must add lifecycle-aware Storage rules
+  deliberately (never public read of non-public animals' media).
+  `vet-docs/` allows create-only for the verified `admin` claim
+  (image/PDF, strictly <5 MiB — the storage rule uses `<` and
+  `isVetDocumentFile` mirrors it with `>= VET_DOC_MAX_BYTES`, so an
+  exactly-5-MiB file is rejected by both);
+  reads/deletes go through server-side Admin SDK only. `receipts/` is private submission data and **deny-all for the
+  client SDK** — uploads transit the server route
+  `/api/receipts/[submissionId]` (see below) and staff read via
+  short-lived signed URLs from `getReceiptUrlAction`. One legacy
+  exception: rows migrated from the Firestore pipeline can store a
+  literal `http` download URL rather than a `receipts/` path, and the
+  admin view returns those verbatim — they predate the signed-URL
+  scheme and bypass it.
   Default deny elsewhere
 
 ## Animal lifecycle (canonical, #167)
@@ -191,71 +212,78 @@ switch, freely staff-editable:
 
 `src/lib/animal-registration.ts` is the single authoritative definition
 of the submission lifecycle, field limits, the quoted fee schedule, and
-receipt-file constraints; `firestore.rules` and `storage.rules` mirror
-its security-relevant parts — keep all three in agreement.
+receipt-file constraints; the intake server action and receipt route
+enforce them server-side — keep all three in agreement.
 
 **The public↔private boundary.** `/animal-registration` is the only
-public submission surface. It writes `animalRegistrations` docs — owner
-name/address/phone/email (PII) plus per-animal name/type/sex/isFixed —
-which are **never publicly readable**. Anonymous and authenticated
-non-admin reads, list queries, and probing queries are all denied at the
-rules layer; only verified `admins/` members can read. There is no
+public submission surface. The browser calls `submitRegistrationAction`
+(`src/app/animal-registration/actions.ts`) — a server action that
+re-validates the payload and inserts a `registration_submissions`
+Postgres row — owner name/address/phone/email (PII) plus per-animal
+name/type/sex/isFixed. The browser never reaches Postgres directly and
+there is no unauthenticated read path: admin review goes through
+`requireAdmin()`-gated actions in
+`src/app/admin/registrations/actions.ts`. There is no
 adoption-application collection: `/animal-adoptions` is a read-only
 listing whose CTAs point at `/contact` — do not invent one.
 
-**Fields the public writes** (allowlisted in `isValidRegistration`):
-`ownerInfo{name,address,phone,email}` (required strings with caps),
-`animals` (1–25 entries), `totalFee` (0–25000), `paymentReceipt` (null or
-the bound `receipts/<doc id>` path), `status` (forced `pending`),
-`createdAt`/`updatedAt` (must be `request.time` server timestamps).
-Rules cannot iterate the `animals` list — per-entry enums/required-ness
-are enforced by the form (`validateRegistration` mirrors the rules) and
-verified by staff. Individual `animalRegistrations` docs are **not**
-linked to public `animals` records — registrations are independent owner
-submissions.
+**Abuse controls (#219).** Honeypot first (a hit returns a fake success
+so the field can't be probed as a bot oracle), then a Postgres-backed
+fixed-window rate limit keyed by a salted hash of the trusted client IP
+(`src/lib/request-identity.ts` documents the header trust boundary;
+raw IPs are never stored). Over-limit attempts get an honest retryable
+`throttled` result. Public creates can only ever carry `pending`.
 
-**Receipts.** The form allocates the registration doc ID first
-(`doc(collection(...))` — no write), uploads the optional file to
-`receipts/<registration doc id>` (public create-only, image/PDF ≤5 MB,
-no overwrites), then `setDoc`s with `paymentReceipt` equal to that
-bound path — `firestore.rules` requires the path to match the doc's own
-ID, so a submission can never reference another registration's receipt
-or anything outside `receipts/`. The doc stores the storage *path*,
-never a public URL; the admin view resolves it through `getDownloadURL`
-(a bearer-token capability URL).
+**Fields the public submits** (re-validated server-side by
+`createRegistrationSubmission` against `REGISTRATION_FIELD_LIMITS`):
+owner contact fields, `animals` (bounded list), declared total fee, and
+`receiptRequested` (intent to attach a receipt — persisted so the
+upload route can refuse rows that never asked for one). Submissions are
+**not** linked to public `animals` records — staff match them to
+registry animals explicitly via `createRegistrationFromSubmissionAction`.
 
-**Orphan receipts.** If the upload succeeds but the Firestore write
-fails, the client deletes `receipts/<doc id>` — storage rules allow a
-non-admin delete exactly when `animalRegistrations/<doc id>` does not
-exist, so cleanup succeeds iff the write truly failed and is denied
-when the document actually landed (lost response → the client treats
-the submission as successful rather than retrying into a duplicate).
-A denied-or-failed cleanup never produces a false success: the user
-still sees the submission error and keeps their data. Residual orphans
-(browser death, cleanup failure) are removed by the scheduled
-`sweepOrphanedReceipts` function (every 24 h; skips objects <1 h old so
-in-flight submissions are never swept). Receipt doc IDs are unguessable
-auto-IDs and `receipts/` is not listable, so the conditional delete
-cannot be aimed at another user's in-flight upload.
+**Receipts.** No direct unauthenticated Storage writes — `storage.rules`
+denies every client access to `receipts/`. After the row lands, the
+browser POSTs the file to `/api/receipts/[submissionId]`, which
+rate-limits, atomically claims the row's `payment_receipt_path` slot
+(`claimReceiptSlot`), reads a bounded body, validates type from the
+bytes' magic bytes (image/PDF ≤5 MB), and writes **create-only**
+(`ifGenerationMatch: 0`) through the Admin SDK. The row stores the
+storage *path*, never a public URL; staff resolve it through
+`getReceiptUrlAction` (10-minute signed URL, `receipts/`-prefixed paths
+only, no `..`).
+
+**Orphan claims/objects.** An upload failure releases the slot claim
+(`releaseReceiptSlot`); a process death leaves a dangling claim, which
+the daily `/api/cron/sweep-receipts` Vercel cron (06:00 UTC, Bearer
+`CRON_SECRET`) clears — and sweeps storage objects no submission row
+claims — after a one-hour grace window (`src/lib/registry/receipt-sweep.ts`).
+Submission IDs are unguessable UUIDs and `receipts/` is not listable
+through the client SDK.
 
 **Lifecycle:** `pending` (submitted, awaiting review) → `approved`
-("Verified") or `rejected`; any supported status can move to any other
-so staff can correct mistakes — nothing is terminal. Public creates can
-only ever set `pending`; admin updates must keep a supported status.
-Unknown/malformed statuses stay admin-visible flagged "Needs review"
-rather than being coerced.
+("Verified") or `rejected`; `updateSubmissionStatus` permits any
+supported-status transition so staff can correct mistakes — nothing is
+terminal. Unknown/malformed statuses stay admin-visible flagged
+"Needs review" rather than being coerced. Approval creates no
+authoritative record — staff must still create the `registrations` row
+explicitly (see below).
 
-**Duplicates/retries:** deliberate — `setDoc` on a fresh allocated ID is
-not idempotent and a repeat submission creates a second pending doc (the
-submit button is disabled + a re-entrancy guard covers double-clicks;
-staff see and can reject accidental duplicates). No content-based
-dedup: two legitimate submissions can share owner details. A retry
-after a failed submission allocates a new doc ID and uploads to a new
-bound receipt path — it never reuses a stale receipt reference.
+**Duplicates/retries:** two different policies live on the same path.
+`createRegistrationSubmission` is idempotent on `submissionId` — a
+repeated insert of the same ID resolves to the existing row rather
+than erroring. The form, though, mints a fresh `crypto.randomUUID()`
+on every submit click, so a user retry after a failed submission
+creates a second `pending` row by design (the submit button is
+disabled while in flight; staff see and can reject accidental
+duplicates). No content-based dedup: two legitimate submissions can
+share owner details. Receipt upload is the opposite shape: a retry
+targets `/api/receipts/[submissionId]` on the **existing** row — the
+route re-claims the released receipt slot rather than creating a new
+submission.
 
-**Retention:** no formal retention period exists. Submissions persist
-indefinitely; rules permit admin delete but no UI exposes it — deletion
-is for erroneous/spam records only.
+**Retention:** no formal retention period exists — the policy question
+is #130. Submissions persist indefinitely.
 
 ## Authoritative registrations (canonical, #169)
 
@@ -284,10 +312,14 @@ infer one from another.
 ## Code conventions
 
 - App Router only; Server Components by default, `"use client"` only
-  where interactivity requires it. There is exactly one Server Actions
-  file (`src/app/admin/homepage/actions.ts`); most Firestore writes go
-  through the client SDK under rules enforcement — follow the pattern
-  of the file you are editing
+  where interactivity requires it. Server Actions live in `actions.ts`
+  files next to their routes (`src/app/admin/**`, `src/app/portal`,
+  public intake) and **each self-authorizes** — `requireAdmin()` for
+  staff surfaces, `requireOwner()` for the portal — never rely on the
+  route being unreachable. CMS Firestore writes (homepage, settings,
+  FAQs, team photos) go through the client SDK under rules enforcement
+  (verified `admin` claim); all registry mutations go through Postgres
+  server actions — follow the pattern of the file you are editing
 - `src/lib` holds Firebase init (`firebase.ts` client,
   `firebase-admin.ts` server), auth helpers (`auth.ts`), maintenance
   predicates (`maintenance.ts`), SEO helpers (`seo.ts`), the animal
@@ -343,8 +375,11 @@ infer one from another.
   share `src/components/error-fallback.tsx`; the Next `error.digest`
   is the correlation handle into server logs. Do not add per-route
   copies without a distinct need.
-- `onFirestoreChange` rebuilds only on `REBUILD_COLLECTIONS` writes;
-  `animalRegistrations`/`admins` writes must not trigger deploys.
+- `onFirestoreChange` rebuilds only on `REBUILD_COLLECTIONS` writes —
+  an allowlist of CMS collections. The retired registry collections
+  (`animals`/`animalRegistrations`/`admins`) are deny-all anyway, but
+  nothing registry-side may ever trigger a deploy: registry writes go
+  to Postgres, not Firestore.
 - Sentry (`@sentry/nextjs`, post-#139) captures unexpected app
   exceptions only — no Replay, tracing, profiling, or Sentry Logs.
   Init lives in `instrumentation-client.ts` / `sentry.server.config.ts`
