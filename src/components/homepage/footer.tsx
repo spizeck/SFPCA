@@ -5,6 +5,7 @@ import {
   TwitterIcon,
 } from "@/components/ui/brand-icons";
 import { ConsentSettingsButton } from "@/components/consent/consent-settings-button";
+import { safeExternalUrl } from "@/lib/url-safety";
 
 interface FooterProps {
   social: {
@@ -15,6 +16,13 @@ interface FooterProps {
 }
 
 export function Footer({ social }: FooterProps) {
+  // CMS values are admin-written but unvalidated — never emit a stored
+  // string as an href without the http(s) scheme check.
+  const links = {
+    facebook: safeExternalUrl(social.facebook),
+    instagram: safeExternalUrl(social.instagram),
+    twitter: safeExternalUrl(social.twitter),
+  };
   return (
     <footer className="bg-foreground text-background py-12">
       <div className="container mx-auto px-4">
@@ -24,9 +32,9 @@ export function Footer({ social }: FooterProps) {
             Saba Foundation for Preventing Cruelty to Animals
           </p>
           <div className="flex gap-6">
-            {social.facebook && (
+            {links.facebook && (
               <a
-                href={social.facebook}
+                href={links.facebook}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="hover:text-primary transition-colors"
@@ -35,9 +43,9 @@ export function Footer({ social }: FooterProps) {
                 <FacebookIcon className="h-6 w-6" aria-hidden="true" />
               </a>
             )}
-            {social.instagram && (
+            {links.instagram && (
               <a
-                href={social.instagram}
+                href={links.instagram}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="hover:text-primary transition-colors"
@@ -46,9 +54,9 @@ export function Footer({ social }: FooterProps) {
                 <InstagramIcon className="h-6 w-6" aria-hidden="true" />
               </a>
             )}
-            {social.twitter && (
+            {links.twitter && (
               <a
-                href={social.twitter}
+                href={links.twitter}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="hover:text-primary transition-colors"
