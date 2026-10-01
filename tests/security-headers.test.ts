@@ -22,14 +22,17 @@ describe("securityHeaders", () => {
   });
 
   it("denies unused powerful features", () => {
-    const policy = map.get("Permissions-Policy") ?? "";
-    for (const feature of ["camera", "microphone", "geolocation"]) {
-      expect(policy).toContain(`${feature}=()`);
-    }
+    // Exact match: substring checks would silently accept a weakened
+    // policy like `camera=(), camera=*`.
+    expect(map.get("Permissions-Policy")).toBe(
+      "camera=(), microphone=(), geolocation=()",
+    );
   });
 
   it("enforces HSTS on the HTTPS-only deployment", () => {
-    expect(map.get("Strict-Transport-Security")).toContain("max-age=");
+    expect(map.get("Strict-Transport-Security")).toBe(
+      "max-age=63072000; includeSubDomains",
+    );
   });
 
   it("does not ship a guessed Content-Security-Policy", () => {
