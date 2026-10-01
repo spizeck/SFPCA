@@ -258,9 +258,12 @@ export const VET_DOC_MAX_BYTES = 5 * 1024 * 1024;
 export const VET_DOC_CONTENT_TYPES = ["image/", "application/pdf"] as const;
 
 // Client-side mirror of the storage-rule check so a bad file is caught
-// before any upload is attempted; the rules remain the boundary.
+// before any upload is attempted; the rules remain the boundary. The
+// bound is strict — the rule's `size <` rejects an exactly-5-MiB file,
+// so the validator must too, or that file fails at upload with an
+// opaque generic error.
 export function isVetDocumentFile(file: { type: string; size: number }): boolean {
-  if (file.size > VET_DOC_MAX_BYTES || file.size <= 0) return false;
+  if (file.size >= VET_DOC_MAX_BYTES || file.size <= 0) return false;
   return VET_DOC_CONTENT_TYPES.some(
     (type) => file.type === type || file.type.startsWith(type),
   );
