@@ -14,6 +14,7 @@ import { useMutation } from "@/hooks/use-mutation";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes";
 import { LoadError } from "@/components/admin/load-error";
 import { logError } from "@/lib/logger";
+import { safeEmbedUrl } from "@/lib/url-safety";
 
 const INITIAL_DATA: SiteSettings = {
   contact: {
@@ -211,17 +212,24 @@ export default function SettingsPage() {
           {data.mapEmbedUrl && (
             <div className="mt-4">
               <Label>Map Preview</Label>
-              <div className="mt-2 rounded-lg overflow-hidden border">
-                <iframe
-                  src={data.mapEmbedUrl}
-                  width="100%"
-                  height="300"
-                  style={{ border: 0 }}
-                  allowFullScreen
-                  loading="lazy"
-                  referrerPolicy="no-referrer-when-downgrade"
-                />
-              </div>
+              {safeEmbedUrl(data.mapEmbedUrl) ? (
+                <div className="mt-2 rounded-lg overflow-hidden border">
+                  <iframe
+                    src={safeEmbedUrl(data.mapEmbedUrl)!}
+                    width="100%"
+                    height="300"
+                    style={{ border: 0 }}
+                    allowFullScreen
+                    loading="lazy"
+                    referrerPolicy="no-referrer-when-downgrade"
+                  />
+                </div>
+              ) : (
+                <p className="mt-2 text-sm text-destructive">
+                  This is not a valid https URL, so the public site will not
+                  render it.
+                </p>
+              )}
             </div>
           )}
         </CardContent>

@@ -236,7 +236,7 @@ export function DocumentUploadDialog({
       open={open}
       onOpenChange={handleOpenChange}
       title="Upload clinical document"
-      description={`Attach a lab report, certificate, or referral document to ${animalName}'s record. Images and PDFs up to ${Math.round(VET_DOC_MAX_BYTES / (1024 * 1024))} MB.`}
+      description={`Attach a lab report, certificate, or referral document to ${animalName}'s record. Images and PDFs under ${Math.round(VET_DOC_MAX_BYTES / (1024 * 1024))} MB.`}
       submitLabel="Upload document"
       pending={mutation.pending}
       onSubmit={handleSubmit}

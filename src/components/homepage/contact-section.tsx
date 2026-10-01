@@ -5,6 +5,7 @@ import { OptimizedVideo } from "@/components/ui/optimized-video";
 import { Phone, Mail, MessageCircle, MapPin, Clock } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { fadeInUpVariants, staggerContainer, defaultTransition, instantTransition, useInViewAnimationProps } from "@/lib/animations";
+import { safeEmbedUrl } from "@/lib/url-safety";
 
 interface ContactSectionProps {
   contact?: {
@@ -30,7 +31,11 @@ export function ContactSection({ contact, mapEmbedUrl, whereWeAre }: ContactSect
   const sectionSubtitle = whereWeAre?.subtitle || "";
   const sectionAddress = whereWeAre?.address || contact?.address || "";
   const sectionHours = whereWeAre?.hours || contact?.hours || "";
-  const sectionMapEmbedUrl = whereWeAre?.mapEmbedUrl || mapEmbedUrl || "";
+  // CMS values are admin-written but unvalidated — an iframe src must be a
+  // real https URL, never a scriptable scheme.
+  const sectionMapEmbedUrl = safeEmbedUrl(
+    whereWeAre?.mapEmbedUrl || mapEmbedUrl,
+  );
   const animationProps = useInViewAnimationProps();
   const reduceMotion = useReducedMotion();
 

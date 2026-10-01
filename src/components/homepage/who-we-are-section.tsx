@@ -6,6 +6,7 @@ import { fadeInUpVariants, instantTransition } from "@/lib/animations";
 import { Card, CardContent } from "@/components/ui/card";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { safeExternalUrl } from "@/lib/url-safety";
 
 interface TeamMember {
   name: string;
@@ -164,9 +165,9 @@ export function WhoWeAreSection({ data }: WhoWeAreSectionProps) {
                           {/* Photo */}
                           <div className="mb-6">
                             <div className="w-32 h-32 mx-auto rounded-full overflow-hidden bg-muted">
-                              {member.photo ? (
+                              {member.photo && safeExternalUrl(member.photo) ? (
                                 <img
-                                  src={member.photo}
+                                  src={safeExternalUrl(member.photo)!}
                                   alt={member.name}
                                   className="w-full h-full object-cover"
                                 />
