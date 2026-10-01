@@ -44,13 +44,16 @@ when the token is unset.
   checked) AND re-checks the Postgres `admin_users` table. The edge
   proxy (`src/proxy.ts`) only checks cookie presence as a fast gate — a
   session cookie alone does not grant admin.
-- **Postgres `admin_users` rows are the staff identity**, keyed by the
-  exact token email (looked up verbatim — never normalize it before the
-  lookup). `ADMIN_EMAILS` is a bootstrap env allowlist, matched
-  case-insensitively; the session route reconciles env-listed users
-  into `admin_users` rows (insert-only) and sets the `admin`/`adminRole`
-  custom claims that Firestore/Storage rules consult for client-SDK
-  writes. The Firestore `admins` collection is retired/deny-all.
+- **Postgres `admin_users` rows are the staff identity.** Emails are
+  normalized (`trim().toLowerCase()`) and matched case-insensitively —
+  `findAdminUser` compares against `lower(admin_users.email)`, which a
+  `lower(email)` unique index keeps unambiguous. `ADMIN_EMAILS` is a
+  bootstrap env allowlist, matched case-insensitively; the session
+  route reconciles env-listed users into `admin_users` rows
+  (insert-only — a provisioned row's role is staff-managed and never
+  rewritten by env config) and sets the `admin`/`adminRole` custom
+  claims that Firestore/Storage rules consult for client-SDK writes.
+  The Firestore `admins` collection is retired/deny-all.
 - **Verified email is required** at session creation and inside
   Firestore/Storage rules. Never trust an unverified email claim.
 - **Security rules are an independent boundary.** Client-side hiding is
@@ -146,8 +149,10 @@ materializes an `auth_identities` row and runs owner-link provisioning.
   animal-photo upload feature must add lifecycle-aware Storage rules
   deliberately (never public read of non-public animals' media).
   `vet-docs/` allows create-only for the verified `admin` claim
-  (image/PDF ≤5 MB); reads/deletes go through server-side Admin SDK
-  only. `receipts/` is private submission data and **deny-all for the
+  (image/PDF, strictly <5 MiB — the storage rule uses `<`, tighter than
+  the app's `≤5 MiB` `VET_DOC_MAX_BYTES` validator, so an exactly-5-MiB
+  file passes `isVetDocumentFile` but is rejected by the rule);
+  reads/deletes go through server-side Admin SDK only. `receipts/` is private submission data and **deny-all for the
   client SDK** — uploads transit the server route
   `/api/receipts/[submissionId]` (see below) and staff read via
   short-lived signed URLs from `getReceiptUrlAction`.
@@ -260,12 +265,18 @@ terminal. Unknown/malformed statuses stay admin-visible flagged
 authoritative record — staff must still create the `registrations` row
 explicitly (see below).
 
-**Duplicates/retries:** deliberate — a repeat submission creates a
-second pending row (the submit button is disabled client-side; staff
-see and can reject accidental duplicates). No content-based dedup: two
-legitimate submissions can share owner details. A retry after a failed
-submission is a fresh row and a fresh receipt claim — it never reuses
-a stale receipt reference.
+**Duplicates/retries:** two different policies live on the same path.
+`createRegistrationSubmission` is idempotent on `submissionId` — a
+repeated insert of the same ID resolves to the existing row rather
+than erroring. The form, though, mints a fresh `crypto.randomUUID()`
+on every submit click, so a user retry after a failed submission
+creates a second `pending` row by design (the submit button is
+disabled while in flight; staff see and can reject accidental
+duplicates). No content-based dedup: two legitimate submissions can
+share owner details. Receipt upload is the opposite shape: a retry
+targets `/api/receipts/[submissionId]` on the **existing** row — the
+route re-claims the released receipt slot rather than creating a new
+submission.
 
 **Retention:** no formal retention period exists — the policy question
 is #130. Submissions persist indefinitely.
