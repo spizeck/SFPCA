@@ -155,7 +155,11 @@ materializes an `auth_identities` row and runs owner-link provisioning.
   reads/deletes go through server-side Admin SDK only. `receipts/` is private submission data and **deny-all for the
   client SDK** — uploads transit the server route
   `/api/receipts/[submissionId]` (see below) and staff read via
-  short-lived signed URLs from `getReceiptUrlAction`.
+  short-lived signed URLs from `getReceiptUrlAction`. One legacy
+  exception: rows migrated from the Firestore pipeline can store a
+  literal `http` download URL rather than a `receipts/` path, and the
+  admin view returns those verbatim — they predate the signed-URL
+  scheme and bypass it.
   Default deny elsewhere
 
 ## Animal lifecycle (canonical, #167)
