@@ -107,6 +107,8 @@ test.describe("security headers", () => {
     expect(headers["permissions-policy"]).toBe(
       "camera=(), microphone=(), geolocation=()",
     );
-    expect(headers["strict-transport-security"]).toContain("max-age=");
+    expect(headers["strict-transport-security"]).toBe(
+      "max-age=63072000; includeSubDomains",
+    );
   });
 });
