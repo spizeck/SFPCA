@@ -87,4 +87,39 @@ describe("ContactPageContent", () => {
       screen.queryByRole("link", { name: "Instagram" }),
     ).not.toBeInTheDocument();
   });
+
+  // Regression for the CMS URL sanitization fix: stored CMS fields are
+  // admin-written but unvalidated, so a scriptable scheme must never reach
+  // a rendered attribute on the public site.
+  test("suppresses scriptable map embed URLs", () => {
+    render(
+      <ContactPageContent
+        contact={contact}
+        mapEmbedUrl="javascript:alert(1)"
+      />,
+    );
+    expect(
+      screen.queryByRole("heading", { name: "Find Us" }),
+    ).not.toBeInTheDocument();
+    expect(document.querySelector("iframe")).not.toBeInTheDocument();
+  });
+
+  test("suppresses non-https and scriptable social links", () => {
+    render(
+      <ContactPageContent
+        contact={contact}
+        social={{
+          facebook: "javascript:alert(1)",
+          instagram: "data:text/html,<script>",
+          twitter: "not-a-url",
+        }}
+      />,
+    );
+    expect(
+      screen.queryByRole("heading", { name: "Follow Us" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Facebook" }),
+    ).not.toBeInTheDocument();
+  });
 });
