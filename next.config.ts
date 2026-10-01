@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs/config";
 import { resolveSentryRuntime } from "./src/lib/sentry";
+import { securityHeaders } from "./src/lib/security-headers";
 
 // Single Sentry environment decision for every runtime (#235).
 // resolveSentryRuntime() treats only real Vercel infrastructure
@@ -37,9 +38,14 @@ const nextConfig: NextConfig = {
   experimental: {
     optimizePackageImports: ['lucide-react'],
   },
-  // Configure headers for video optimization
+  // Baseline hardening headers on every response, plus long-cache
+  // headers for videos.
   async headers() {
     return [
+      {
+        source: '/:path*',
+        headers: securityHeaders,
+      },
       {
         source: '/videos/:path*',
         headers: [
