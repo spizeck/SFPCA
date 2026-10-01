@@ -8,7 +8,7 @@
 // never production.
 import { expect, test } from "./fixtures";
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./env";
-import { dismissConsentNotice } from "./helpers";
+import { dismissConsentNotice, openAddAnimalDialog } from "./helpers";
 
 async function signInAsAdmin(page: import("@playwright/test").Page) {
   await page.goto("/login");
@@ -27,8 +27,7 @@ async function createListedAnimal(
   // form dialog's getByRole("dialog") locator below.
   await dismissConsentNotice(page);
 
-  await page.getByRole("button", { name: "Add Animal" }).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = await openAddAnimalDialog(page);
   await dialog.getByLabel("Name").fill(animalName);
   await dialog
     .getByLabel(/^Description/)

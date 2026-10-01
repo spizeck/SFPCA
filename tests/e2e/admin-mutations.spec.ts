@@ -3,7 +3,7 @@
 // No real Firebase project or Sentry endpoint is ever contacted.
 import { expect, test, type Page } from "./fixtures";
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./env";
-import { dismissConsentNotice } from "./helpers";
+import { dismissConsentNotice, openAddAnimalDialog } from "./helpers";
 
 async function signInAsAdmin(page: Page) {
   await page.goto("/login");
@@ -31,8 +31,7 @@ test.describe("admin mutation hardening", () => {
     await dismissConsentNotice(page);
 
     // Create
-    await page.getByRole("button", { name: "Add Animal" }).click();
-    const dialog = page.getByRole("dialog");
+    const dialog = await openAddAnimalDialog(page);
     await dialog.getByLabel("Name").fill("E2E Hardening Animal");
     await dialog.getByRole("button", { name: "Add Animal" }).click();
     await expect(toast(page, "Animal added successfully")).toBeVisible();

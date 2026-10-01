@@ -5,7 +5,7 @@
 // animal's history.
 import { expect, test, type Page } from "./fixtures";
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./env";
-import { dismissConsentNotice } from "./helpers";
+import { dismissConsentNotice, openAddAnimalDialog } from "./helpers";
 
 async function signInAsAdmin(page: Page) {
   await page.goto("/login");
@@ -21,8 +21,7 @@ async function signInAsAdmin(page: Page) {
 async function createAnimal(page: Page, name: string) {
   await page.goto("/admin/animals");
   await dismissConsentNotice(page);
-  await page.getByRole("button", { name: "Add Animal" }).click();
-  const animalDialog = page.getByRole("dialog");
+  const animalDialog = await openAddAnimalDialog(page);
   await animalDialog.getByLabel("Name").fill(name);
   await animalDialog.getByRole("button", { name: "Add Animal" }).click();
   await expect(

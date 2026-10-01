@@ -5,7 +5,7 @@
 // emulator suite; the registry is PGlite (real Postgres).
 import { expect, test, type Page } from "./fixtures";
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./env";
-import { dismissConsentNotice, waitForDialogSettled } from "./helpers";
+import { dismissConsentNotice, waitForDialogSettled, openAddAnimalDialog } from "./helpers";
 
 async function signInAsAdmin(page: Page) {
   await page.goto("/login");
@@ -25,8 +25,7 @@ async function createDuplicate(
   name: string,
   birthDate: string,
 ) {
-  await page.getByRole("button", { name: "Add Animal" }).click();
-  const dialog = page.getByRole("dialog");
+  const dialog = await openAddAnimalDialog(page);
   await dialog.getByLabel("Name").fill(name);
   await dialog.getByLabel("Birth date", { exact: true }).fill(birthDate);
   await dialog.getByRole("button", { name: "Add Animal" }).click();
