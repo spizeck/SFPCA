@@ -90,3 +90,27 @@ test.describe("SEO metadata", () => {
     expect(res.headers()["content-type"]).toContain("image/png");
   });
 });
+
+test.describe("security headers", () => {
+  // Unit tests pin the constant; this proves next.config.ts actually
+  // wires it onto a real response.
+  test("baseline hardening headers are emitted on responses", async ({
+    request,
+  }) => {
+    const res = await request.get("/");
+    const headers = res.headers();
+    expect(headers["x-content-type-options"]).toBe("nosniff");
+    expect(headers["x-frame-options"]).toBe("SAMEORIGIN");
+    expect(headers["referrer-policy"]).toBe(
+      "strict-origin-when-cross-origin",
+    );
+    expect(headers["permissions-policy"]).toBe(
+      "camera=(), microphone=(), geolocation=()",
+    );
+    expect(headers["strict-transport-security"]).toBe(
+      "max-age=63072000; includeSubDomains",
+    );
+    // poweredByHeader: false — no framework fingerprinting header.
+    expect(headers["x-powered-by"]).toBeUndefined();
+  });
+});

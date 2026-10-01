@@ -11,6 +11,7 @@ import {
   TwitterIcon,
 } from "@/components/ui/brand-icons";
 import { instantTransition } from "@/lib/animations";
+import { safeEmbedUrl, safeExternalUrl } from "@/lib/url-safety";
 
 interface ContactPageProps {
   contact?: {
@@ -30,6 +31,15 @@ interface ContactPageProps {
 
 export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPageProps) {
   const reduceMotion = useReducedMotion();
+
+  // CMS values are admin-written but unvalidated — an iframe src or link
+  // href must be a real https/http URL, never a scriptable scheme.
+  const embedUrl = safeEmbedUrl(mapEmbedUrl);
+  const socialLinks = {
+    facebook: safeExternalUrl(social?.facebook),
+    instagram: safeExternalUrl(social?.instagram),
+    twitter: safeExternalUrl(social?.twitter),
+  };
 
   const contactCards = [
     {
@@ -157,7 +167,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
       </section>
 
       {/* Map Section */}
-      {mapEmbedUrl && (
+      {embedUrl && (
         <section className="py-20 bg-muted">
           <div className="container mx-auto px-4">
             <motion.div
@@ -184,7 +194,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
             >
               <div className="rounded-lg overflow-hidden shadow-lg">
                 <iframe
-                  src={mapEmbedUrl}
+                  src={embedUrl}
                   title="Map showing the SFPCA location on Saba"
                   width="100%"
                   height="400"
@@ -201,7 +211,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
       )}
 
       {/* Social Media */}
-      {social && (social.facebook || social.instagram || social.twitter) && (
+      {(socialLinks.facebook || socialLinks.instagram || socialLinks.twitter) && (
         <section className="py-20">
           <div className="container mx-auto px-4">
             <motion.div
@@ -215,9 +225,9 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
                 Follow Us
               </h2>
               <div className="flex justify-center gap-6">
-                {social.facebook && (
+                {socialLinks.facebook && (
                   <a
-                    href={social.facebook}
+                    href={socialLinks.facebook}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-4 transition-colors"
@@ -226,9 +236,9 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
                     <FacebookIcon className="h-6 w-6" aria-hidden="true" />
                   </a>
                 )}
-                {social.instagram && (
+                {socialLinks.instagram && (
                   <a
-                    href={social.instagram}
+                    href={socialLinks.instagram}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-4 transition-colors"
@@ -237,9 +247,9 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
                     <InstagramIcon className="h-6 w-6" aria-hidden="true" />
                   </a>
                 )}
-                {social.twitter && (
+                {socialLinks.twitter && (
                   <a
-                    href={social.twitter}
+                    href={socialLinks.twitter}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-4 transition-colors"
