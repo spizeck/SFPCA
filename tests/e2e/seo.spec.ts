@@ -110,5 +110,7 @@ test.describe("security headers", () => {
     expect(headers["strict-transport-security"]).toBe(
       "max-age=63072000; includeSubDomains",
     );
+    // poweredByHeader: false — no framework fingerprinting header.
+    expect(headers["x-powered-by"]).toBeUndefined();
   });
 });

@@ -15,6 +15,9 @@ import { securityHeaders } from "./src/lib/security-headers";
 const sentryRuntime = resolveSentryRuntime(process.env);
 
 const nextConfig: NextConfig = {
+  // Drop the X-Powered-By: Next.js response header — gratuitous
+  // framework fingerprinting.
+  poweredByHeader: false,
   env: {
     NEXT_PUBLIC_SENTRY_RESOLVED_ENVIRONMENT: sentryRuntime.environment,
     NEXT_PUBLIC_SENTRY_SEND_EVENTS: sentryRuntime.sendEvents
