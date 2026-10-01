@@ -149,9 +149,9 @@ materializes an `auth_identities` row and runs owner-link provisioning.
   animal-photo upload feature must add lifecycle-aware Storage rules
   deliberately (never public read of non-public animals' media).
   `vet-docs/` allows create-only for the verified `admin` claim
-  (image/PDF, strictly <5 MiB — the storage rule uses `<`, tighter than
-  the app's `≤5 MiB` `VET_DOC_MAX_BYTES` validator, so an exactly-5-MiB
-  file passes `isVetDocumentFile` but is rejected by the rule);
+  (image/PDF, strictly <5 MiB — the storage rule uses `<` and
+  `isVetDocumentFile` mirrors it with `>= VET_DOC_MAX_BYTES`, so an
+  exactly-5-MiB file is rejected by both);
   reads/deletes go through server-side Admin SDK only. `receipts/` is private submission data and **deny-all for the
   client SDK** — uploads transit the server route
   `/api/receipts/[submissionId]` (see below) and staff read via
