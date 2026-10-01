@@ -63,10 +63,10 @@ function WorkItemRow({ item }: { item: DashboardWorkItem }) {
     <li>
       <Link
         href={item.href}
-        className="flex items-center gap-3 py-3 px-2 -mx-2 rounded-md hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group"
+        className="flex items-center gap-3 py-3 px-2 -mx-2 rounded-md hover:bg-muted/50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring group"
         aria-label={`${item.label} — ${DASHBOARD_URGENCY_LABELS[item.urgency]}. Open the ${item.domain} queue.`}
       >
-        <span className="text-2xl font-bold tabular-nums w-10 text-center flex-shrink-0">
+        <span className="text-2xl font-bold tabular-nums w-10 text-center shrink-0">
           {item.count}
         </span>
         <span className="min-w-0 flex-1">
@@ -74,7 +74,7 @@ function WorkItemRow({ item }: { item: DashboardWorkItem }) {
           <span className="text-xs text-muted-foreground">{item.domain}</span>
         </span>
         <UrgencyBadge urgency={item.urgency} />
-        <ArrowRight className="h-4 w-4 text-muted-foreground flex-shrink-0 group-hover:translate-x-0.5 transition-transform" />
+        <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0 group-hover:translate-x-0.5 transition-transform" />
       </Link>
     </li>
   );
@@ -85,10 +85,10 @@ function FailureRow({ failure }: { failure: DashboardFailure }) {
     <li>
       <Link
         href={failure.href}
-        className="flex items-center gap-3 py-3 px-2 -mx-2 rounded-md hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex items-center gap-3 py-3 px-2 -mx-2 rounded-md hover:bg-muted/50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
       >
         <CircleAlert
-          className="h-5 w-5 text-amber-600 flex-shrink-0"
+          className="h-5 w-5 text-amber-600 shrink-0"
           aria-hidden
         />
         <span className="min-w-0 flex-1 text-sm">
@@ -97,7 +97,7 @@ function FailureRow({ failure }: { failure: DashboardFailure }) {
             counts couldn&apos;t load — check this area by hand.
           </span>
         </span>
-        <ArrowRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+        <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
       </Link>
     </li>
   );
@@ -137,7 +137,7 @@ async function WorkQueues({ role }: { role: "admin" | "editor" }) {
             <Card>
               <CardContent className="py-6 flex items-center gap-3">
                 <CircleCheck
-                  className="h-6 w-6 text-green-600 flex-shrink-0"
+                  className="h-6 w-6 text-green-600 shrink-0"
                   aria-hidden
                 />
                 <p className="text-sm">

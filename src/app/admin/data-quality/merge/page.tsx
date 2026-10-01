@@ -216,7 +216,7 @@ function MergeReview() {
   return (
     <div className="space-y-6">
       <div className="rounded-md border border-amber-500/50 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm flex gap-2">
-        <TriangleAlert className="h-4 w-4 mt-0.5 flex-shrink-0 text-amber-600" />
+        <TriangleAlert className="h-4 w-4 mt-0.5 shrink-0 text-amber-600" />
         <p>
           Merging is a permanent identity decision. Compare the records
           carefully — if you&apos;re not sure these are the same animal,
@@ -277,7 +277,7 @@ function MergeReview() {
                     key={b.code}
                     className="flex gap-2 rounded-md border border-red-500/50 bg-red-50 dark:bg-red-950/30 p-3"
                   >
-                    <CircleAlert className="h-4 w-4 mt-0.5 flex-shrink-0 text-red-600" />
+                    <CircleAlert className="h-4 w-4 mt-0.5 shrink-0 text-red-600" />
                     {b.message}
                   </p>
                 ))}
