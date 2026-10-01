@@ -2,7 +2,7 @@
 // Firebase emulators + PGlite registry — no real credentials.
 import { expect, test, type Page } from "./fixtures";
 import { E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD } from "./env";
-import { dismissConsentNotice } from "./helpers";
+import { dismissConsentNotice, openAddAnimalDialog } from "./helpers";
 
 async function signInAsAdmin(page: Page) {
   await page.goto("/login");
@@ -24,8 +24,7 @@ test.describe("admin vaccination records", () => {
     await dismissConsentNotice(page);
 
     // Create the animal first (the registry write path is Postgres).
-    await page.getByRole("button", { name: "Add Animal" }).click();
-    const animalDialog = page.getByRole("dialog");
+    const animalDialog = await openAddAnimalDialog(page);
     await animalDialog.getByLabel("Name").fill("E2E Vaccination Dog");
     await animalDialog
       .getByRole("button", { name: "Add Animal" })
@@ -79,8 +78,7 @@ test.describe("admin vaccination records", () => {
     await page.goto("/admin/animals");
     await dismissConsentNotice(page);
 
-    await page.getByRole("button", { name: "Add Animal" }).click();
-    const animalDialog = page.getByRole("dialog");
+    const animalDialog = await openAddAnimalDialog(page);
     await animalDialog.getByLabel("Name").fill("E2E Validation Cat");
     await animalDialog
       .getByRole("button", { name: "Add Animal" })

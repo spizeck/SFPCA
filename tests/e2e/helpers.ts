@@ -51,6 +51,22 @@ export async function signIn(
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
 }
 
+// /admin/animals renders "Add Animal" server-side; a click that lands
+// before hydration finishes is silently swallowed and the dialog never
+// opens, so a naive `.click()` + locator wait burns the whole test
+// timeout (observed in CI: data-quality.spec.ts timed out at 120s on a
+// click that never produced a dialog). Retry the click until the
+// dialog is actually up.
+export async function openAddAnimalDialog(page: Page): Promise<Locator> {
+  const button = page.getByRole("button", { name: "Add Animal" });
+  const dialog = page.getByRole("dialog");
+  await expect(async () => {
+    await button.click();
+    await expect(dialog).toBeVisible({ timeout: 5_000 });
+  }).toPass({ timeout: 30_000 });
+  return dialog;
+}
+
 // A freshly mounted Radix dialog animates in (~200ms translate/scale).
 // Playwright's actionability check can pass during a janky frame pair
 // under load, then the dispatched pointer events land where the button
