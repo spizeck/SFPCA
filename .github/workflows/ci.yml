@@ -119,6 +119,11 @@ jobs:
                 firestore.rules|storage.rules|firestore.indexes.json|firebase.json|.firebaserc|tests/*.test.mjs)
                   rules=true; e2e=true ;;
 
+                # Emulator exec wrapper (#269): test:rules and the E2E
+                # jobs run through it — changes must exercise both.
+                scripts/emulators.ts|scripts/lib/emulator-ports.ts)
+                  rules=true; e2e=true; app=true ;;
+
                 # Firebase Functions package (isolated dependency tree;
                 # not exercised by the E2E emulators).
                 functions/*)

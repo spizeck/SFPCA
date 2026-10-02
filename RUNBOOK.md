@@ -86,7 +86,7 @@ files is not used by production code.
 | `ADMIN_EMAILS` | Bootstrap/emergency admin allowlist — NOT the authorization authority (Postgres `admin_users` is; see §21) | yes-ish — emails are personal data |
 | `DATABASE_URL` | Neon Postgres pooled endpoint — **required**: registry reads/writes + admin authz | **yes** (Vercel–Neon integration) |
 | `DATABASE_URL_UNPOOLED` | Neon unpooled endpoint for migrations/preview self-migrate | **yes** (Vercel–Neon integration) |
-| `CRON_SECRET` | Bearer guard for `/api/cron/*` routes | **yes** — random string, set in Production AND Preview |
+| `CRON_SECRET` | Bearer guard for `/api/cron/*` routes | **yes** — random string. Production required; Preview optional — preview live runs are refused (#271), only `?dry_run=1` works there |
 | `RESEND_API_KEY` | Resend API key for reminder email delivery | **yes** — without it live reminder runs refuse (503); dry-run still works |
 | `EMAIL_FROM` | Verified sender identity, e.g. `SFPCA <reminders@…>` — domain must be verified in Resend | no |
 | `RESEND_WEBHOOK_SECRET` | `whsec_…` webhook signing secret | **yes** — without it the webhook route refuses everything (503) |
@@ -151,6 +151,43 @@ deploys.
 Emulators can never hit production: `test:rules` and `test:e2e` pin
 `--project demo-sfpca`, and `demo-*` projects are emulator-only by
 design. No test command in this repo targets a real project.
+
+### 4a. Emulator port collisions — other projects on this machine (#269)
+
+`test:rules`, `test:e2e`, and `test:e2e:maintenance` all run through
+`tsx scripts/emulators.ts`, which preflights the fixed emulator ports
+(auth 9099, firestore 8080, storage 9199 — hub/logging auto-select, so
+they never collide) before `emulators:exec`. If another developer
+project's suite — or an orphaned emulator process — already holds a
+port, the command fails *before* any test runs and names the owner:
+
+- a live foreign suite is identified by project ID via its hub locator
+  (`%TEMP%\hub-<projectId>.json` → hub `/emulators`), e.g.
+  `port 8080 — held by the emulator suite for project "demo-other"`;
+- an orphaned emulator or unrelated server is identified by OS process,
+  e.g. `port 8080 — java.exe (pid 21300) — no live emulator hub claims
+  the port`.
+
+Nothing is ever killed automatically. Remedies, in order of
+preference:
+
+1. **Run our suite on the alternate port block** — append `--alt-ports`
+   to the wrapped command (or run
+   `npx tsx scripts/emulators.ts exec --alt-ports --only auth,firestore,storage --project demo-sfpca "<test command>"`).
+   This shifts every fixed port by +10000 (auth 19099, firestore 18080,
+   storage 19199), generates a throwaway `firebase.alt.<pid>.json` in
+   the OS temp dir with **absolute** rules paths, and exports the
+   matching `NEXT_PUBLIC_*_EMULATOR_*` overrides consumed by
+   `src/lib/firebase.ts` and `playwright.config.ts`. Both suites can
+   run side by side.
+2. **Stop the other suite** in its own project directory
+   (`firebase emulators:exec`/Ctrl-C there, or the terminal running
+   it). For an orphaned process, kill the pid named in the diagnostic
+   (e.g. `taskkill /PID 21300 /F` for a leftover Firestore `java.exe`).
+
+Stale `%TEMP%\hub-*.json` locators are normal — a locator whose pid is
+dead is ignored automatically. To inspect state without running tests:
+`npx tsx scripts/emulators.ts check`.
 
 ## 5. Pre-release checklist
 
@@ -1325,9 +1362,22 @@ restore it, delete it again — never use a real `receipts/` object.
   (`preview/ops/180-neon-integration`) — never `ep-soft-wind-awarztez`.
   Preview credentials are physically incapable of writing to
   Production's branch.
-- Stale preview branches (e.g. old PRs, dependabot) can accumulate —
-  Neon Free allows **10 branches per project**; delete obsolete
-  `preview/*` branches from the Neon console if provisioning slows.
+- **Preview branch cleanup is automated (#262).** The integration
+  creates `preview/<git-branch>` but never deletes it; Neon Free allows
+  **10 branches per project**, so stale branches once accumulated until
+  provisioning slowed. `.github/workflows/neon-preview-cleanup.yml` now
+  deletes `preview/<head-ref>` on `pull_request_target: closed` (merge
+  and close-without-merge) and on branch `delete` events, and a daily
+  sweep removes `preview/*` branches that no open PR or remote branch
+  references after a grace/abandonment window (1d/30d defaults).
+  Deletion is exact-name-match-then-delete-by-id, refuses the primary
+  branch, is idempotent, and requires the `NEON_API_KEY` **repo secret**
+  (without it the job warns and exits 0). Operator surface:
+  - `npx tsx scripts/neon-ops.ts preview-branches` — preview branches
+    with age + the verdict the sweep would reach now
+  - `npx tsx scripts/neon-preview-cleanup.ts sweep` — dry-run the sweep
+  - `… sweep --apply` / `… pr <git-ref>` — manual delete paths
+  - Neon console → Branches remains the UI fallback.
 - See ARCHITECTURE.md §10–§13 for the variable/table reference.
 
 ### 19b. Schema migration lifecycle
