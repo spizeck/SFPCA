@@ -110,7 +110,7 @@ jobs:
                   db=true; app=true; e2e=true ;;
                 scripts/db-*|scripts/seed.ts|scripts/seed-data.json|scripts/migrate-firestore.ts|scripts/preview-migrate.ts|scripts/reconcile-migration.ts|scripts/neon-ops.ts)
                   db=true; app=true ;;
-                scripts/deploy-functions.js)
+                scripts/deploy-functions.js|scripts/firebase-cli.mjs)
                   functions=true ;;
 
                 # Firebase security rules, indexes and emulator config.

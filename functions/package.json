@@ -3,10 +3,10 @@
   "description": "Cloud Functions for Firebase",
   "scripts": {
     "lint": "eslint .",
-    "serve": "firebase emulators:start --only functions",
-    "shell": "firebase functions:shell",
+    "serve": "node ../scripts/firebase-cli.mjs emulators:start --only functions",
+    "shell": "node ../scripts/firebase-cli.mjs functions:shell",
     "start": "npm run shell",
-    "deploy": "firebase deploy --only functions",
+    "deploy": "node ../scripts/firebase-cli.mjs deploy --only functions",
     "logs": "firebase functions:log",
     "test": "node --test \"test/*.test.js\""
   },

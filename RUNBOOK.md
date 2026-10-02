@@ -247,6 +247,39 @@ succeeds but the function logs `outcome:"skipped"` / refuses requests —
 check `functions/.env` first when a deployed function silently does
 nothing.
 
+### 7a. "User code failed to load … Timeout after 10000" (#267)
+
+firebase-tools discovers the function spec by spawning a child process
+that loads `functions/index.js` and polling its `/__/functions.yaml`
+endpoint, with a **10 s** deadline. On a cold filesystem (first run
+after boot, or an AV rescan of `node_modules`) that load has measured
+~13 s on a Windows dev box — the error is environmental, not a code
+bug, and typically clears on retry once caches are warm.
+
+Fixed entry points already raise the bound via the supported
+`FUNCTIONS_DISCOVERY_TIMEOUT` (seconds) override:
+
+- `npm run deploy:functions` sets it to **60** inline;
+- `functions/` scripts `serve`, `shell`, `deploy` route through
+  `scripts/firebase-cli.mjs`, which defaults it to **60** for any
+  `firebase` invocation (`FUNCTIONS_DISCOVERY_TIMEOUT=N` to override).
+
+If you invoke `npx firebase deploy --only functions` (or any other
+discovery path) directly, set `FUNCTIONS_DISCOVERY_TIMEOUT=60` yourself.
+
+Diagnose when the error persists **after** the timeout is raised —
+then it is a real load defect, not a cold cache:
+
+```bash
+cd functions
+node -e "const t=Date.now(); require('./index.js'); console.log(Date.now()-t+'ms')"
+```
+
+Expect <1 s warm. If a single import dominates, it is likely a
+top-level side effect added since — `functions/test/discovery-load.test.js`
+enforces a module-count budget so heavyweight top-level dependencies
+fail CI deterministically instead of flaking the deploy timeout.
+
 ## 8. Firestore & Storage rules
 
 Rules are an **authorization boundary**, not config — treat every rules

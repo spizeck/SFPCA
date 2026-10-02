@@ -43,17 +43,28 @@ function checkEnvFile() {
 
 function deployFunctions() {
   log('\n🚀 Deploying Firebase Cloud Functions...', 'bright');
-  
+
   try {
     // Check environment variables
     checkEnvFile();
-    
+
     // Deploy functions
     log('\n📦 Installing dependencies...', 'blue');
     execSync('cd functions && npm install', { stdio: 'inherit' });
-    
+
+    // Definition discovery cold-loads functions/node_modules in a child
+    // process under a 10s deadline — a cold/AV-scanned filesystem has
+    // measured ~13s (#267). FUNCTIONS_DISCOVERY_TIMEOUT (seconds) is the
+    // supported firebase-tools override; caller values win.
     log('\n🔥 Deploying functions to Firebase...', 'blue');
-    execSync('firebase deploy --only functions', { stdio: 'inherit' });
+    execSync('firebase deploy --only functions', {
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        FUNCTIONS_DISCOVERY_TIMEOUT:
+          process.env.FUNCTIONS_DISCOVERY_TIMEOUT || '60',
+      },
+    });
     
     log('\n✅ Functions deployed successfully!', 'green');
     log('\n📝 Next steps:', 'yellow');

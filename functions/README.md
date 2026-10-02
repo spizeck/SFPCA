@@ -21,17 +21,8 @@ This directory contains Firebase Cloud Functions that trigger Vercel rebuilds wh
   When `REBUILD_TRIGGER_TOKEN` is not configured the endpoint refuses all
   requests (fails closed).
 
-### 3. sweepOrphanedReceipts
-- **Trigger**: Scheduled, every 24 hours
-- **Action**: Deletes `receipts/<id>` storage objects that have no matching
-  `animalRegistrations/<id>` document — orphans left when a public
-  registration upload succeeded but the submission write (and the
-  client's immediate cleanup) failed. Objects younger than 1 hour are
-  skipped so in-flight submissions are never swept. A failing object is
-  counted and skipped rather than aborting the run; if any objects
-  failed, the run logs an error summary and the execution is marked
-  failed so alerting catches it. Logs counts only — never file names
-  or contents.
+(The old `sweepOrphanedReceipts` Cloud Function was retired in #183 —
+orphan cleanup is now the Vercel cron route `/api/cron/sweep-receipts`.)
 
 ## Setup
 
@@ -116,6 +107,20 @@ curl -H "Authorization: Bearer $REBUILD_TRIGGER_TOKEN" \
    - Run `npm install` in the functions directory
    - Check that all dependencies are installed
    - Review the Firebase console for detailed error messages
+
+4. **`User code failed to load. Cannot determine backend specification.
+   Timeout after 10000`**
+   - Cold filesystem/AV scan of `node_modules` exceeds firebase-tools'
+     default 10 s discovery deadline — environmental, not a code bug.
+     Retrying once usually works (warm cache).
+   - The `serve`/`shell`/`deploy` scripts here run through
+     `scripts/firebase-cli.mjs`, which sets the supported
+     `FUNCTIONS_DISCOVERY_TIMEOUT=60` override; `npm run
+     deploy:functions` sets it too. For bare `npx firebase …`
+     invocations, export `FUNCTIONS_DISCOVERY_TIMEOUT=60` yourself.
+   - Persisting slowness is diagnosed in RUNBOOK §7a; a module-count
+     guard (`test/discovery-load.test.js`) keeps heavyweight top-level
+     imports from reintroducing the problem.
 
 ### Viewing Logs
 ```bash
