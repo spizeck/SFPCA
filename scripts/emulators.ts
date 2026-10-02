@@ -48,8 +48,15 @@ function readFirebaseConfig(configPath = "firebase.json"): {
 // Both `--only a,b` and `--only=a,b` are valid firebase CLI syntax.
 function parseOnly(args: string[]): string[] | null {
   const i = args.indexOf("--only");
+  if (i >= 0) {
+    const value = args[i + 1];
+    if (!value || value.startsWith("-")) {
+      throw new Error("--only requires a comma-separated emulator list");
+    }
+    return value.split(",").map((s) => s.trim()).filter(Boolean);
+  }
   const eq = args.find((a) => a.startsWith("--only="));
-  const value = i >= 0 ? args[i + 1] : eq?.slice("--only=".length);
+  const value = eq?.slice("--only=".length);
   if (!value) return null;
   return value.split(",").map((s) => s.trim()).filter(Boolean);
 }
@@ -67,10 +74,16 @@ function extractConfigArg(args: string[]): {
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === "--config") {
-      configPath = args[i + 1] ?? configPath;
+      const value = args[i + 1];
+      if (!value || value.startsWith("-")) {
+        throw new Error("--config requires a file path");
+      }
+      configPath = value;
       i++;
     } else if (a.startsWith("--config=")) {
-      configPath = a.slice("--config=".length);
+      const value = a.slice("--config=".length);
+      if (!value) throw new Error("--config requires a file path");
+      configPath = value;
     } else {
       fwd.push(a);
     }
