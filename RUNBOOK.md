@@ -86,7 +86,7 @@ files is not used by production code.
 | `ADMIN_EMAILS` | Bootstrap/emergency admin allowlist — NOT the authorization authority (Postgres `admin_users` is; see §21) | yes-ish — emails are personal data |
 | `DATABASE_URL` | Neon Postgres pooled endpoint — **required**: registry reads/writes + admin authz | **yes** (Vercel–Neon integration) |
 | `DATABASE_URL_UNPOOLED` | Neon unpooled endpoint for migrations/preview self-migrate | **yes** (Vercel–Neon integration) |
-| `CRON_SECRET` | Bearer guard for `/api/cron/*` routes | **yes** — random string, set in Production AND Preview |
+| `CRON_SECRET` | Bearer guard for `/api/cron/*` routes | **yes** — random string. Production required; Preview optional — preview live runs are refused (#271), only `?dry_run=1` works there |
 | `RESEND_API_KEY` | Resend API key for reminder email delivery | **yes** — without it live reminder runs refuse (503); dry-run still works |
 | `EMAIL_FROM` | Verified sender identity, e.g. `SFPCA <reminders@…>` — domain must be verified in Resend | no |
 | `RESEND_WEBHOOK_SECRET` | `whsec_…` webhook signing secret | **yes** — without it the webhook route refuses everything (503) |
@@ -1314,9 +1314,22 @@ restore it, delete it again — never use a real `receipts/` object.
   (`preview/ops/180-neon-integration`) — never `ep-soft-wind-awarztez`.
   Preview credentials are physically incapable of writing to
   Production's branch.
-- Stale preview branches (e.g. old PRs, dependabot) can accumulate —
-  Neon Free allows **10 branches per project**; delete obsolete
-  `preview/*` branches from the Neon console if provisioning slows.
+- **Preview branch cleanup is automated (#262).** The integration
+  creates `preview/<git-branch>` but never deletes it; Neon Free allows
+  **10 branches per project**, so stale branches once accumulated until
+  provisioning slowed. `.github/workflows/neon-preview-cleanup.yml` now
+  deletes `preview/<head-ref>` on `pull_request_target: closed` (merge
+  and close-without-merge) and on branch `delete` events, and a daily
+  sweep removes `preview/*` branches that no open PR or remote branch
+  references after a grace/abandonment window (1d/30d defaults).
+  Deletion is exact-name-match-then-delete-by-id, refuses the primary
+  branch, is idempotent, and requires the `NEON_API_KEY` **repo secret**
+  (without it the job warns and exits 0). Operator surface:
+  - `npx tsx scripts/neon-ops.ts preview-branches` — preview branches
+    with age + the verdict the sweep would reach now
+  - `npx tsx scripts/neon-preview-cleanup.ts sweep` — dry-run the sweep
+  - `… sweep --apply` / `… pr <git-ref>` — manual delete paths
+  - Neon console → Branches remains the UI fallback.
 - See ARCHITECTURE.md §10–§13 for the variable/table reference.
 
 ### 19b. Schema migration lifecycle
