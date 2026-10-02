@@ -601,6 +601,39 @@ Orphan-receipt sweep failing
     deliberately never logged — inspect Storage directly if needed.
   → 401s mean CRON_SECRET is unset or mismatched — the route fails
     closed; check the Vercel env var for that environment.
+
+Deployment failed — WHERE did it fail? (read the stages in order)
+  → "Resource provisioning failed" / ~0 ms duration / NO build log:
+    the build never started — a provisioning failure, not an
+    application failure. Two known causes, check both:
+    (a) Vercel platform capacity — check vercel-status.com, redeploy.
+        Our 2026-09 incident was this: it recovered on its own with NO
+        repo change and before any build machine was assigned.
+    (b) A connected integration failing to provision its resource —
+        the classic case is the Vercel–Neon integration unable to
+        create a preview branch because the project hit its branch
+        limit (§19a: Free = 10 branches). Check the Neon console for
+        branch count and integration errors before assuming (a).
+  → Build log exists but stops during "Installing dependencies":
+    npm ci / registry issue — check the install step output.
+  → Stops during preview-migrate (VERCEL_ENV=preview only):
+    Neon preview-branch problem — §19a/§19b; check the branch exists
+    and DATABASE_URL_UNPOOLED resolves.
+  → Stops during "Creating an optimized production build":
+    application build failure — reproduce locally with npm run build.
+  → Build succeeds, deploy unhealthy / runtime errors:
+    Vercel → Logs for the deployment; treat as a runtime incident, not
+    a build problem.
+  → `firebase deploy`/emulator discovery failing with "User code
+    failed to load … Timeout after 10000": cold Functions-definition
+    discovery, not an app/deploy failure — §7a (wrapper-backed
+    commands get the 60 s override; bare `firebase`/`npx firebase`
+    needs FUNCTIONS_DISCOVERY_TIMEOUT=60 set explicitly).
+  → Cron routes on preview answering 403: with the #271 guard merged,
+    live sweeps/sends are production-only — only
+    /api/cron/reminders?dry_run=1 works on preview (the sweep route
+    has no dry-run mode). If the guard is not deployed, a preview 403
+    comes from deployment protection or another access control instead.
 ```
 
 ## 14. Automatic content rebuilds (post-#94)
