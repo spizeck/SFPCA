@@ -63,13 +63,16 @@ REBUILD_TRIGGER_TOKEN=your_random_secret_here
 
 ### 3. Deploy Functions
 ```bash
-firebase deploy --only functions
+npm run deploy
 ```
 
-Or use the deployment script:
+Or use the deployment script from the repo root:
 ```bash
 npm run deploy:functions
 ```
+
+Both route through the repo's 60-second discovery-timeout override —
+a bare `firebase deploy` bypasses it; see Troubleshooting #4.
 
 ## Usage
 
@@ -116,8 +119,18 @@ curl -H "Authorization: Bearer $REBUILD_TRIGGER_TOKEN" \
    - The `serve`/`shell`/`deploy` scripts here run through
      `scripts/firebase-cli.mjs`, which sets the supported
      `FUNCTIONS_DISCOVERY_TIMEOUT=60` override; `npm run
-     deploy:functions` sets it too. For bare `npx firebase …`
-     invocations, export `FUNCTIONS_DISCOVERY_TIMEOUT=60` yourself.
+     deploy:functions` sets it too.
+   - Bare `firebase …` and `npx firebase …` calls bypass the wrapper
+     and keep the 10 s default. For any direct invocation that loads
+     the functions code (`deploy`, `emulators:start`,
+     `functions:shell`), either route it through the wrapper —
+     `node ../scripts/firebase-cli.mjs <args>` from this directory —
+     or set the variable yourself:
+
+     ```bash
+     FUNCTIONS_DISCOVERY_TIMEOUT=60 firebase deploy --only functions   # bash/zsh
+     $env:FUNCTIONS_DISCOVERY_TIMEOUT=60                                # PowerShell — then run the command
+     ```
    - Persisting slowness is diagnosed in RUNBOOK §7a; a module-count
      guard (`test/discovery-load.test.js`) keeps heavyweight top-level
      imports from reintroducing the problem.

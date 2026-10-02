@@ -293,7 +293,7 @@ They need `VERCEL_TOKEN` and `VERCEL_PROJECT_ID` in `functions/.env`
 (see `functions/README.md`). Deploy with:
 
 ```bash
-npm run deploy:functions   # or: cd functions && firebase deploy --only functions
+npm run deploy:functions   # or: cd functions && npm run deploy
 ```
 
 ## Observability & troubleshooting

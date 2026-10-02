@@ -198,7 +198,10 @@ Functions (§7) and rules (§8).
 All commands run from the **repo root** (`firebase.json` points at
 `functions/`). Deploys require the Firebase CLI (`firebase-tools` is a
 devDependency; `npx firebase …` works without a global install) and a
-login with deploy rights on `saba-sfpca`.
+login with deploy rights on `saba-sfpca`. Commands that load the
+functions code run through `scripts/firebase-cli.mjs`, the repo
+wrapper that raises firebase-tools' discovery timeout to 60 s — bare
+`firebase`/`npx firebase` invocations bypass it (§7a).
 
 **Preflight:**
 
@@ -213,7 +216,7 @@ cd ..
 **Deploy everything (both functions):**
 
 ```bash
-firebase deploy --only functions
+node scripts/firebase-cli.mjs deploy --only functions
 ```
 
 or `npm run deploy:functions`, which additionally fails fast if
@@ -223,8 +226,8 @@ or `npm run deploy:functions`, which additionally fails fast if
 hotfix that touches a single function):
 
 ```bash
-firebase deploy --only functions:triggerRebuild
-firebase deploy --only functions:onFirestoreChange
+node scripts/firebase-cli.mjs deploy --only functions:triggerRebuild
+node scripts/firebase-cli.mjs deploy --only functions:onFirestoreChange
 ```
 
 **Verify:**
@@ -256,16 +259,26 @@ after boot, or an AV rescan of `node_modules`) that load has measured
 ~13 s on a Windows dev box — the error is environmental, not a code
 bug, and typically clears on retry once caches are warm.
 
-Fixed entry points already raise the bound via the supported
+Repo entry points already raise the bound via the supported
 `FUNCTIONS_DISCOVERY_TIMEOUT` (seconds) override:
 
 - `npm run deploy:functions` sets it to **60** inline;
-- `functions/` scripts `serve`, `shell`, `deploy` route through
-  `scripts/firebase-cli.mjs`, which defaults it to **60** for any
-  `firebase` invocation (`FUNCTIONS_DISCOVERY_TIMEOUT=N` to override).
+- `functions/` scripts `serve`, `shell`, `deploy` — and ad-hoc
+  `node scripts/firebase-cli.mjs …` calls — route through
+  `scripts/firebase-cli.mjs`, which defaults it to **60**
+  (`FUNCTIONS_DISCOVERY_TIMEOUT=N` to override).
 
-If you invoke `npx firebase deploy --only functions` (or any other
-discovery path) directly, set `FUNCTIONS_DISCOVERY_TIMEOUT=60` yourself.
+Direct `firebase …` / `npx firebase …` invocations bypass the wrapper
+and keep the 10 s default. For any direct invocation that loads the
+functions code (`deploy`, `emulators:start --only functions`,
+`functions:shell`), either run it through the wrapper
+(`node scripts/firebase-cli.mjs <args>`) or set the variable yourself:
+
+```bash
+FUNCTIONS_DISCOVERY_TIMEOUT=60 npx firebase deploy --only functions   # bash/zsh
+set "FUNCTIONS_DISCOVERY_TIMEOUT=60" && npx firebase deploy --only functions   # cmd.exe
+$env:FUNCTIONS_DISCOVERY_TIMEOUT = "60"   # PowerShell — persists for the session
+```
 
 Diagnose when the error persists **after** the timeout is raised —
 then it is a real load defect, not a cold cache:
@@ -442,8 +455,10 @@ repository-driven:
 2. `git revert` the offending change on a branch (or check out the
    good version of `functions/` onto a hotfix branch).
 3. `cd functions && npm run lint && npm test`.
-4. `firebase deploy --only functions` (or `functions:<name>` if only
-   one function is affected).
+4. `node scripts/firebase-cli.mjs deploy --only functions` (or
+   `functions:<name>` if only one function is affected) — the wrapper
+   supplies the 60 s discovery timeout (§7a); a bare `firebase deploy`
+   needs `FUNCTIONS_DISCOVERY_TIMEOUT=60` set explicitly.
 
 [console] Cloud Functions v2 run on Cloud Run, which keeps prior
 revisions — an emergency traffic rollback in the Google Cloud console
