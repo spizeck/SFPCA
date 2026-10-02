@@ -299,7 +299,8 @@ bug, and typically clears on retry once caches are warm.
 Repo entry points already raise the bound via the supported
 `FUNCTIONS_DISCOVERY_TIMEOUT` (seconds) override:
 
-- `npm run deploy:functions` sets it to **60** inline;
+- `npm run deploy:functions` defaults it to **60**, while preserving a
+  non-empty caller-supplied value;
 - `functions/` scripts `serve`, `shell`, `deploy` — and ad-hoc
   `node scripts/firebase-cli.mjs …` calls — route through
   `scripts/firebase-cli.mjs`, which defaults it to **60**
@@ -327,8 +328,9 @@ node -e "const t=Date.now(); require('./index.js'); console.log(Date.now()-t+'ms
 
 Expect <1 s warm. If a single import dominates, it is likely a
 top-level side effect added since — `functions/test/discovery-load.test.js`
-enforces a module-count budget so heavyweight top-level dependencies
-fail CI deterministically instead of flaking the deploy timeout.
+enforces a resolved-module count ceiling and records elapsed
+module-load time (it asserts the structural property, not a
+wall-clock threshold that would flake).
 
 ## 8. Firestore & Storage rules
 
