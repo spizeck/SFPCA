@@ -86,7 +86,7 @@ files is not used by production code.
 | `ADMIN_EMAILS` | Bootstrap/emergency admin allowlist — NOT the authorization authority (Postgres `admin_users` is; see §21) | yes-ish — emails are personal data |
 | `DATABASE_URL` | Neon Postgres pooled endpoint — **required**: registry reads/writes + admin authz | **yes** (Vercel–Neon integration) |
 | `DATABASE_URL_UNPOOLED` | Neon unpooled endpoint for migrations/preview self-migrate | **yes** (Vercel–Neon integration) |
-| `CRON_SECRET` | Bearer guard for `/api/cron/*` routes | **yes** — random string, set in Production AND Preview |
+| `CRON_SECRET` | Bearer guard for `/api/cron/*` routes | **yes** — random string. Production required; Preview optional — preview live runs are refused (#271), only `?dry_run=1` works there |
 | `RESEND_API_KEY` | Resend API key for reminder email delivery | **yes** — without it live reminder runs refuse (503); dry-run still works |
 | `EMAIL_FROM` | Verified sender identity, e.g. `SFPCA <reminders@…>` — domain must be verified in Resend | no |
 | `RESEND_WEBHOOK_SECRET` | `whsec_…` webhook signing secret | **yes** — without it the webhook route refuses everything (503) |

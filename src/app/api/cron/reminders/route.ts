@@ -12,6 +12,11 @@
 // dry run. It works without a provider configured; a live run refuses
 // (503) when RESEND_API_KEY/EMAIL_FROM are unset rather than silently
 // queueing work that can never go out.
+//
+// Preview deployments get dry-run only (#271): a live run would send
+// REAL email to real owners from the preview Neon branch's data.
+// Vercel only schedules crons on production, so nothing legitimate
+// is lost.
 
 import { NextRequest, NextResponse } from "next/server";
 import { createResendSender } from "@/lib/email";
@@ -38,6 +43,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       { ok: false, error: "as_of must be YYYY-MM-DD" },
       { status: 400 },
+    );
+  }
+
+  if (process.env.VERCEL_ENV === "preview" && !dryRun) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "live reminder runs are disabled on preview deployments (dry_run=1 still works)",
+      },
+      { status: 403 },
     );
   }
 
