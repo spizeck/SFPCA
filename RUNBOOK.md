@@ -624,6 +624,11 @@ Deployment failed — WHERE did it fail? (read the stages in order)
   → Build succeeds, deploy unhealthy / runtime errors:
     Vercel → Logs for the deployment; treat as a runtime incident, not
     a build problem.
+  → `firebase deploy`/emulator discovery failing with "User code
+    failed to load … Timeout after 10000": cold Functions-definition
+    discovery, not an app/deploy failure — §7a (wrapper-backed
+    commands get the 60 s override; bare `firebase`/`npx firebase`
+    needs FUNCTIONS_DISCOVERY_TIMEOUT=60 set explicitly).
   → Cron routes on preview answering 403: with the #271 guard merged,
     live sweeps/sends are production-only — only
     /api/cron/reminders?dry_run=1 works on preview (the sweep route
