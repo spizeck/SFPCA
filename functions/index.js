@@ -2,7 +2,13 @@ const functions = require("firebase-functions/v2");
 const logger = require("firebase-functions/logger");
 const {initializeApp} = require("firebase-admin/app");
 const crypto = require("crypto");
-const {triggerVercelRebuild} = require("./lib/rebuild");
+
+// lib/rebuild (and its axios dependency) is required lazily inside the
+// handlers below — definition discovery loads this module in a
+// deadline-bound child process, so every module pulled at top level
+// counts against it (#267).
+const triggerVercelRebuild = (...args) =>
+  require("./lib/rebuild").triggerVercelRebuild(...args);
 
 initializeApp();
 

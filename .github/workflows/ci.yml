@@ -37,6 +37,7 @@ jobs:
   changes:
     name: Detect changes
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       app: ${{ steps.classify.outputs.app }}
       functions: ${{ steps.classify.outputs.functions }}
@@ -110,7 +111,7 @@ jobs:
                   db=true; app=true; e2e=true ;;
                 scripts/db-*|scripts/seed.ts|scripts/seed-data.json|scripts/migrate-firestore.ts|scripts/preview-migrate.ts|scripts/reconcile-migration.ts|scripts/neon-ops.ts)
                   db=true; app=true ;;
-                scripts/deploy-functions.js)
+                scripts/deploy-functions.js|scripts/firebase-cli.mjs)
                   functions=true ;;
 
                 # Firebase security rules, indexes and emulator config.
@@ -118,6 +119,11 @@ jobs:
                 # are E2E-relevant too.
                 firestore.rules|storage.rules|firestore.indexes.json|firebase.json|.firebaserc|tests/*.test.mjs)
                   rules=true; e2e=true ;;
+
+                # Emulator exec wrapper (#269): test:rules and the E2E
+                # jobs run through it — changes must exercise both.
+                scripts/emulators.ts|scripts/lib/emulator-ports.ts)
+                  rules=true; e2e=true; app=true ;;
 
                 # Firebase Functions package (isolated dependency tree;
                 # not exercised by the E2E emulators).
@@ -180,6 +186,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.app == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -222,6 +229,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.functions == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: functions
@@ -255,6 +263,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rules == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -287,6 +296,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.db == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -317,6 +327,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

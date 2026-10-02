@@ -86,7 +86,7 @@ files is not used by production code.
 | `ADMIN_EMAILS` | Bootstrap/emergency admin allowlist — NOT the authorization authority (Postgres `admin_users` is; see §21) | yes-ish — emails are personal data |
 | `DATABASE_URL` | Neon Postgres pooled endpoint — **required**: registry reads/writes + admin authz | **yes** (Vercel–Neon integration) |
 | `DATABASE_URL_UNPOOLED` | Neon unpooled endpoint for migrations/preview self-migrate | **yes** (Vercel–Neon integration) |
-| `CRON_SECRET` | Bearer guard for `/api/cron/*` routes | **yes** — random string, set in Production AND Preview |
+| `CRON_SECRET` | Bearer guard for `/api/cron/*` routes | **yes** — random string. Production required; Preview optional — preview live runs are refused (#271), only `?dry_run=1` works there |
 | `RESEND_API_KEY` | Resend API key for reminder email delivery | **yes** — without it live reminder runs refuse (503); dry-run still works |
 | `EMAIL_FROM` | Verified sender identity, e.g. `SFPCA <reminders@…>` — domain must be verified in Resend | no |
 | `RESEND_WEBHOOK_SECRET` | `whsec_…` webhook signing secret | **yes** — without it the webhook route refuses everything (503) |
@@ -152,6 +152,43 @@ Emulators can never hit production: `test:rules` and `test:e2e` pin
 `--project demo-sfpca`, and `demo-*` projects are emulator-only by
 design. No test command in this repo targets a real project.
 
+### 4a. Emulator port collisions — other projects on this machine (#269)
+
+`test:rules`, `test:e2e`, and `test:e2e:maintenance` all run through
+`tsx scripts/emulators.ts`, which preflights the fixed emulator ports
+(auth 9099, firestore 8080, storage 9199 — hub/logging auto-select, so
+they never collide) before `emulators:exec`. If another developer
+project's suite — or an orphaned emulator process — already holds a
+port, the command fails *before* any test runs and names the owner:
+
+- a live foreign suite is identified by project ID via its hub locator
+  (`%TEMP%\hub-<projectId>.json` → hub `/emulators`), e.g.
+  `port 8080 — held by the emulator suite for project "demo-other"`;
+- an orphaned emulator or unrelated server is identified by OS process,
+  e.g. `port 8080 — java.exe (pid 21300) — no live emulator hub claims
+  the port`.
+
+Nothing is ever killed automatically. Remedies, in order of
+preference:
+
+1. **Run our suite on the alternate port block** — append `--alt-ports`
+   to the wrapped command (or run
+   `npx tsx scripts/emulators.ts exec --alt-ports --only auth,firestore,storage --project demo-sfpca "<test command>"`).
+   This shifts every fixed port by +10000 (auth 19099, firestore 18080,
+   storage 19199), generates a throwaway `firebase.alt.<pid>.json` in
+   the OS temp dir with **absolute** rules paths, and exports the
+   matching `NEXT_PUBLIC_*_EMULATOR_*` overrides consumed by
+   `src/lib/firebase.ts` and `playwright.config.ts`. Both suites can
+   run side by side.
+2. **Stop the other suite** in its own project directory
+   (`firebase emulators:exec`/Ctrl-C there, or the terminal running
+   it). For an orphaned process, kill the pid named in the diagnostic
+   (e.g. `taskkill /PID 21300 /F` for a leftover Firestore `java.exe`).
+
+Stale `%TEMP%\hub-*.json` locators are normal — a locator whose pid is
+dead is ignored automatically. To inspect state without running tests:
+`npx tsx scripts/emulators.ts check`.
+
 ## 5. Pre-release checklist
 
 Before merging a PR that will go to production:
@@ -198,7 +235,10 @@ Functions (§7) and rules (§8).
 All commands run from the **repo root** (`firebase.json` points at
 `functions/`). Deploys require the Firebase CLI (`firebase-tools` is a
 devDependency; `npx firebase …` works without a global install) and a
-login with deploy rights on `saba-sfpca`.
+login with deploy rights on `saba-sfpca`. Commands that load the
+functions code run through `scripts/firebase-cli.mjs`, the repo
+wrapper that raises firebase-tools' discovery timeout to 60 s — bare
+`firebase`/`npx firebase` invocations bypass it (§7a).
 
 **Preflight:**
 
@@ -213,7 +253,7 @@ cd ..
 **Deploy everything (both functions):**
 
 ```bash
-firebase deploy --only functions
+node scripts/firebase-cli.mjs deploy --only functions
 ```
 
 or `npm run deploy:functions`, which additionally fails fast if
@@ -223,8 +263,8 @@ or `npm run deploy:functions`, which additionally fails fast if
 hotfix that touches a single function):
 
 ```bash
-firebase deploy --only functions:triggerRebuild
-firebase deploy --only functions:onFirestoreChange
+node scripts/firebase-cli.mjs deploy --only functions:triggerRebuild
+node scripts/firebase-cli.mjs deploy --only functions:onFirestoreChange
 ```
 
 **Verify:**
@@ -246,6 +286,51 @@ deploy. If you deploy a function that needs `VERCEL_TOKEN`,
 succeeds but the function logs `outcome:"skipped"` / refuses requests —
 check `functions/.env` first when a deployed function silently does
 nothing.
+
+### 7a. "User code failed to load … Timeout after 10000" (#267)
+
+firebase-tools discovers the function spec by spawning a child process
+that loads `functions/index.js` and polling its `/__/functions.yaml`
+endpoint, with a **10 s** deadline. On a cold filesystem (first run
+after boot, or an AV rescan of `node_modules`) that load has measured
+~13 s on a Windows dev box — the error is environmental, not a code
+bug, and typically clears on retry once caches are warm.
+
+Repo entry points already raise the bound via the supported
+`FUNCTIONS_DISCOVERY_TIMEOUT` (seconds) override:
+
+- `npm run deploy:functions` defaults it to **60**, while preserving a
+  non-empty caller-supplied value;
+- `functions/` scripts `serve`, `shell`, `deploy` — and ad-hoc
+  `node scripts/firebase-cli.mjs …` calls — route through
+  `scripts/firebase-cli.mjs`, which defaults it to **60**
+  (`FUNCTIONS_DISCOVERY_TIMEOUT=N` to override).
+
+Direct `firebase …` / `npx firebase …` invocations bypass the wrapper
+and keep the 10 s default. For any direct invocation that loads the
+functions code (`deploy`, `emulators:start --only functions`,
+`functions:shell`), either run it through the wrapper
+(`node scripts/firebase-cli.mjs <args>`) or set the variable yourself:
+
+```bash
+FUNCTIONS_DISCOVERY_TIMEOUT=60 npx firebase deploy --only functions   # bash/zsh
+set "FUNCTIONS_DISCOVERY_TIMEOUT=60" && npx firebase deploy --only functions   # cmd.exe
+$env:FUNCTIONS_DISCOVERY_TIMEOUT = "60"   # PowerShell — persists for the session
+```
+
+Diagnose when the error persists **after** the timeout is raised —
+then it is a real load defect, not a cold cache:
+
+```bash
+cd functions
+node -e "const t=Date.now(); require('./index.js'); console.log(Date.now()-t+'ms')"
+```
+
+Expect <1 s warm. If a single import dominates, it is likely a
+top-level side effect added since — `functions/test/discovery-load.test.js`
+enforces a resolved-module count ceiling and records elapsed
+module-load time (it asserts the structural property, not a
+wall-clock threshold that would flake).
 
 ## 8. Firestore & Storage rules
 
@@ -409,8 +494,10 @@ repository-driven:
 2. `git revert` the offending change on a branch (or check out the
    good version of `functions/` onto a hotfix branch).
 3. `cd functions && npm run lint && npm test`.
-4. `firebase deploy --only functions` (or `functions:<name>` if only
-   one function is affected).
+4. `node scripts/firebase-cli.mjs deploy --only functions` (or
+   `functions:<name>` if only one function is affected) — the wrapper
+   supplies the 60 s discovery timeout (§7a); a bare `firebase deploy`
+   needs `FUNCTIONS_DISCOVERY_TIMEOUT=60` set explicitly.
 
 [console] Cloud Functions v2 run on Cloud Run, which keeps prior
 revisions — an emergency traffic rollback in the Google Cloud console
@@ -1305,9 +1392,22 @@ restore it, delete it again — never use a real `receipts/` object.
   (`preview/ops/180-neon-integration`) — never `ep-soft-wind-awarztez`.
   Preview credentials are physically incapable of writing to
   Production's branch.
-- Stale preview branches (e.g. old PRs, dependabot) can accumulate —
-  Neon Free allows **10 branches per project**; delete obsolete
-  `preview/*` branches from the Neon console if provisioning slows.
+- **Preview branch cleanup is automated (#262).** The integration
+  creates `preview/<git-branch>` but never deletes it; Neon Free allows
+  **10 branches per project**, so stale branches once accumulated until
+  provisioning slowed. `.github/workflows/neon-preview-cleanup.yml` now
+  deletes `preview/<head-ref>` on `pull_request_target: closed` (merge
+  and close-without-merge) and on branch `delete` events, and a daily
+  sweep removes `preview/*` branches that no open PR or remote branch
+  references after a grace/abandonment window (1d/30d defaults).
+  Deletion is exact-name-match-then-delete-by-id, refuses the primary
+  branch, is idempotent, and requires the `NEON_API_KEY` **repo secret**
+  (without it the job warns and exits 0). Operator surface:
+  - `npx tsx scripts/neon-ops.ts preview-branches` — preview branches
+    with age + the verdict the sweep would reach now
+  - `npx tsx scripts/neon-preview-cleanup.ts sweep` — dry-run the sweep
+  - `… sweep --apply` / `… pr <git-ref>` — manual delete paths
+  - Neon console → Branches remains the UI fallback.
 - See ARCHITECTURE.md §10–§13 for the variable/table reference.
 
 ### 19b. Schema migration lifecycle
