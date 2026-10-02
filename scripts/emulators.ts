@@ -131,12 +131,12 @@ function buildAltConfig(only: string[] | null): {
   const env: Record<string, string> = {};
   const requested = only ?? Object.keys(cfg.emulators ?? {});
   for (const name of requested) {
-    const section = cfg.emulators?.[name];
-    if (!section) continue;
+    const section = cfg.emulators?.[name] ?? {};
     const base = section.port ?? DEFAULT_PORTS[name];
     if (!base) continue;
     const alt = base + ALT_PORT_OFFSET;
-    cfg.emulators![name] = { ...section, port: alt };
+    cfg.emulators ??= {};
+    cfg.emulators[name] = { ...section, port: alt };
     if (name === "firestore") {
       env.NEXT_PUBLIC_FIRESTORE_EMULATOR_PORT = String(alt);
     } else if (name === "storage") {
