@@ -21,17 +21,8 @@ This directory contains Firebase Cloud Functions that trigger Vercel rebuilds wh
   When `REBUILD_TRIGGER_TOKEN` is not configured the endpoint refuses all
   requests (fails closed).
 
-### 3. sweepOrphanedReceipts
-- **Trigger**: Scheduled, every 24 hours
-- **Action**: Deletes `receipts/<id>` storage objects that have no matching
-  `animalRegistrations/<id>` document — orphans left when a public
-  registration upload succeeded but the submission write (and the
-  client's immediate cleanup) failed. Objects younger than 1 hour are
-  skipped so in-flight submissions are never swept. A failing object is
-  counted and skipped rather than aborting the run; if any objects
-  failed, the run logs an error summary and the execution is marked
-  failed so alerting catches it. Logs counts only — never file names
-  or contents.
+(The old `sweepOrphanedReceipts` Cloud Function was retired in #183 —
+orphan cleanup is now the Vercel cron route `/api/cron/sweep-receipts`.)
 
 ## Setup
 
@@ -72,13 +63,16 @@ REBUILD_TRIGGER_TOKEN=your_random_secret_here
 
 ### 3. Deploy Functions
 ```bash
-firebase deploy --only functions
+npm run deploy
 ```
 
-Or use the deployment script:
+Or use the deployment script from the repo root:
 ```bash
 npm run deploy:functions
 ```
+
+Both route through the repo's 60-second discovery-timeout override —
+a bare `firebase deploy` bypasses it; see Troubleshooting #4.
 
 ## Usage
 
@@ -116,6 +110,30 @@ curl -H "Authorization: Bearer $REBUILD_TRIGGER_TOKEN" \
    - Run `npm install` in the functions directory
    - Check that all dependencies are installed
    - Review the Firebase console for detailed error messages
+
+4. **`User code failed to load. Cannot determine backend specification.
+   Timeout after 10000`**
+   - Cold filesystem/AV scan of `node_modules` exceeds firebase-tools'
+     default 10 s discovery deadline — environmental, not a code bug.
+     Retrying once usually works (warm cache).
+   - The `serve`/`shell`/`deploy` scripts here run through
+     `scripts/firebase-cli.mjs`, which sets the supported
+     `FUNCTIONS_DISCOVERY_TIMEOUT=60` override; `npm run
+     deploy:functions` sets it too.
+   - Bare `firebase …` and `npx firebase …` calls bypass the wrapper
+     and keep the 10 s default. For any direct invocation that loads
+     the functions code (`deploy`, `emulators:start`,
+     `functions:shell`), either route it through the wrapper —
+     `node ../scripts/firebase-cli.mjs <args>` from this directory —
+     or set the variable yourself:
+
+     ```bash
+     FUNCTIONS_DISCOVERY_TIMEOUT=60 firebase deploy --only functions   # bash/zsh
+     $env:FUNCTIONS_DISCOVERY_TIMEOUT=60                                # PowerShell — then run the command
+     ```
+   - Persisting slowness is diagnosed in RUNBOOK §7a; a module-count
+     guard (`test/discovery-load.test.js`) keeps heavyweight top-level
+     imports from reintroducing the problem.
 
 ### Viewing Logs
 ```bash
