@@ -23,7 +23,7 @@
 // decides.
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { findPackageJSON } from "node:module";
 import { dirname, join } from "node:path";
 import os from "node:os";
@@ -201,6 +201,15 @@ async function cmdExec(args: string[]) {
     [firebaseBin(), ...configArg, "emulators:exec", ...fwd],
     { stdio: "inherit", env: childEnv },
   );
+  // The generated alt config has served its purpose — don't leave
+  // firebase.alt.<pid>.json files accumulating in the temp dir.
+  if (alt) {
+    try {
+      unlinkSync(configArg[1]);
+    } catch {
+      // Already gone — harmless.
+    }
+  }
   // Post-mortem: preflight races are possible (a foreign suite can grab
   // a port between the check and the bind). If the child failed AND a
   // required port is now occupied, name the winner so the operator does
