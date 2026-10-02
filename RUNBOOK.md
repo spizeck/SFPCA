@@ -152,6 +152,43 @@ Emulators can never hit production: `test:rules` and `test:e2e` pin
 `--project demo-sfpca`, and `demo-*` projects are emulator-only by
 design. No test command in this repo targets a real project.
 
+### 4a. Emulator port collisions — other projects on this machine (#269)
+
+`test:rules`, `test:e2e`, and `test:e2e:maintenance` all run through
+`tsx scripts/emulators.ts`, which preflights the fixed emulator ports
+(auth 9099, firestore 8080, storage 9199 — hub/logging auto-select, so
+they never collide) before `emulators:exec`. If another developer
+project's suite — or an orphaned emulator process — already holds a
+port, the command fails *before* any test runs and names the owner:
+
+- a live foreign suite is identified by project ID via its hub locator
+  (`%TEMP%\hub-<projectId>.json` → hub `/emulators`), e.g.
+  `port 8080 — held by the emulator suite for project "demo-other"`;
+- an orphaned emulator or unrelated server is identified by OS process,
+  e.g. `port 8080 — java.exe (pid 21300) — no live emulator hub claims
+  the port`.
+
+Nothing is ever killed automatically. Remedies, in order of
+preference:
+
+1. **Run our suite on the alternate port block** — append `--alt-ports`
+   to the wrapped command (or run
+   `npx tsx scripts/emulators.ts exec --alt-ports --only auth,firestore,storage --project demo-sfpca "<test command>"`).
+   This shifts every fixed port by +10000 (auth 19099, firestore 18080,
+   storage 19199), generates a throwaway `firebase.alt.<pid>.json` in
+   the OS temp dir with **absolute** rules paths, and exports the
+   matching `NEXT_PUBLIC_*_EMULATOR_*` overrides consumed by
+   `src/lib/firebase.ts` and `playwright.config.ts`. Both suites can
+   run side by side.
+2. **Stop the other suite** in its own project directory
+   (`firebase emulators:exec`/Ctrl-C there, or the terminal running
+   it). For an orphaned process, kill the pid named in the diagnostic
+   (e.g. `taskkill /PID 21300 /F` for a leftover Firestore `java.exe`).
+
+Stale `%TEMP%\hub-*.json` locators are normal — a locator whose pid is
+dead is ignored automatically. To inspect state without running tests:
+`npx tsx scripts/emulators.ts check`.
+
 ## 5. Pre-release checklist
 
 Before merging a PR that will go to production:
