@@ -7,6 +7,13 @@
 // Scheduled via vercel.json crons. Vercel sends Authorization:
 // Bearer $CRON_SECRET on cron invocations; the check fails closed when
 // the variable is unset so the route is never publicly callable.
+//
+// Preview deployments are refused outright (#271): the sweep deletes
+// objects from the SHARED production Storage bucket using the preview
+// Neon branch's rows as the orphan oracle — data divergence between
+// the branch and production would make real objects look orphaned.
+// Vercel only schedules crons on production anyway, so nothing
+// legitimate is lost.
 
 import { NextRequest, NextResponse } from "next/server";
 import { adminReceiptBucket } from "@/lib/firebase-admin-storage";
@@ -22,6 +29,12 @@ export async function GET(request: NextRequest) {
   const auth = request.headers.get("authorization");
   if (!secret || auth !== `Bearer ${secret}`) {
     return NextResponse.json({ ok: false }, { status: 401 });
+  }
+  if (process.env.VERCEL_ENV === "preview") {
+    return NextResponse.json(
+      { ok: false, error: "cron routes do not run on preview deployments" },
+      { status: 403 },
+    );
   }
 
   try {
