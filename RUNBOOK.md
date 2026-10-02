@@ -532,7 +532,9 @@ Deployment failed — WHERE did it fail? (read the stages in order)
     Vercel → Logs for the deployment; treat as a runtime incident, not
     a build problem.
   → Cron routes on preview answering 403 for live runs is EXPECTED
-    (#271) — live sweeps/sends are production-only; use ?dry_run=1.
+    (#271) — sweeps and live reminder sends are production-only; only
+    /api/cron/reminders?dry_run=1 works on preview (the sweep route
+    has no dry-run mode).
 ```
 
 ## 14. Automatic content rebuilds (post-#94)
