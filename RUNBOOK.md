@@ -517,10 +517,16 @@ Orphan-receipt sweep failing
 
 Deployment failed — WHERE did it fail? (read the stages in order)
   → "Resource provisioning failed" / ~0 ms duration / NO build log:
-    Vercel platform could not assign a build machine — an upstream
-    capacity incident, NOT caused by anything in this repo. Check
-    vercel-status.com, then redeploy. (Observed 2026-09: recovered on
-    its own; unrelated to Neon branch count — do not conflate.)
+    the build never started — a provisioning failure, not an
+    application failure. Two known causes, check both:
+    (a) Vercel platform capacity — check vercel-status.com, redeploy.
+        Our 2026-09 incident was this: it recovered on its own with NO
+        repo change and before any build machine was assigned.
+    (b) A connected integration failing to provision its resource —
+        the classic case is the Vercel–Neon integration unable to
+        create a preview branch because the project hit its branch
+        limit (§19a: Free = 10 branches). Check the Neon console for
+        branch count and integration errors before assuming (a).
   → Build log exists but stops during "Installing dependencies":
     npm ci / registry issue — check the install step output.
   → Stops during preview-migrate (VERCEL_ENV=preview only):
@@ -531,10 +537,11 @@ Deployment failed — WHERE did it fail? (read the stages in order)
   → Build succeeds, deploy unhealthy / runtime errors:
     Vercel → Logs for the deployment; treat as a runtime incident, not
     a build problem.
-  → Cron routes on preview answering 403 for live runs is EXPECTED
-    (#271) — sweeps and live reminder sends are production-only; only
+  → Cron routes on preview answering 403: with the #271 guard merged,
+    live sweeps/sends are production-only — only
     /api/cron/reminders?dry_run=1 works on preview (the sweep route
-    has no dry-run mode).
+    has no dry-run mode). If the guard is not deployed, a preview 403
+    comes from deployment protection or another access control instead.
 ```
 
 ## 14. Automatic content rebuilds (post-#94)
