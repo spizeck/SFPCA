@@ -56,8 +56,11 @@ function parseOnly(args: string[]): string[] | null {
     return value.split(",").map((s) => s.trim()).filter(Boolean);
   }
   const eq = args.find((a) => a.startsWith("--only="));
-  const value = eq?.slice("--only=".length);
-  if (!value) return null;
+  if (eq === undefined) return null;
+  const value = eq.slice("--only=".length);
+  if (!value) {
+    throw new Error("--only requires a comma-separated emulator list");
+  }
   return value.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
