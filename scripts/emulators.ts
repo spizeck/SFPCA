@@ -39,16 +39,43 @@ import {
 const ALT_PORT_OFFSET = 10_000;
 const OUR_PROJECT = "demo-sfpca";
 
-function readFirebaseConfig(): {
+function readFirebaseConfig(configPath = "firebase.json"): {
   emulators?: Record<string, { port?: number }>;
 } {
-  return JSON.parse(readFileSync("firebase.json", "utf8"));
+  return JSON.parse(readFileSync(configPath, "utf8"));
 }
 
+// Both `--only a,b` and `--only=a,b` are valid firebase CLI syntax.
 function parseOnly(args: string[]): string[] | null {
   const i = args.indexOf("--only");
-  if (i < 0 || !args[i + 1]) return null;
-  return args[i + 1].split(",").map((s) => s.trim()).filter(Boolean);
+  const eq = args.find((a) => a.startsWith("--only="));
+  const value = i >= 0 ? args[i + 1] : eq?.slice("--only=".length);
+  if (!value) return null;
+  return value.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+// A caller may select a different config via `--config <path>` or
+// `--config=<path>`. The wrapper must preflight the same file the
+// child binds, and exactly one --config may reach the CLI — repeated
+// flags have undefined precedence.
+function extractConfigArg(args: string[]): {
+  configPath: string | null;
+  fwd: string[];
+} {
+  const fwd: string[] = [];
+  let configPath: string | null = null;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--config") {
+      configPath = args[i + 1] ?? configPath;
+      i++;
+    } else if (a.startsWith("--config=")) {
+      configPath = a.slice("--config=".length);
+    } else {
+      fwd.push(a);
+    }
+  }
+  return { configPath, fwd };
 }
 
 async function preflight(
@@ -75,8 +102,12 @@ function printProblems(problems: string[], tail: string) {
   console.error(tail);
 }
 
-async function cmdCheck(only: string[] | null) {
-  const ports = requiredPorts(readFirebaseConfig(), only);
+async function cmdCheck(args: string[]) {
+  const { configPath, fwd } = extractConfigArg(args);
+  const ports = requiredPorts(
+    readFirebaseConfig(configPath ?? "firebase.json"),
+    parseOnly(fwd),
+  );
   const problems = await preflight(ports);
   if (!problems.length) {
     console.log(
@@ -114,20 +145,25 @@ const PATH_FIELDS: [string, string][] = [
   ["hosting", "public"],
 ];
 
-function absolutizePaths(cfg: Record<string, any>) {
+// Relative file paths are resolved against the CONFIG file's
+// directory — firebase semantics — not the caller's cwd.
+function absolutizePaths(cfg: Record<string, any>, baseDir: string) {
   for (const [section, field] of PATH_FIELDS) {
     const sec = cfg[section];
     if (sec && typeof sec[field] === "string" && !path.isAbsolute(sec[field])) {
-      sec[field] = path.resolve(process.cwd(), sec[field]);
+      sec[field] = path.resolve(baseDir, sec[field]);
     }
   }
 }
 
-function buildAltConfig(only: string[] | null): {
+function buildAltConfig(
+  only: string[] | null,
+  cfg: { emulators?: Record<string, { port?: number }> },
+  baseDir: string,
+): {
   path: string;
   env: Record<string, string>;
 } {
-  const cfg = readFirebaseConfig();
   const env: Record<string, string> = {};
   const requested = only ?? Object.keys(cfg.emulators ?? {});
   for (const name of requested) {
@@ -146,20 +182,26 @@ function buildAltConfig(only: string[] | null): {
         `http://localhost:${alt}`;
     }
   }
-  absolutizePaths(cfg);
+  absolutizePaths(cfg, baseDir);
   const cfgPath = path.join(
     os.tmpdir(),
     `firebase.alt.${process.pid}.json`,
   );
-  writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+  // Exclusive create: the tmp path is predictable, so refuse to
+  // overwrite (or later unlink) a file this call did not create.
+  writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), { flag: "wx" });
   return { path: cfgPath, env };
 }
 
 async function cmdExec(args: string[]) {
   const alt = args.includes("--alt-ports");
-  const fwd = args.filter((a) => a !== "--alt-ports");
+  const { configPath, fwd } = extractConfigArg(
+    args.filter((a) => a !== "--alt-ports"),
+  );
   const only = parseOnly(fwd);
-  const cfg = readFirebaseConfig();
+  const selectedConfig = configPath ?? "firebase.json";
+  const cfg = readFirebaseConfig(selectedConfig);
+  const cfgBaseDir = path.dirname(path.resolve(selectedConfig));
   const ports = requiredPorts(cfg, only);
 
   const problems = await preflight(ports);
@@ -194,10 +236,12 @@ async function cmdExec(args: string[]) {
   let altConfigPath: string | undefined;
   let status = 1;
   try {
-    let configArg: string[] = [];
+    // Forward the caller's config selection unchanged in normal mode;
+    // in alt mode exactly one --config (the generated file) is passed.
+    let configArg = configPath ? ["--config", configPath] : [];
     const childEnv = { ...process.env };
     if (alt) {
-      const altCfg = buildAltConfig(only);
+      const altCfg = buildAltConfig(only, cfg, cfgBaseDir);
       altConfigPath = altCfg.path;
       configArg = ["--config", altCfg.path];
       Object.assign(childEnv, altCfg.env);
@@ -242,7 +286,7 @@ async function cmdExec(args: string[]) {
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   if (cmd === "check") {
-    await cmdCheck(parseOnly(rest));
+    await cmdCheck(rest);
     return;
   }
   if (cmd === "exec") {
@@ -250,7 +294,8 @@ async function main() {
     return;
   }
   console.error(
-    "usage: emulators.ts check [--only a,b,c] | exec [--alt-ports] <emulators:exec args>",
+    "usage: emulators.ts check [--only a,b,c] [--config <path>] | " +
+      "exec [--alt-ports] <emulators:exec args>",
   );
   process.exit(1);
 }
