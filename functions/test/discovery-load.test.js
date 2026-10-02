@@ -14,10 +14,12 @@ const path = require("node:path");
 const FUNCTIONS_DIR = path.join(__dirname, "..");
 
 // Number of distinct resolved modules index.js may pull at load time.
-// Measured ~30 today (firebase-functions lazy-loads providers); a
-// heavyweight top-level dep (e.g. googleapis, ~1000+ files) trips this
-// deterministically on any machine — unlike a millisecond assertion.
-const MODULE_FILE_BUDGET = 150;
+// Measured ~683 today (firebase-functions/v2 + firebase-admin are the
+// bulk; the SDK lazy-loads trigger providers so this is near-minimal
+// already). A heavyweight top-level dep (e.g. googleapis, ~1000+
+// files) trips this deterministically on any machine — unlike a
+// millisecond assertion.
+const MODULE_FILE_BUDGET = 900;
 
 test("index.js loads with no env, few files, both exports", () => {
   const probe = `
@@ -26,7 +28,7 @@ const orig = Module._load;
 const files = new Set();
 Module._load = function (request, parent, isMain) {
   const m = orig.apply(this, arguments);
-  try { files.add(Module._resolveFilename(request, this)); } catch {}
+  try { files.add(Module._resolveFilename(request, parent)); } catch {}
   return m;
 };
 const t = Date.now();
