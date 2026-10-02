@@ -514,6 +514,25 @@ Orphan-receipt sweep failing
     deliberately never logged — inspect Storage directly if needed.
   → 401s mean CRON_SECRET is unset or mismatched — the route fails
     closed; check the Vercel env var for that environment.
+
+Deployment failed — WHERE did it fail? (read the stages in order)
+  → "Resource provisioning failed" / ~0 ms duration / NO build log:
+    Vercel platform could not assign a build machine — an upstream
+    capacity incident, NOT caused by anything in this repo. Check
+    vercel-status.com, then redeploy. (Observed 2026-09: recovered on
+    its own; unrelated to Neon branch count — do not conflate.)
+  → Build log exists but stops during "Installing dependencies":
+    npm ci / registry issue — check the install step output.
+  → Stops during preview-migrate (VERCEL_ENV=preview only):
+    Neon preview-branch problem — §19a/§19b; check the branch exists
+    and DATABASE_URL_UNPOOLED resolves.
+  → Stops during "Creating an optimized production build":
+    application build failure — reproduce locally with npm run build.
+  → Build succeeds, deploy unhealthy / runtime errors:
+    Vercel → Logs for the deployment; treat as a runtime incident, not
+    a build problem.
+  → Cron routes on preview answering 403 for live runs is EXPECTED
+    (#271) — live sweeps/sends are production-only; use ?dry_run=1.
 ```
 
 ## 14. Automatic content rebuilds (post-#94)
