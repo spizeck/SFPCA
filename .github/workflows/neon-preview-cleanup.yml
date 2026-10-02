@@ -40,7 +40,10 @@ permissions:
   pull-requests: read # sweep + shared-head-ref checks list open PRs
 
 concurrency:
-  group: neon-preview-cleanup
+  # Per-ref: a global group would let a newer queued run evict an older
+  # pending cleanup, silently dropping PR-close deletions until the
+  # daily sweep. Runs for different refs must not displace each other.
+  group: neon-preview-cleanup-${{ github.event.pull_request.head.ref || github.event.ref || 'sweep' }}
   cancel-in-progress: false # never abandon a delete mid-call
 
 jobs:
@@ -68,7 +71,13 @@ jobs:
         run: npm ci
 
       - name: Delete closed PR's preview branch
-        if: github.event_name == 'pull_request_target'
+        # Same-repo PRs only: a fork PR's head.ref is attacker-chosen
+        # text in the FORK's namespace — a fork branch named like a live
+        # origin branch must not be able to delete that branch's preview
+        # database with NEON_API_KEY.
+        if: >-
+          github.event_name == 'pull_request_target' &&
+          github.event.pull_request.head.repo.full_name == github.repository
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}

@@ -222,10 +222,10 @@ async function cmdSweep(key: string, projectId: string) {
       await deleteBranch(key, projectId, b.id);
       console.log(`deleted ${b.name}`);
     } catch (e) {
-      failures++;
       if (e instanceof NeonApiError && e.status === 404) {
         console.log(`${b.name} already deleted`);
       } else {
+        failures++;
         console.error(
           `failed to delete ${b.name}: ${e instanceof Error ? e.message : e}`,
         );

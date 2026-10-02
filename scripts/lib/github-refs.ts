@@ -75,7 +75,10 @@ export async function listRepoBranches(
     const branches = await ghApi(
       repo,
       token,
-      `/branches?per_page=100&page=${page}&protected=false`,
+      // No `protected` filter — protected=false would EXCLUDE main and
+      // other protected branches from remoteHeads, letting the sweep
+      // misclassify their preview branches as stale.
+      `/branches?per_page=100&page=${page}`,
     );
     for (const b of branches) {
       if (typeof b?.name === "string") out.add(b.name);
