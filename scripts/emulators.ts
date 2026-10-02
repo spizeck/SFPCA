@@ -173,18 +173,13 @@ async function cmdExec(args: string[]) {
     process.exit(1);
   }
 
-  let configArg: string[] = [];
-  const childEnv = { ...process.env };
+  // Preflight the shifted block first — before writing the alt config,
+  // so an early exit cannot leak firebase.alt.<pid>.json.
+  const boundPorts = alt
+    ? ports.map((p) => ({ name: p.name, port: p.port + ALT_PORT_OFFSET }))
+    : ports;
   if (alt) {
-    const altCfg = buildAltConfig(only);
-    configArg = ["--config", altCfg.path];
-    Object.assign(childEnv, altCfg.env);
-    // Preflight the shifted block too — an alt port can also be taken.
-    const altPorts = ports.map((p) => ({
-      name: p.name,
-      port: p.port + ALT_PORT_OFFSET,
-    }));
-    const altProblems = await preflight(altPorts);
+    const altProblems = await preflight(boundPorts);
     if (altProblems.length) {
       console.error("emulator preflight: alternate port(s) also in use:");
       for (const p of altProblems) console.error(p);
@@ -192,41 +187,56 @@ async function cmdExec(args: string[]) {
     }
     console.log(
       `emulators: using alternate ports ` +
-        altPorts.map((p) => `${p.name}:${p.port}`).join(", "),
+        boundPorts.map((p) => `${p.name}:${p.port}`).join(", "),
     );
   }
 
-  const r = spawnSync(
-    process.execPath,
-    [firebaseBin(), ...configArg, "emulators:exec", ...fwd],
-    { stdio: "inherit", env: childEnv },
-  );
-  // The generated alt config has served its purpose — don't leave
-  // firebase.alt.<pid>.json files accumulating in the temp dir.
-  if (alt) {
-    try {
-      unlinkSync(configArg[1]);
-    } catch {
-      // Already gone — harmless.
+  let altConfigPath: string | undefined;
+  let status = 1;
+  try {
+    let configArg: string[] = [];
+    const childEnv = { ...process.env };
+    if (alt) {
+      const altCfg = buildAltConfig(only);
+      altConfigPath = altCfg.path;
+      configArg = ["--config", altCfg.path];
+      Object.assign(childEnv, altCfg.env);
+    }
+    const r = spawnSync(
+      process.execPath,
+      [firebaseBin(), ...configArg, "emulators:exec", ...fwd],
+      { stdio: "inherit", env: childEnv },
+    );
+    status = r.status ?? 1;
+  } finally {
+    // The generated alt config has served its purpose — don't leave
+    // firebase.alt.<pid>.json files accumulating in the temp dir.
+    if (altConfigPath) {
+      try {
+        unlinkSync(altConfigPath);
+      } catch {
+        // Already gone — harmless.
+      }
     }
   }
   // Post-mortem: preflight races are possible (a foreign suite can grab
   // a port between the check and the bind). If the child failed AND a
-  // required port is now occupied, name the winner so the operator does
-  // not chase the emulator's generic "unexpected error" / port-taken
-  // message in the wrong direction.
-  if ((r.status ?? 1) !== 0) {
-    const late = await preflight(ports);
+  // port the child would bind is now occupied, name the winner so the
+  // operator does not chase the emulator's generic "unexpected error"
+  // in the wrong direction. Check boundPorts — under --alt-ports those
+  // are the shifted ports the child actually needed.
+  if (status !== 0) {
+    const late = await preflight(boundPorts);
     if (late.length) {
       printProblems(
         late,
         "\nThe port(s) above were captured between preflight and " +
           "emulator bind — a competing suite likely started at the same " +
-          "time. Rerun, or use --alt-ports.",
+          `time. Rerun${alt ? "." : ", or use --alt-ports."}`,
       );
     }
   }
-  process.exit(r.status ?? 1);
+  process.exit(status);
 }
 
 async function main() {
