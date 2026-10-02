@@ -70,7 +70,9 @@ describe("GET /api/cron/sweep-receipts", () => {
 
   test("production and local runs execute both sweeps", async () => {
     for (const env of ["production", undefined]) {
-      if (env) vi.stubEnv("VERCEL_ENV", env);
+      // stubEnv(name, undefined) deletes and stays tracked so
+      // unstubAllEnvs restores correctly across the loop.
+      vi.stubEnv("VERCEL_ENV", env);
       mockSweepReceipts.mockClear();
       mockSweepVetDocs.mockClear();
       const response = await GET(authed());
