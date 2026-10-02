@@ -89,6 +89,12 @@
     "fast-xml-parser": "^5.3.4",
     "jwks-rsa": {
       "jose": "5.10.0"
+    },
+    "@sentry/opentelemetry": {
+      "@opentelemetry/core": "^2.8.0"
+    },
+    "@sentry/node-core": {
+      "@opentelemetry/core": "^2.8.0"
     }
   }
 }
