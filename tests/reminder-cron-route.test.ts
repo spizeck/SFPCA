@@ -104,6 +104,39 @@ describe("GET /api/cron/reminders", () => {
     );
   });
 
+  // #271: on a preview deployment a "live" run would send real email
+  // from preview-branch data. Live runs are refused; dry-run stays
+  // available for preview verification.
+  test("preview deployments refuse live runs but allow dry-run", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    const live = await GET(authed());
+    expect(live.status).toBe(403);
+    expect(mockRunCycle).not.toHaveBeenCalled();
+
+    mockRunCycle.mockResolvedValue({
+      asOf: "2026-09-23",
+      dryRun: true,
+      evaluated: 0,
+      queued: 0,
+      skipped: 0,
+      suppressed: 0,
+      suppressedByReason: {},
+      skippedByReason: {},
+      delivery: "dry-run",
+    });
+    const dry = await GET(authed("?dry_run=1"));
+    expect(dry.status).toBe(200);
+  });
+
+  test("production deployments run live normally", async () => {
+    vi.stubEnv("VERCEL_ENV", "production");
+    const response = await GET(authed());
+    expect(response.status).toBe(200);
+    expect(mockRunCycle).toHaveBeenCalledWith(
+      expect.objectContaining({ dryRun: false }),
+    );
+  });
+
   test("a live run passes the sender through and reports the result", async () => {
     const sender = { provider: "resend", send: vi.fn() };
     mockCreateSender.mockReturnValue(sender);
