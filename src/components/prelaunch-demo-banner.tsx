@@ -37,9 +37,36 @@ const SESSION_KEY = "sfpca:lifecycle";
 // state update re-renders the component (picking up the storage write
 // or removal the fetch handler just made). The server snapshot is
 // always false, keeping SSR and first client render identical.
+//
+// Browsers can deny storage outright (private mode, blocked cookies) —
+// every access is wrapped so a denied read can never break rendering
+// and a denied write can never block a confirmed lifecycle update.
+const readPersistedDemo = () => {
+  try {
+    return (
+      window.sessionStorage.getItem(SESSION_KEY) ===
+      APP_LIFECYCLE_PRELAUNCH_DEMO
+    );
+  } catch {
+    return false;
+  }
+};
+const writePersistedDemo = (demo: boolean) => {
+  try {
+    if (demo) {
+      window.sessionStorage.setItem(
+        SESSION_KEY,
+        APP_LIFECYCLE_PRELAUNCH_DEMO,
+      );
+    } else {
+      window.sessionStorage.removeItem(SESSION_KEY);
+    }
+  } catch {
+    // Persistence is best-effort — the confirmed state still applies.
+  }
+};
 const subscribe = () => () => {};
-const getClientSnapshot = () =>
-  window.sessionStorage.getItem(SESSION_KEY) === APP_LIFECYCLE_PRELAUNCH_DEMO;
+const getClientSnapshot = () => readPersistedDemo();
 const getServerSnapshot = () => false;
 
 export function PrelaunchDemoBanner() {
@@ -63,13 +90,13 @@ export function PrelaunchDemoBanner() {
           if (cancelled) return;
           const lifecycle = body?.lifecycle as string | undefined;
           if (lifecycle === APP_LIFECYCLE_PRELAUNCH_DEMO) {
-            window.sessionStorage.setItem(SESSION_KEY, lifecycle);
+            writePersistedDemo(true);
             setConfirmed(APP_LIFECYCLE_PRELAUNCH_DEMO);
           } else if (lifecycle === APP_LIFECYCLE_LIVE) {
             // A CONFIRMED live response clears a persisted demo label —
             // go-live mid-session. The endpoint answers 503 on a failed
             // lifecycle read, which lands on neither branch.
-            window.sessionStorage.removeItem(SESSION_KEY);
+            writePersistedDemo(false);
             setConfirmed(APP_LIFECYCLE_LIVE);
           }
         })
