@@ -110,25 +110,40 @@ export async function getAppLifecycle(
 const LIFECYCLE_CACHE_TTL_MS = 60_000;
 let cached: { value: AppLifecycle; at: number } | null = null;
 
-export async function getCachedAppLifecycle(
+// Strict cached read: returns the last CONFIRMED lifecycle — fresh
+// cached value, or a successful read, or a stale cached value when the
+// read fails. `undefined` only when nothing was ever confirmed (a cold
+// start during a read outage). Callers decide their own fail direction:
+// crawler metadata should publish its restrictive variant on undefined;
+// per-request headers should fall back to 'live'.
+export async function getCachedAppLifecycleStrict(
   db?: RegistryDb,
   ttlMs: number = LIFECYCLE_CACHE_TTL_MS,
-): Promise<AppLifecycle> {
+): Promise<AppLifecycle | undefined> {
   if (cached && Date.now() - cached.at < ttlMs) {
     return cached.value;
   }
   const value = await getAppLifecycleStrict(db);
   if (value === undefined) {
-    // Read failure: preserve the last CONFIRMED state rather than
-    // guessing. A demo-window outage then keeps the noindex posture
-    // instead of flipping the demo site to live SEO; post-go-live the
-    // cache only ever holds 'live', so an outage can never resurrect
-    // the demo presentation. A cold-start failure still resolves
-    // 'live' — the fail-safe direction for a fresh deploy.
-    return cached?.value ?? APP_LIFECYCLE_LIVE;
+    return cached?.value;
   }
   cached = { value, at: Date.now() };
   return value;
+}
+
+export async function getCachedAppLifecycle(
+  db?: RegistryDb,
+  ttlMs: number = LIFECYCLE_CACHE_TTL_MS,
+): Promise<AppLifecycle> {
+  // Read failure: preserve the last CONFIRMED state rather than
+  // guessing. A demo-window outage then keeps the noindex posture
+  // instead of flipping the demo site to live SEO; post-go-live the
+  // cache only ever holds 'live', so an outage can never resurrect
+  // the demo presentation. A cold-start failure still resolves
+  // 'live' — the fail-safe direction for a fresh deploy.
+  return (
+    (await getCachedAppLifecycleStrict(db, ttlMs)) ?? APP_LIFECYCLE_LIVE
+  );
 }
 
 // Test seam: reset the memo between isolated runs.
