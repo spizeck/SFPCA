@@ -288,9 +288,11 @@ submission.
 records 7 years after registration-year end (anonymize, never delete
 canonical history), verified receipts 90 days after the server-side
 `receipt_verified_at` stamp (delete the Storage object, keep ledger
-facts), abandoned/rejected submissions 12 months (delete). Active rows
-in `retention_holds` exempt an entity from every automated path until
-released.
+facts), abandoned/rejected submissions 12 months (delete). A
+submission's completed-record clock follows its newest linked
+registration year. Active rows in `retention_holds` exempt an entity
+and its linked submission/registration family from every automated
+path until released.
 
 ## Authoritative registrations (canonical, #169)
 

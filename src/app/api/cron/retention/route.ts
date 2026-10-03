@@ -55,6 +55,15 @@ export async function GET(request: NextRequest) {
   }
 
   const purgeEnabled = isRetentionPurgeEnabled();
+  // A future as_of on a live run would make receipts/submissions
+  // eligible before their actual deadline — allow it only for
+  // read-only passes.
+  if (!dryRunRequested && purgeEnabled && asOf > todayIsoDate()) {
+    return NextResponse.json(
+      { ok: false, error: "as_of may not be in the future on a live run" },
+      { status: 400 },
+    );
+  }
   if (process.env.VERCEL_ENV === "preview" && !dryRunRequested) {
     return NextResponse.json(
       {

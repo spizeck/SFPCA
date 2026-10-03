@@ -50,7 +50,7 @@ everything.
 | `triggerRebuild` | `functions/index.js` | Cloud Functions v2 | manual `firebase deploy` | same | Cloud Logging |
 | Storage sweep | `src/app/api/cron/sweep-receipts/route.ts`, `src/lib/registry/receipt-sweep.ts`, `src/lib/registry/vet-document-sweep.ts` | Vercel cron (`vercel.json`, daily 06:00 UTC) | automatic with Vercel deploy | Vercel → Deployments → Cron / Functions logs | Vercel → Logs, `subsystem:"receipt-cleanup"` + `subsystem:"vet-doc-cleanup"`; partial failures return 500 |
 | Reminder send | `src/app/api/cron/reminders/route.ts`, `src/lib/registry/reminders.ts`, `src/lib/registry/communications.ts` | Vercel cron (`vercel.json`, daily 12:00 UTC = 08:00 AST) | automatic with Vercel deploy | Vercel → Deployments → Cron; `/admin/communications` | Vercel → Logs, `subsystem:"communications"`; 503 when provider unconfigured |
-| Retention purge | `src/app/api/cron/retention/route.ts`, `src/lib/registry/retention.ts`, `src/lib/retention.ts` | Vercel cron (`vercel.json`, daily 05:30 UTC) | automatic with Vercel deploy; destructive pass requires `RETENTION_PURGE_ENABLED=1` (§30) | Vercel → Deployments → Cron | Vercel → Logs, `subsystem:"retention"`; partial row failures → summary `failed` count + 200, never silent |
+| Retention purge | `src/app/api/cron/retention/route.ts`, `src/lib/registry/retention.ts`, `src/lib/retention.ts` | Vercel cron (`vercel.json`, daily 05:30 UTC) | automatic with Vercel deploy; destructive pass requires `RETENTION_PURGE_ENABLED=true` (§30) | Vercel → Deployments → Cron | Vercel → Logs, `subsystem:"retention"`; partial row failures → summary `failed` count + 500, never silent |
 | Resend webhook | `src/app/api/webhooks/resend/route.ts` | Resend dashboard (endpoint + signing secret) | manual provider config | Resend dashboard → Webhooks | signature failures → 400; no secret → 503 |
 | Firestore rules | `firestore.rules` | Firestore | manual `firebase deploy --only firestore:rules` | Firebase console → Firestore → Rules | denied requests surface as `permission-denied` in app logs |
 | Storage rules | `storage.rules` | Cloud Storage | manual `firebase deploy --only storage` | Firebase console → Storage → Rules | `storage/unauthorized` in app logs |
@@ -2402,7 +2402,7 @@ inline in routes.
 | Uploaded payment receipts (`receipts/`) | 90 days after `receipt_verified_at` | **Delete the Storage object**; `payment_receipt_path` nulled + `receipt_purged_at` stamped; payment/audit facts kept |
 | Pending submissions never decided | 12 months after `submitted_at` | **Delete the row** (plus its receipt object), but only when no registration/payment descends from it |
 | Rejected submissions | 12 months after `decided_at` | Same delete path |
-| `retention_holds` active row | — | Skips the entity (and, for registrations, its linked submission/payment family) in every phase until released |
+| `retention_holds` active row | — | Skips the entity and its linked submission/registration/payment family in every phase until released |
 
 Registration-year end is **December 31 23:59:59.999 UTC** of the
 registration's calendar `year` (`registrationYearEnd`), matching the
@@ -2424,12 +2424,14 @@ Query controls: `?dry_run=1` forces a read-only count pass; `&as_of=YYYY-MM-DD`
 runs "as of" a controlled date for operator review.
 
 **Rollout gate.** Destructive passes require
-`RETENTION_PURGE_ENABLED=1` in the environment. Without it the route
+`RETENTION_PURGE_ENABLED=true` in the environment. Without it the route
 returns a dry-run summary even in production — deploy code first, run
 `/api/cron/retention?dry_run=1` (CRON_SECRET bearer), inspect the
 counts, verify the Privacy Policy text is published, THEN set the env
 var. Preview deployments are **always** dry-run regardless of the env
-var — a preview can never purge.
+var — a preview can never purge. A future `as_of` is rejected (400) on
+live runs — future dates exist only for dry-run previews of what a
+later pass would do.
 
 **Holds.** Staff apply/release holds from the submission detail dialog
 (`/admin/registrations`) or the animal profile's Registrations panel.
@@ -2441,8 +2443,9 @@ unique index). Both mutations are `requireAdmin` server actions.
 **Logging.** Every pass emits one structured summary under
 `subsystem:"retention"` with counts per phase (eligible / purged /
 heldSkipped / linkedSkipped / failed) — never names, emails, receipt
-paths, or entity ids. Row failures log `errorCode` only and the run
-continues; the summary `failed` count is the alarm signal.
+paths, or entity ids. Row failures log `errorCode` only, the run
+continues, and a nonzero `failed` count in the summary makes the route
+return 500 — partial failures are never silent.
 
 **Idempotency.** Eligibility is re-derived from current state every
 run; already-purged receipts (`payment_receipt_path` NULL or

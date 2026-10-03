@@ -29,16 +29,22 @@
 //   receipt that somehow survived to this point is purged with the
 //   record — the binary must never outlive its retention window.
 //
-//   Holds — an active retention_holds row shields an entity (and, for
-//   registrations, the linked submission/payments family) from every
-//   automated path until staff deliberately release it.
+//   Holds — an active retention_holds row shields an entity and its
+//   whole linked submission/registration/payment family from every
+//   automated path until staff deliberately release it. Hold mutations
+//   and destructive work serialize on per-entity advisory locks, and
+//   every destructive transaction re-derives hold state under the lock,
+//   so a hold committed mid-run always wins.
 //
 // Safety rules throughout:
-//   - idempotent: every step re-derives eligibility from current state;
-//     re-running after partial failure converges, never double-acts;
+//   - idempotent: eligibility is re-derived from current state and
+//     every destructive step is an atomic claim; re-running or running
+//     concurrently converges, never double-acts or double-audits;
 //   - fail closed: rows lacking trustworthy timestamps are never
 //     eligible — ambiguity always means "keep";
 //   - bounded: each phase processes at most batchSize rows per run;
+//     held/ineligible rows are filtered in SQL so they cannot starve
+//     the batch;
 //   - no PII in logs: only counts and error codes are emitted — object
 //     names are submission uuids and stay out of every log entry.
 
@@ -53,9 +59,9 @@ import {
   isNull,
   lt,
   lte,
-  notInArray,
   or,
   sql,
+  type SQL,
 } from "drizzle-orm";
 import {
   auditEvents,
@@ -159,6 +165,71 @@ export type HoldResult =
   | { ok: true }
   | { ok: false; reason: "invalid" | "conflict" | "not-found" };
 
+// Transaction-scoped advisory lock serializing hold application
+// against destructive retention writes on the same entity. Both
+// applyRetentionHold and every purge row-operation lock this key, so a
+// hold created while a pass runs is either committed before the pass's
+// recheck (and wins) or ordered after the write — never silently
+// ignored mid-flight.
+async function lockRetentionEntity(
+  tx: Pick<RegistryDb, "execute">,
+  entityType: string,
+  entityId: string,
+): Promise<void> {
+  await tx.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtext(${entityType + ":" + entityId}))`,
+  );
+}
+
+async function activeHoldExists(
+  tx: Pick<RegistryDb, "select">,
+  entityType: RetentionHoldEntityType,
+  entityIds: string[],
+): Promise<boolean> {
+  if (entityIds.length === 0) return false;
+  const [row] = await tx
+    .select({ n: sql<number>`count(*)::int` })
+    .from(retentionHolds)
+    .where(
+      and(
+        eq(retentionHolds.entityType, entityType),
+        inArray(retentionHolds.entityId, entityIds),
+        isNull(retentionHolds.removedAt),
+      ),
+    );
+  return (row?.n ?? 0) > 0;
+}
+
+async function linkedRegistrationIds(
+  tx: Pick<RegistryDb, "select">,
+  submissionId: string,
+): Promise<string[]> {
+  const rows = await tx
+    .select({ id: registrations.id })
+    .from(registrations)
+    .where(eq(registrations.submissionId, submissionId))
+    .orderBy(asc(registrations.id));
+  return rows.map((r) => r.id);
+}
+
+// Lock a submission and its whole registration family, then recheck
+// every active hold against committed state. Returns true when a hold
+// (including one applied mid-pass) protects the row.
+async function familyHeld(
+  tx: Pick<RegistryDb, "select" | "execute">,
+  submissionId: string,
+): Promise<boolean> {
+  await lockRetentionEntity(tx, "registration_submission", submissionId);
+  if (await activeHoldExists(tx, "registration_submission", [submissionId])) {
+    return true;
+  }
+  const regIds = await linkedRegistrationIds(tx, submissionId);
+  for (const regId of regIds) {
+    await lockRetentionEntity(tx, "registration", regId);
+  }
+  return activeHoldExists(tx, "registration", regIds);
+}
+
 async function holdTargetExists(
   tx: Pick<RegistryDb, "select">,
   entityType: RetentionHoldEntityType,
@@ -203,6 +274,8 @@ export async function applyRetentionHold(
 
   try {
     return await db.transaction(async (tx) => {
+      // Serialize with the purge pass: whoever locks first wins.
+      await lockRetentionEntity(tx, entityType, entityId);
       if (!(await holdTargetExists(tx, entityType, entityId))) {
         return { ok: false as const, reason: "not-found" as const };
       }
@@ -254,6 +327,7 @@ export async function releaseRetentionHold(
   }
 
   return db.transaction(async (tx) => {
+    await lockRetentionEntity(tx, entityType, entityId);
     const [hold] = await tx
       .select({ id: retentionHolds.id })
       .from(retentionHolds)
@@ -363,6 +437,39 @@ async function linkedRecordsExist(
   return (pay?.n ?? 0) > 0;
 }
 
+// Hold predicates, shared by every phase's WHERE clause and its
+// heldSkipped count. A submission is protected when an ACTIVE hold sits
+// on the submission itself OR on any registration it produced — a
+// registration hold shields the whole intake family (submission PII,
+// receipt, payment free-text).
+const HELD_SUBMISSION = sql`(
+  EXISTS (
+    SELECT 1 FROM ${retentionHolds} h
+    WHERE h.entity_type = 'registration_submission'
+      AND h.entity_id = ${registrationSubmissions.id}
+      AND h.removed_at IS NULL
+  ) OR EXISTS (
+    SELECT 1 FROM ${retentionHolds} h
+    JOIN ${registrations} r ON r.id = h.entity_id
+    WHERE h.entity_type = 'registration'
+      AND h.removed_at IS NULL
+      AND r.submission_id = ${registrationSubmissions.id}
+  )
+)`;
+
+const NOT_HELD_SUBMISSION = sql`NOT ${HELD_SUBMISSION}`;
+
+async function countSubmissions(
+  db: Pick<RegistryDb, "select">,
+  where: SQL | undefined,
+): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(registrationSubmissions)
+    .where(where);
+  return row?.n ?? 0;
+}
+
 export async function runRetentionPass({
   db = getRegistryDb(),
   bucket,
@@ -405,69 +512,55 @@ export async function runRetentionPass({
     },
   };
 
-  // Active holds up front — one read, then every phase filters in
-  // memory. Bounded by design (holds are a deliberate, rare action).
-  const holdRows = await db
-    .select({
-      entityType: retentionHolds.entityType,
-      entityId: retentionHolds.entityId,
-    })
-    .from(retentionHolds)
-    .where(isNull(retentionHolds.removedAt));
-  const heldSubmissions = new Set(
-    holdRows
-      .filter((h) => h.entityType === "registration_submission")
-      .map((h) => h.entityId),
-  );
-  const heldRegistrations = new Set(
-    holdRows
-      .filter((h) => h.entityType === "registration")
-      .map((h) => h.entityId),
-  );
+  // Skip predicates live in SQL, not in-memory sets: held and already-
+  // handled rows are excluded from every batch, so they can never fill
+  // the bounded batch and starve actionable rows behind them. Each
+  // phase reports skip counts via cheap COUNT queries instead.
 
   // --- Phase 1: verified receipts older than 90 days ---------------------
+  const receiptAgeWhere = and(
+    isNotNull(registrationSubmissions.paymentReceiptPath),
+    isNull(registrationSubmissions.receiptPurgedAt),
+    isNotNull(registrationSubmissions.receiptVerifiedAt),
+    lte(registrationSubmissions.receiptVerifiedAt, verifiedReceiptCutoff(now)),
+  );
+  summary.receipts.heldSkipped = await countSubmissions(
+    db,
+    and(receiptAgeWhere, HELD_SUBMISSION),
+  );
   const receiptRows = await db
     .select({
       id: registrationSubmissions.id,
       paymentReceiptPath: registrationSubmissions.paymentReceiptPath,
     })
     .from(registrationSubmissions)
-    .where(
-      and(
-        isNotNull(registrationSubmissions.paymentReceiptPath),
-        isNull(registrationSubmissions.receiptPurgedAt),
-        isNotNull(registrationSubmissions.receiptVerifiedAt),
-        lte(
-          registrationSubmissions.receiptVerifiedAt,
-          verifiedReceiptCutoff(now),
-        ),
-      ),
-    )
+    .where(and(receiptAgeWhere, NOT_HELD_SUBMISSION))
     .orderBy(asc(registrationSubmissions.receiptVerifiedAt))
     .limit(limit);
 
   for (const row of receiptRows) {
-    if (heldSubmissions.has(row.id)) {
-      summary.receipts.heldSkipped++;
-      continue;
-    }
     const path = row.paymentReceiptPath;
     if (!path) continue; // impossible per WHERE — belt
     summary.receipts.eligible++;
     if (dryRun) continue;
     try {
-      await deleteReceiptObject(bucket, path);
-      const purgedAt = new Date();
-      await db.transaction(async (tx) => {
-        await tx.insert(auditEvents).values({
-          actorLabel: RETENTION_ACTOR,
-          entityType: "registration_submission",
-          entityId: row.id,
-          action: "receipt-retention-purge",
-          before: { receiptPresent: true },
-          after: { receiptPresent: false },
-        });
-        await tx
+      // Claim first, delete second: the row is marked purged inside the
+      // same transaction that rechecks holds (so a mid-run hold can
+      // never lose its receipt), then the object is removed. If the
+      // object call fails after commit the row already says "purged"
+      // and the leftover becomes an unreferenced orphan — the
+      // receipt-sweep cron converges it.
+      const outcome = await db.transaction(async (tx) => {
+        // Serialized with hold application: a hold created mid-run is
+        // either committed before this recheck (and wins) or ordered
+        // after the purge — never silently ignored.
+        if (await familyHeld(tx, row.id)) return "held" as const;
+        // Atomic claim: only the run that actually flips path → NULL
+        // records the purge — concurrent passes converge without
+        // double-counting or double-auditing, and a mid-run path
+        // replacement is never mistaken for our object.
+        const purgedAt = new Date();
+        const claimed = await tx
           .update(registrationSubmissions)
           .set({
             paymentReceiptPath: null,
@@ -479,9 +572,25 @@ export async function runRetentionPass({
               eq(registrationSubmissions.id, row.id),
               eq(registrationSubmissions.paymentReceiptPath, path),
             ),
-          );
+          )
+          .returning();
+        if (claimed.length === 0) return "claimed" as const;
+        await tx.insert(auditEvents).values({
+          actorLabel: RETENTION_ACTOR,
+          entityType: "registration_submission",
+          entityId: row.id,
+          action: "receipt-retention-purge",
+          before: { receiptPresent: true },
+          after: { receiptPresent: false },
+        });
+        return "done" as const;
       });
-      summary.receipts.purged++;
+      if (outcome === "done") {
+        await deleteReceiptObject(bucket, path);
+        summary.receipts.purged++;
+      } else if (outcome === "held") {
+        summary.receipts.heldSkipped++;
+      }
     } catch (error) {
       summary.receipts.failed++;
       log.warn({
@@ -495,6 +604,36 @@ export async function runRetentionPass({
 
   // --- Phase 2: abandoned / unsuccessful submissions ----------------------
   const abandonedCutoff = abandonedSubmissionCutoff(now);
+  const abandonedAgeWhere = or(
+    and(
+      eq(registrationSubmissions.status, "pending"),
+      lte(registrationSubmissions.submittedAt, abandonedCutoff),
+    ),
+    and(
+      eq(registrationSubmissions.status, "rejected"),
+      isNotNull(registrationSubmissions.decidedAt),
+      lte(registrationSubmissions.decidedAt, abandonedCutoff),
+    ),
+  );
+  // A submission that produced canonical descendants is a completed
+  // record, not an abandoned one — the 7-year path owns it.
+  const LINKED_RECORD = sql`(
+    EXISTS (
+      SELECT 1 FROM ${registrations} r
+      WHERE r.submission_id = ${registrationSubmissions.id}
+    ) OR EXISTS (
+      SELECT 1 FROM ${payments} p
+      WHERE p.submission_id = ${registrationSubmissions.id}
+    )
+  )`;
+  summary.abandonedSubmissions.heldSkipped = await countSubmissions(
+    db,
+    and(abandonedAgeWhere, HELD_SUBMISSION),
+  );
+  summary.abandonedSubmissions.linkedSkipped = await countSubmissions(
+    db,
+    and(abandonedAgeWhere, NOT_HELD_SUBMISSION, LINKED_RECORD),
+  );
   const abandonedRows = await db
     .select({
       id: registrationSubmissions.id,
@@ -503,41 +642,33 @@ export async function runRetentionPass({
     })
     .from(registrationSubmissions)
     .where(
-      or(
-        and(
-          eq(registrationSubmissions.status, "pending"),
-          lte(registrationSubmissions.submittedAt, abandonedCutoff),
-        ),
-        and(
-          eq(registrationSubmissions.status, "rejected"),
-          isNotNull(registrationSubmissions.decidedAt),
-          lte(registrationSubmissions.decidedAt, abandonedCutoff),
-        ),
+      and(
+        abandonedAgeWhere,
+        NOT_HELD_SUBMISSION,
+        sql`NOT ${LINKED_RECORD}`,
       ),
     )
     .orderBy(asc(registrationSubmissions.submittedAt))
     .limit(limit);
 
   for (const row of abandonedRows) {
-    if (heldSubmissions.has(row.id)) {
-      summary.abandonedSubmissions.heldSkipped++;
-      continue;
-    }
+    summary.abandonedSubmissions.eligible++;
+    if (dryRun) continue;
     try {
-      // A submission that produced canonical descendants is a completed
-      // record, not an abandoned one — the 7-year path owns it.
-      if (await linkedRecordsExist(db, row.id)) {
-        summary.abandonedSubmissions.linkedSkipped++;
-        continue;
-      }
-      summary.abandonedSubmissions.eligible++;
-      if (dryRun) continue;
-      if (row.paymentReceiptPath) {
-        await deleteReceiptObject(bucket, row.paymentReceiptPath);
-      }
-      await db.transaction(async (tx) => {
-        // The audit row is written first and survives the delete —
-        // entity_id is text precisely so history can outlive the row.
+      const outcome = await db.transaction(async (tx) => {
+        if (await familyHeld(tx, row.id)) return "held" as const;
+        // A canonical descendant may have materialized mid-run — the
+        // recheck runs under the entity lock.
+        if (await linkedRecordsExist(tx, row.id)) {
+          return "linked" as const;
+        }
+        const deleted = await tx
+          .delete(registrationSubmissions)
+          .where(eq(registrationSubmissions.id, row.id))
+          .returning();
+        if (deleted.length === 0) return "claimed" as const;
+        // The audit row survives the delete — entity_id is text
+        // precisely so history can outlive the row.
         await tx.insert(auditEvents).values({
           actorLabel: RETENTION_ACTOR,
           entityType: "registration_submission",
@@ -546,11 +677,18 @@ export async function runRetentionPass({
           before: { status: row.status },
           after: null,
         });
-        await tx
-          .delete(registrationSubmissions)
-          .where(eq(registrationSubmissions.id, row.id));
+        return "done" as const;
       });
-      summary.abandonedSubmissions.deleted++;
+      if (outcome === "done") {
+        if (row.paymentReceiptPath) {
+          await deleteReceiptObject(bucket, row.paymentReceiptPath);
+        }
+        summary.abandonedSubmissions.deleted++;
+      } else if (outcome === "held") {
+        summary.abandonedSubmissions.heldSkipped++;
+      } else if (outcome === "linked") {
+        summary.abandonedSubmissions.linkedSkipped++;
+      }
     } catch (error) {
       summary.abandonedSubmissions.failed++;
       log.warn({
@@ -564,105 +702,76 @@ export async function runRetentionPass({
 
   // --- Phase 3: completed records past the 7-year window ------------------
   const maxYear = maxCompletedRetentionYear(now);
-  // The submission-year equivalent: submitted_at earlier than the first
-  // day AFTER the last eligible year.
+  // The timestamp equivalent for registration-less payments: occurred_at
+  // earlier than the first day AFTER the last eligible year.
   const submittedBefore = new Date(Date.UTC(maxYear + 1, 0, 1));
+  const HELD_REGISTRATION = sql`EXISTS (
+    SELECT 1 FROM ${retentionHolds} h
+    WHERE h.entity_type = 'registration'
+      AND h.entity_id = ${registrations.id}
+      AND h.removed_at IS NULL
+  )`;
 
   const [eligibleRegs] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(registrations)
     .where(lte(registrations.year, maxYear));
   summary.completedRecords.registrationsEligible = eligibleRegs?.n ?? 0;
-  summary.completedRecords.registrationsHeld = heldRegistrations.size
-    ? (
-        await db
-          .select({ n: sql<number>`count(*)::int` })
-          .from(registrations)
-          .where(
-            and(
-              lte(registrations.year, maxYear),
-              inArray(registrations.id, [...heldRegistrations]),
-            ),
-          )
-      )[0]?.n ?? 0
-    : 0;
+  const [heldRegs] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(registrations)
+    .where(and(lte(registrations.year, maxYear), HELD_REGISTRATION));
+  summary.completedRecords.registrationsHeld = heldRegs?.n ?? 0;
 
-  // 3a — submission PII anonymization. Eligible when the submission's
-  // own year is inside the window AND no linked registration still
-  // retains a newer year (a 2018 intake backfilled into a 2019
-  // registration follows 2019's window). Already-anonymized rows are
-  // excluded by the PII-present predicate — reruns are no-ops.
+  // 3a — submission PII anonymization. The clock is the record's
+  // APPLICABLE year: the newest linked registration year, or the
+  // submission's own year when it produced none — a 2018 intake that
+  // became a 2026 registration follows 2026's window, and a late-
+  // submitted intake for an old year follows that year's window.
+  // Already-anonymized rows are excluded by the PII-present predicate —
+  // reruns are no-ops.
+  const anchorYear = sql`COALESCE(
+    (SELECT max(r.year) FROM ${registrations} r
+     WHERE r.submission_id = ${registrationSubmissions.id}),
+    EXTRACT(YEAR FROM ${registrationSubmissions.submittedAt})::int
+  )`;
+  const piiPresent = or(
+    isNotNull(registrationSubmissions.ownerAddress),
+    isNotNull(registrationSubmissions.ownerPhone),
+    isNotNull(registrationSubmissions.ownerEmail),
+    sql`${registrationSubmissions.ownerName} <> ${ANONYMIZED_OWNER_NAME}`,
+    isNotNull(registrationSubmissions.paymentReceiptPath),
+  );
+  const completedAgeWhere = and(
+    piiPresent,
+    sql`${anchorYear} <= ${maxYear}`,
+  );
+  summary.completedRecords.heldSkipped = await countSubmissions(
+    db,
+    and(completedAgeWhere, HELD_SUBMISSION),
+  );
   const expiredSubmissions = await db
     .select({
       id: registrationSubmissions.id,
-      status: registrationSubmissions.status,
       paymentReceiptPath: registrationSubmissions.paymentReceiptPath,
     })
     .from(registrationSubmissions)
-    .where(
-      and(
-        lt(registrationSubmissions.submittedAt, submittedBefore),
-        or(
-          isNotNull(registrationSubmissions.ownerAddress),
-          isNotNull(registrationSubmissions.ownerPhone),
-          isNotNull(registrationSubmissions.ownerEmail),
-          sql`${registrationSubmissions.ownerName} <> ${ANONYMIZED_OWNER_NAME}`,
-          isNotNull(registrationSubmissions.paymentReceiptPath),
-        ),
-        sql`NOT EXISTS (
-          SELECT 1 FROM ${registrations} r
-          WHERE r.submission_id = ${registrationSubmissions.id}
-            AND r.year > ${maxYear}
-        )`,
-      ),
-    )
+    .where(and(completedAgeWhere, NOT_HELD_SUBMISSION))
     .orderBy(asc(registrationSubmissions.submittedAt))
     .limit(limit);
 
   for (const row of expiredSubmissions) {
-    if (heldSubmissions.has(row.id)) {
-      summary.completedRecords.heldSkipped++;
+    if (dryRun) {
+      summary.completedRecords.submissionsAnonymized++;
       continue;
     }
     try {
-      // A hold on any linked registration protects the submission's PII
-      // too — the intake record is evidence for that registration.
-      const linkedHeld = heldRegistrations.size
-        ? (
-            await db
-              .select({ n: sql<number>`count(*)::int` })
-              .from(registrations)
-              .where(
-                and(
-                  eq(registrations.submissionId, row.id),
-                  inArray(registrations.id, [...heldRegistrations]),
-                ),
-              )
-          )[0]?.n ?? 0
-        : 0;
-
-      if (linkedHeld > 0) {
-        summary.completedRecords.heldSkipped++;
-        continue;
-      }
-      if (dryRun) {
-        summary.completedRecords.submissionsAnonymized++;
-        continue;
-      }
-      if (row.paymentReceiptPath) {
-        await deleteReceiptObject(bucket, row.paymentReceiptPath);
-      }
-      const purgedAt = new Date();
-      await db.transaction(async (tx) => {
-        await tx.insert(auditEvents).values({
-          actorLabel: RETENTION_ACTOR,
-          entityType: "registration_submission",
-          entityId: row.id,
-          action: "retention-anonymize",
-          before: { ownerPii: "present" },
-          after: { ownerPii: "removed" },
-        });
-        await tx
+      const outcome = await db.transaction(async (tx) => {
+        if (await familyHeld(tx, row.id)) return "held" as const;
+        // PII-present in the WHERE is the atomic claim: a concurrent
+        // pass that anonymized first leaves nothing to claim.
+        const purgedAt = new Date();
+        const claimed = await tx
           .update(registrationSubmissions)
           .set({
             ownerName: ANONYMIZED_OWNER_NAME,
@@ -675,9 +784,27 @@ export async function runRetentionPass({
               : {}),
             updatedAt: purgedAt,
           })
-          .where(eq(registrationSubmissions.id, row.id));
+          .where(and(eq(registrationSubmissions.id, row.id), piiPresent))
+          .returning();
+        if (claimed.length === 0) return "claimed" as const;
+        await tx.insert(auditEvents).values({
+          actorLabel: RETENTION_ACTOR,
+          entityType: "registration_submission",
+          entityId: row.id,
+          action: "retention-anonymize",
+          before: { ownerPii: "present" },
+          after: { ownerPii: "removed" },
+        });
+        return "done" as const;
       });
-      summary.completedRecords.submissionsAnonymized++;
+      if (outcome === "done") {
+        if (row.paymentReceiptPath) {
+          await deleteReceiptObject(bucket, row.paymentReceiptPath);
+        }
+        summary.completedRecords.submissionsAnonymized++;
+      } else if (outcome === "held") {
+        summary.completedRecords.heldSkipped++;
+      }
     } catch (error) {
       summary.completedRecords.failed++;
       log.warn({
@@ -691,52 +818,62 @@ export async function runRetentionPass({
 
   // 3b — registration free-text fields. The row itself is canonical
   // animal history and stays; notes are the only place stray PII can
-  // hide. Held registrations are excluded from the update entirely.
-  const registrationWhere = and(
-    lte(registrations.year, maxYear),
-    or(
-      isNotNull(registrations.notes),
-      isNotNull(registrations.resolutionNote),
-      isNotNull(registrations.cancellationNote),
-    ),
-    heldRegistrations.size
-      ? notInArray(registrations.id, [...heldRegistrations])
-      : undefined,
-  );
-  if (dryRun) {
-    const [r] = await db
-      .select({ n: sql<number>`count(*)::int` })
-      .from(registrations)
-      .where(registrationWhere);
-    summary.completedRecords.registrationsAnonymized = r?.n ?? 0;
-  } else {
-    try {
-      const updated = await db
-        .update(registrations)
-        .set({
-          notes: null,
-          resolutionNote: null,
-          cancellationNote: null,
-          updatedAt: new Date(),
-        })
-        .where(registrationWhere)
-        .returning();
-      summary.completedRecords.registrationsAnonymized = updated.length;
-    } catch (error) {
-      summary.completedRecords.failed++;
-      log.warn({
-        ...base,
-        phase: "completed-registrations",
-        outcome: "batch-failed",
-        errorCode: errorCode(error),
-      });
+  // hide. Held registrations are excluded from the selection so they
+  // cannot starve the batch; the same predicate rides the UPDATE as a
+  // committed-state recheck for mid-run holds.
+  const regBatch = await db
+    .select({ id: registrations.id })
+    .from(registrations)
+    .where(
+      and(
+        lte(registrations.year, maxYear),
+        or(
+          isNotNull(registrations.notes),
+          isNotNull(registrations.resolutionNote),
+          isNotNull(registrations.cancellationNote),
+        ),
+        sql`NOT ${HELD_REGISTRATION}`,
+      ),
+    )
+    .orderBy(asc(registrations.id))
+    .limit(limit);
+  const regIds = regBatch.map((r) => r.id);
+  if (regIds.length > 0) {
+    const regUpdateWhere = and(
+      inArray(registrations.id, regIds),
+      sql`NOT ${HELD_REGISTRATION}`,
+    );
+    if (dryRun) {
+      summary.completedRecords.registrationsAnonymized = regIds.length;
+    } else {
+      try {
+        const updated = await db
+          .update(registrations)
+          .set({
+            notes: null,
+            resolutionNote: null,
+            cancellationNote: null,
+            updatedAt: new Date(),
+          })
+          .where(regUpdateWhere)
+          .returning();
+        summary.completedRecords.registrationsAnonymized = updated.length;
+      } catch (error) {
+        summary.completedRecords.failed++;
+        log.warn({
+          ...base,
+          phase: "completed-registrations",
+          outcome: "batch-failed",
+          errorCode: errorCode(error),
+        });
+      }
     }
   }
 
   // 3c — payment reference/note fields on expired registrations plus
   // orphan payments aged by their own occurrence year. Ledger facts
   // (amount, status, method, linkage, occurred_at) are preserved.
-  const paymentWhere = and(
+  const paymentFreeTextWhere = and(
     or(isNotNull(payments.reference), isNotNull(payments.note)),
     or(
       and(
@@ -750,35 +887,45 @@ export async function runRetentionPass({
         lt(payments.occurredAt, submittedBefore),
       ),
     ),
-    heldRegistrations.size
-      ? or(
-          isNull(payments.registrationId),
-          notInArray(payments.registrationId, [...heldRegistrations]),
-        )
-      : undefined,
+    // A hold on the payment's registration shields it too.
+    sql`NOT EXISTS (
+      SELECT 1 FROM ${retentionHolds} h
+      WHERE h.entity_type = 'registration'
+        AND h.entity_id = ${payments.registrationId}
+        AND h.removed_at IS NULL
+    )`,
   );
-  if (dryRun) {
-    const [p] = await db
-      .select({ n: sql<number>`count(*)::int` })
-      .from(payments)
-      .where(paymentWhere);
-    summary.completedRecords.paymentsAnonymized = p?.n ?? 0;
-  } else {
-    try {
-      const updated = await db
-        .update(payments)
-        .set({ reference: null, note: null, updatedAt: new Date() })
-        .where(paymentWhere)
-        .returning();
-      summary.completedRecords.paymentsAnonymized = updated.length;
-    } catch (error) {
-      summary.completedRecords.failed++;
-      log.warn({
-        ...base,
-        phase: "completed-payments",
-        outcome: "batch-failed",
-        errorCode: errorCode(error),
-      });
+  const payBatch = await db
+    .select({ id: payments.id })
+    .from(payments)
+    .where(paymentFreeTextWhere)
+    .orderBy(asc(payments.id))
+    .limit(limit);
+  const payIds = payBatch.map((p) => p.id);
+  if (payIds.length > 0) {
+    const payUpdateWhere = and(
+      inArray(payments.id, payIds),
+      paymentFreeTextWhere,
+    );
+    if (dryRun) {
+      summary.completedRecords.paymentsAnonymized = payIds.length;
+    } else {
+      try {
+        const updated = await db
+          .update(payments)
+          .set({ reference: null, note: null, updatedAt: new Date() })
+          .where(payUpdateWhere)
+          .returning();
+        summary.completedRecords.paymentsAnonymized = updated.length;
+      } catch (error) {
+        summary.completedRecords.failed++;
+        log.warn({
+          ...base,
+          phase: "completed-payments",
+          outcome: "batch-failed",
+          errorCode: errorCode(error),
+        });
+      }
     }
   }
 

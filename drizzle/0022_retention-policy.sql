@@ -21,10 +21,13 @@ ALTER TABLE "retention_holds" ADD CONSTRAINT "retention_holds_removed_by_identit
 CREATE UNIQUE INDEX "retention_holds_active_key" ON "retention_holds" USING btree ("entity_type","entity_id") WHERE "retention_holds"."removed_at" IS NULL;--> statement-breakpoint
 CREATE INDEX "retention_holds_entity_idx" ON "retention_holds" USING btree ("entity_type","entity_id");--> statement-breakpoint
 -- Backfill the verification stamp for existing receipts (#130). Staff
--- approval and payment confirmation are the only trustworthy
+-- approval and confirmed payments are the only trustworthy
 -- verification signals ever recorded; the stamp is the EARLIEST of the
--- two. Rows with neither stay NULL — an unverifiable timestamp fails
--- closed and the receipt is simply never 90-day purge-eligible.
+-- two. Manual payments insert directly as 'confirmed' with only a
+-- 'recorded' event, so both event shapes count — restricted to
+-- confirmed payment rows. Rows with neither stay NULL — an
+-- unverifiable timestamp fails closed and the receipt is simply never
+-- 90-day purge-eligible.
 UPDATE "registration_submissions" s
 SET "receipt_verified_at" = LEAST(
 	CASE WHEN s."status" = 'approved' THEN s."decided_at" END,
@@ -32,7 +35,10 @@ SET "receipt_verified_at" = LEAST(
 		SELECT min(pe."created_at")
 		FROM "payment_events" pe
 		JOIN "payments" p ON p."id" = pe."payment_id"
-		WHERE p."submission_id" = s."id" AND pe."event" = 'confirmed'
+		WHERE p."submission_id" = s."id"
+		  AND p."kind" = 'payment' AND p."status" = 'confirmed'
+		  AND (pe."event" = 'confirmed'
+		       OR (pe."event" = 'recorded' AND pe."detail"->>'status' = 'confirmed'))
 	)
 )
 WHERE s."payment_receipt_path" IS NOT NULL;

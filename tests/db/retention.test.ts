@@ -331,6 +331,29 @@ describe("abandoned / unsuccessful submissions (12 months)", () => {
     await pass();
     expect(await getSubmission(s.id)).not.toBeNull();
   });
+
+  test("a held abandoned submission cannot starve the batch", async () => {
+    // The held row is the oldest — filtered in SQL it cannot occupy
+    // the batch of 1 and starve the actionable row behind it.
+    const held = await seedSubmission({
+      submittedAt: new Date("2024-01-01T00:00:00Z"),
+    });
+    const free = await seedSubmission({
+      submittedAt: new Date("2025-01-01T00:00:00Z"),
+    });
+    await applyRetentionHold(
+      "registration_submission",
+      held.id,
+      "audit",
+      "staff",
+      null,
+      db,
+    );
+    const summary = await pass({ batchSize: 1 });
+    expect(summary.abandonedSubmissions.deleted).toBe(1);
+    expect(await getSubmission(free.id)).toBeNull();
+    expect(await getSubmission(held.id)).not.toBeNull();
+  });
 });
 
 describe("completed records (7 years after year end)", () => {
@@ -437,6 +460,70 @@ describe("completed records (7 years after year end)", () => {
     const second = await pass();
     expect(second.completedRecords.submissionsAnonymized).toBe(0);
   });
+
+  test("the clock follows the newest linked registration year", async () => {
+    // Intake submitted in 2018 but linked to a 2026 registration —
+    // retention follows 2026's window, not the intake date.
+    const s = await seedSubmission({
+      status: "approved",
+      submittedAt: new Date("2018-06-01T00:00:00Z"),
+      decidedAt: new Date("2018-06-02T00:00:00Z"),
+    });
+    await seedRegistration(s.id, 2026);
+    const summary = await pass();
+    expect(summary.completedRecords.submissionsAnonymized).toBe(0);
+    expect((await getSubmission(s.id))!.ownerName).toBe(OWNER.ownerName);
+  });
+
+  test("a submission with no linked registration ages by its own year", async () => {
+    const s = await seedSubmission({
+      status: "approved",
+      submittedAt: new Date("2018-06-01T00:00:00Z"),
+      decidedAt: new Date("2018-06-02T00:00:00Z"),
+    });
+    const summary = await pass();
+    expect(summary.completedRecords.submissionsAnonymized).toBe(1);
+    expect((await getSubmission(s.id))!.ownerName).toBe(
+      ANONYMIZED_OWNER_NAME,
+    );
+  });
+
+  test("held registrations are excluded from bounded anonymization batches", async () => {
+    // Held registration has notes and is older; the free one must
+    // still be anonymized in the same bounded batch.
+    const heldSub = await seedSubmission({
+      status: "approved",
+      submittedAt: new Date("2018-01-01T00:00:00Z"),
+    });
+    const heldReg = await seedRegistration(heldSub.id, 2018);
+    const freeSub = await seedSubmission({
+      status: "approved",
+      submittedAt: new Date("2018-02-01T00:00:00Z"),
+    });
+    const freeReg = await seedRegistration(freeSub.id, 2018);
+    for (const reg of [heldReg, freeReg]) {
+      await db
+        .update(schema.registrations)
+        .set({ notes: "stray detail" })
+        .where(eq(schema.registrations.id, reg.id));
+    }
+    await applyRetentionHold(
+      "registration",
+      heldReg.id,
+      "legal",
+      "staff",
+      null,
+      db,
+    );
+    const summary = await pass({ batchSize: 1 });
+    expect(summary.completedRecords.registrationsAnonymized).toBe(1);
+    const rows = await db.select().from(schema.registrations);
+    expect(
+      rows.find((r) => r.id === heldReg.id)!.notes,
+    ).toBe("stray detail");
+    expect(rows.find((r) => r.id === freeReg.id)!.notes).toBeNull();
+    expect(summary.completedRecords.registrationsHeld).toBe(1);
+  });
 });
 
 describe("retention holds", () => {
@@ -495,6 +582,66 @@ describe("retention holds", () => {
     expect(summary.completedRecords.heldSkipped).toBeGreaterThanOrEqual(1);
     expect((await getSubmission(s.id))!.ownerEmail).toBe(
       OWNER.ownerEmail,
+    );
+  });
+
+  test("a held registration shields the linked submission's receipt", async () => {
+    // The receipt's 90-day window expired, but a registration-level
+    // hold protects the whole intake family — including the receipt.
+    const s = await seedSubmission({
+      status: "approved",
+      decidedAt: new Date("2026-06-02T00:00:00Z"),
+      paymentReceiptPath: "receipts/family-held",
+      receiptVerifiedAt: new Date("2026-06-01T00:00:00Z"),
+    });
+    const reg = await seedRegistration(s.id, 2026);
+    await applyRetentionHold(
+      "registration",
+      reg.id,
+      "dispute",
+      "staff@example.com",
+      null,
+      db,
+    );
+    const bucket = fakeBucket();
+    const summary = await pass({ bucket });
+    expect(summary.receipts.purged).toBe(0);
+    expect(summary.receipts.heldSkipped).toBe(1);
+    expect(bucket.deleted).toHaveLength(0);
+    expect((await getSubmission(s.id))!.paymentReceiptPath).toBe(
+      "receipts/family-held",
+    );
+  });
+
+  test("a held row cannot starve the batch", async () => {
+    // Held receipt is the OLDEST eligible-aged row — filtered in SQL,
+    // it cannot occupy the batch of 1 and starve the actionable rows.
+    const held = await seedSubmission({
+      status: "approved",
+      decidedAt: new Date("2026-05-02T00:00:00Z"),
+      paymentReceiptPath: "receipts/held",
+      receiptVerifiedAt: new Date("2026-05-01T00:00:00Z"),
+    });
+    await seedSubmission({
+      status: "approved",
+      decidedAt: new Date("2026-06-02T00:00:00Z"),
+      paymentReceiptPath: "receipts/free",
+      receiptVerifiedAt: new Date("2026-06-01T00:00:00Z"),
+    });
+    await applyRetentionHold(
+      "registration_submission",
+      held.id,
+      "audit",
+      "staff",
+      null,
+      db,
+    );
+    const bucket = fakeBucket();
+    const summary = await pass({ bucket, batchSize: 1 });
+    expect(summary.receipts.purged).toBe(1);
+    expect(bucket.deleted).toEqual(["receipts/free"]);
+    expect((await getSubmission(held.id))!.paymentReceiptPath).toBe(
+      "receipts/held",
     );
   });
 

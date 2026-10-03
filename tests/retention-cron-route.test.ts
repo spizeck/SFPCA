@@ -83,6 +83,20 @@ describe("GET /api/cron/retention", () => {
     expect(mockRunPass).not.toHaveBeenCalled();
   });
 
+  test("a future as_of is rejected on live runs but allowed for dry runs", async () => {
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("RETENTION_PURGE_ENABLED", "true");
+    const live = await GET(authed("?as_of=2999-01-01"));
+    expect(live.status).toBe(400);
+    expect(mockRunPass).not.toHaveBeenCalled();
+
+    const dry = await GET(authed("?as_of=2999-01-01&dry_run=1"));
+    expect(dry.status).toBe(200);
+    expect(mockRunPass).toHaveBeenCalledWith(
+      expect.objectContaining({ dryRun: true }),
+    );
+  });
+
   test("preview deployments can never purge — even with the flag set", async () => {
     vi.stubEnv("VERCEL_ENV", "preview");
     vi.stubEnv("RETENTION_PURGE_ENABLED", "true");
