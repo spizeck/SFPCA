@@ -47,6 +47,49 @@ export default function PrivacyPage() {
         </section>
 
         <section className="space-y-4 mb-10">
+          <h2 className="text-2xl font-semibold">Registration data retention</h2>
+          <p>
+            When you register an animal with SFPCA we keep your
+            information only for defined periods:
+          </p>
+          <ul className="list-disc pl-6 space-y-2">
+            <li>
+              <strong>Completed registrations and payments</strong> —
+              kept for 7 years after the end of the registration year
+              they belong to. After that, the personal details on the
+              original submission are removed while the animal&apos;s
+              registration and payment history is kept as part of the
+              registry&apos;s records.
+            </li>
+            <li>
+              <strong>Payment receipts</strong> — the receipt file you
+              upload is used to verify and reconcile your payment, then
+              deleted 90 days after it has been verified. The payment
+              itself — amount, date, and status — stays on record.
+            </li>
+            <li>
+              <strong>Registrations that were never completed</strong> —
+              a submission that is left unfinished or is not approved is
+              kept for up to 12 months and then deleted.
+            </li>
+            <li>
+              <strong>Animal and owner records</strong> — your
+              animal&apos;s registry entry and its ownership, licensing,
+              and veterinary history may be kept while they are needed
+              to provide SFPCA services and maintain accurate animal
+              records.
+            </li>
+            <li>
+              <strong>Exceptions</strong> — some information may be kept
+              longer when necessary for a legal obligation, an active
+              dispute, a fraud or security investigation, an accounting
+              or audit requirement, or another documented record-keeping
+              need.
+            </li>
+          </ul>
+        </section>
+
+        <section className="space-y-4 mb-10">
           <h2 className="text-2xl font-semibold">Error monitoring</h2>
           <p>
             Separately from analytics, the site uses Sentry to detect
@@ -59,10 +102,11 @@ export default function PrivacyPage() {
         </section>
 
         <section className="space-y-4">
-          <h2 className="text-2xl font-semibold">Questions</h2>
+          <h2 className="text-2xl font-semibold">Questions and requests</h2>
           <p>
-            For questions about your data — including anything submitted
-            through registration or contact forms — please reach out via the{" "}
+            To ask about your data — including access, correction, or
+            deletion of your personal information, subject to the records
+            SFPCA needs to keep — please reach out via the{" "}
             <a href="/contact" className="text-primary underline underline-offset-4">
               contact page
             </a>

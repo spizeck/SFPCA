@@ -49,6 +49,7 @@ import {
 } from "../payments";
 import { isRegistrationResolution } from "../registrations";
 import { isIsoDateString } from "../vaccinations";
+import { stampReceiptVerified } from "./retention";
 import type { RegistryDb } from "./public-animals";
 
 const UUID_RE =
@@ -518,6 +519,11 @@ export async function recordManualPayment(
           status,
         },
       });
+      // A confirmed payment against the submission verifies its
+      // receipt — the 90-day retention clock starts here (#130).
+      if (status === "confirmed" && reg.submissionId) {
+        await stampReceiptVerified(tx, reg.submissionId);
+      }
       return {
         ok: true as const,
         paymentId: payment.id,
@@ -611,6 +617,9 @@ export async function confirmPayment(
       before: { status: "pending" },
       after: { status: "confirmed" },
     });
+    if (row.submissionId) {
+      await stampReceiptVerified(tx, row.submissionId);
+    }
 
     const reg = row.registrationId
       ? await lockRegistration(tx, row.registrationId)
@@ -1132,6 +1141,9 @@ export async function reconcileProviderOutcome(
       source: "provider",
       detail: { from: "pending", to: input.outcome, ...input.detail },
     });
+    if (input.outcome === "confirmed" && payment.submissionId) {
+      await stampReceiptVerified(tx, payment.submissionId);
+    }
     return {
       ok: true as const,
       paymentId: payment.id,

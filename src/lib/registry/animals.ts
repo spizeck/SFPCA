@@ -88,6 +88,10 @@ import {
   type PaymentEventRecord,
   type PaymentRecord,
 } from "./payments";
+import {
+  listActiveHoldsFor,
+  type RetentionHoldRecord,
+} from "./retention";
 import type { RegistryDb } from "./public-animals";
 
 // Admin DTO — all animals columns are staff-safe (no owner data lives on
@@ -893,6 +897,9 @@ export interface AnimalRegistryContext {
   // Append-only reconciliation history for those rows (#170) — who/
   // what transitioned each transaction and when.
   paymentEvents: PaymentEventRecord[];
+  // Active retention holds on this animal's registrations (#130) —
+  // staff see which completed records are exempted from cleanup.
+  retentionHolds: RetentionHoldRecord[];
   documents: {
     id: string;
     label: string;
@@ -964,6 +971,11 @@ export async function getAnimalRegistryContext(
     paymentRows.map((p) => p.id),
     db,
   );
+  const retentionHoldMap = await listActiveHoldsFor(
+    "registration",
+    registrationRows.map((r) => r.id),
+    db,
+  );
 
   return {
     microchips: chipRows,
@@ -972,6 +984,7 @@ export async function getAnimalRegistryContext(
     registrations: registrationRows,
     payments: paymentRows,
     paymentEvents,
+    retentionHolds: [...retentionHoldMap.values()],
     documents: documentRows.map((r) => ({
       ...r,
       createdAt: r.createdAt.toISOString(),

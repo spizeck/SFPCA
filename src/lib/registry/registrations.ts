@@ -63,6 +63,7 @@ import {
 } from "../payments";
 import { currentOwnershipSq } from "./ownership";
 import { moneyByRegistration, recordManualPayment } from "./payments";
+import { stampReceiptVerified } from "./retention";
 import type { RegistryDb } from "./public-animals";
 
 export interface AdminRegistrationSubmission {
@@ -74,6 +75,8 @@ export interface AdminRegistrationSubmission {
   ownerEmail: string | null;
   animals: RegistrationAnimalInput[];
   paymentReceiptPath: string | null;
+  receiptVerifiedAt: string | null;
+  receiptPurgedAt: string | null;
   totalFeeCents: number;
   currency: string;
   status: string;
@@ -91,6 +94,8 @@ const SUBMISSION_COLUMNS = {
   ownerEmail: registrationSubmissions.ownerEmail,
   animals: registrationSubmissions.animals,
   paymentReceiptPath: registrationSubmissions.paymentReceiptPath,
+  receiptVerifiedAt: registrationSubmissions.receiptVerifiedAt,
+  receiptPurgedAt: registrationSubmissions.receiptPurgedAt,
   totalFeeCents: registrationSubmissions.totalFeeCents,
   currency: registrationSubmissions.currency,
   status: registrationSubmissions.status,
@@ -112,6 +117,8 @@ function toSubmissionDto(
       : [],
     submittedAt: row.submittedAt.toISOString(),
     decidedAt: row.decidedAt?.toISOString() ?? null,
+    receiptVerifiedAt: row.receiptVerifiedAt?.toISOString() ?? null,
+    receiptPurgedAt: row.receiptPurgedAt?.toISOString() ?? null,
     updatedAt: row.updatedAt.toISOString(),
   };
 }
@@ -246,6 +253,12 @@ export async function updateSubmissionStatus(
       before: { status: before.status },
       after: { status },
     });
+    // Staff approval is a verification signal for the receipt — the
+    // 90-day retention clock starts here if no earlier confirmed
+    // payment set it (#130). Stamps inside this transaction.
+    if (status === "approved") {
+      await stampReceiptVerified(tx, id);
+    }
     return { ok: true, submission: toSubmissionDto(row) };
   });
 }

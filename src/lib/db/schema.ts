@@ -530,6 +530,21 @@ export const registrationSubmissions = pgTable(
     // one — a known submission id alone must not entitle a caller to
     // attach an object to somebody else's record.
     receiptRequested: boolean("receipt_requested").notNull().default(false),
+    // Retention stamps (#130). receipt_verified_at is the server-side
+    // stamp set when the receipt was verified/reconciled (submission
+    // approval or first confirmed payment — first-writer-wins); the
+    // 90-day receipt purge clock runs from it. NULL fails closed: the
+    // receipt is never purge-eligible. receipt_purged_at marks the
+    // deliberate binary removal — the row knows the object is
+    // intentionally gone rather than broken.
+    receiptVerifiedAt: timestamp("receipt_verified_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    receiptPurgedAt: timestamp("receipt_purged_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
     totalFeeCents: integer("total_fee_cents").notNull().default(0),
     currency: text("currency").notNull().default("USD"),
     status: text("status").notNull().default("pending"),
@@ -1795,6 +1810,54 @@ export const auditEvents = pgTable(
   (t) => [
     index("audit_events_entity_idx").on(t.entityType, t.entityId),
     index("audit_events_created_idx").on(t.createdAt),
+  ],
+);
+
+// --- Retention holds (#130) --------------------------------------------------
+// The deliberate exemption from automated retention cleanup. An active
+// hold (removed_at IS NULL) shields its entity — and, for registrations,
+// the linked submission/payments family — from every purge/anonymize
+// path in the retention service until a staff member releases it. The
+// row is never deleted: release stamps removed_* so hold history stays
+// auditable. One active hold per entity is enforced by the partial
+// unique index.
+export const retentionHolds = pgTable(
+  "retention_holds",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    entityType: text("entity_type").notNull(),
+    entityId: uuid("entity_id").notNull(),
+    reason: text("reason").notNull(),
+    createdByLabel: text("created_by_label").notNull(),
+    createdByIdentityId: uuid("created_by_identity_id").references(
+      () => authIdentities.id,
+      { onDelete: "set null" },
+    ),
+    createdAt: createdAt(),
+    removedAt: timestamp("removed_at", { withTimezone: true, mode: "date" }),
+    removedByLabel: text("removed_by_label"),
+    removedByIdentityId: uuid("removed_by_identity_id").references(
+      () => authIdentities.id,
+      { onDelete: "set null" },
+    ),
+  },
+  (t) => [
+    uniqueIndex("retention_holds_active_key")
+      .on(t.entityType, t.entityId)
+      .where(sql`${t.removedAt} IS NULL`),
+    index("retention_holds_entity_idx").on(t.entityType, t.entityId),
+    check(
+      "retention_holds_entity_type_check",
+      sql`${t.entityType} IN ('registration_submission','registration')`,
+    ),
+    check(
+      "retention_holds_reason_check",
+      sql`length(btrim(${t.reason})) > 0`,
+    ),
+    check(
+      "retention_holds_removed_consistency_check",
+      sql`(${t.removedAt} IS NULL) = (${t.removedByLabel} IS NULL)`,
+    ),
   ],
 );
 
