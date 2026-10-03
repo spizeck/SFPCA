@@ -26,7 +26,7 @@ entire demo footprint is removed and verified clean.
 
 ## The lifecycle
 
-`app_state` (single-row Postgres table, migration `0022`) is the durable
+`app_state` (single-row Postgres table, migration `0023`) is the durable
 deployment lifecycle:
 
 - `prelaunch-demo` — the demo tooling may run; banner + noindex + email
@@ -88,7 +88,7 @@ successfully verify it is not the production primary endpoint.
    build time, so a deploy made before the variable exists keeps the
    `production` label for the whole demo window. Also ensure
    `SITE_MAINTENANCE_MODE` is **off** so the board can reach the site.
-2. **Deploy** the reviewed build including migration `0022` — the
+2. **Deploy** the reviewed build including migration `0023` — the
    `app_state` row is created as `prelaunch-demo` automatically.
 3. **Operator env** (`.env.local`): `DATABASE_URL`/`DATABASE_URL_UNPOOLED`,
    `FIREBASE_ADMIN_*`, `NEON_API_KEY`, `ADMIN_EMAILS`,

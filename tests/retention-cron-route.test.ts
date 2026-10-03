@@ -6,8 +6,9 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { mockRunPass } = vi.hoisted(() => ({
+const { mockRunPass, mockLifecycleStrict } = vi.hoisted(() => ({
   mockRunPass: vi.fn(),
+  mockLifecycleStrict: vi.fn(),
 }));
 
 vi.mock("@/lib/registry/retention", () => ({
@@ -20,6 +21,13 @@ vi.mock("@/lib/db/client", () => ({
 
 vi.mock("@/lib/firebase-admin-storage", () => ({
   adminReceiptBucket: () => ({}),
+}));
+
+// The demo-mode guard skips destructive passes while prelaunch —
+// resolve 'live' deterministically so these tests exercise the normal
+// path.
+vi.mock("@/lib/app-lifecycle", () => ({
+  getAppLifecycleStrict: mockLifecycleStrict,
 }));
 
 import { GET } from "@/app/api/cron/retention/route";
@@ -62,6 +70,7 @@ beforeEach(() => {
   vi.unstubAllEnvs();
   vi.stubEnv("CRON_SECRET", SECRET);
   mockRunPass.mockReset().mockResolvedValue(EMPTY_SUMMARY);
+  mockLifecycleStrict.mockReset().mockResolvedValue("live");
 });
 
 describe("GET /api/cron/retention", () => {
@@ -160,6 +169,35 @@ describe("GET /api/cron/retention", () => {
     const body = await response.json();
     expect(body.ok).toBe(false);
     expect(body.result.receipts.purged).toBe(1);
+  });
+
+  // #276: no scheduled deletion while the demo lifecycle is active —
+  // the demo reset already reclaims demo objects, and an unreadable
+  // lifecycle must not resolve 'live' mid-outage.
+  test("prelaunch-demo skips destructive passes; dry runs still report", async () => {
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("RETENTION_PURGE_ENABLED", "true");
+    mockLifecycleStrict.mockResolvedValue("prelaunch-demo");
+    const live = await GET(authed());
+    expect(live.status).toBe(200);
+    expect((await live.json()).skipped).toBe("prelaunch-demo");
+    expect(mockRunPass).not.toHaveBeenCalled();
+
+    const dry = await GET(authed("?dry_run=1"));
+    expect(dry.status).toBe(200);
+    expect(mockRunPass).toHaveBeenCalledWith(
+      expect.objectContaining({ dryRun: true }),
+    );
+  });
+
+  test("an unreadable lifecycle skips destructive passes", async () => {
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("RETENTION_PURGE_ENABLED", "true");
+    mockLifecycleStrict.mockResolvedValue(undefined);
+    const response = await GET(authed());
+    expect(response.status).toBe(200);
+    expect((await response.json()).skipped).toBe("lifecycle-unreadable");
+    expect(mockRunPass).not.toHaveBeenCalled();
   });
 
   test("a pass error is a 500, not a hang", async () => {
