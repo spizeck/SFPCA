@@ -31,14 +31,16 @@ import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@/hooks/use-mutation";
 import { LoadError } from "@/components/admin/load-error";
 import { AnimalRegistration } from "@/lib/types";
-import { Eye, CircleCheckBig, Download, CircleX, RotateCcw, Link2 } from "lucide-react";
+import { Eye, CircleCheckBig, Download, CircleX, RotateCcw, Link2, Shield } from "lucide-react";
 import {
+  applyRetentionHoldAction,
   createRegistrationFromSubmissionAction,
   getReceiptUrlAction,
   getRegistrationQueuesAction,
   listConfirmationsDueAction,
   listPendingPaymentsAction,
   listRegistrationsAction,
+  releaseRetentionHoldAction,
   searchAnimalsForLinkAction,
   setRegistrationStatusAction,
 } from "./actions";
@@ -74,6 +76,8 @@ export default function RegistrationsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [selected, setSelected] = useState<AnimalRegistration | null>(null);
+  // Retention hold input for the detail dialog (#130).
+  const [holdReason, setHoldReason] = useState("");
   // Submission → animal linking dialog state.
   const [linking, setLinking] = useState<AnimalRegistration | null>(null);
   const [linkQuery, setLinkQuery] = useState("");
@@ -174,6 +178,85 @@ export default function RegistrationsPage() {
         });
       }
     }, `receipt-${registration.id}`);
+  };
+
+  // Re-read the submission row after a hold mutation so the detail
+  // dialog reflects the real stored hold (author, timestamp), not a
+  // client-side guess.
+  const refreshSelected = async (id: string) => {
+    const subs = await listRegistrationsAction();
+    setRegistrations(subs);
+    setSelected(subs.find((s) => s.id === id) ?? null);
+  };
+
+  const applyHold = (registration: AnimalRegistration) => {
+    const reason = holdReason.trim();
+    if (!reason) {
+      toast({
+        title: "Reason required",
+        description: "Document why this record is exempt from retention cleanup.",
+        variant: "destructive",
+      });
+      return;
+    }
+    mutation.run(async () => {
+      try {
+        const result = await applyRetentionHoldAction(
+          "registration_submission",
+          registration.id,
+          reason,
+        );
+        if (!result.ok) {
+          toast({
+            title: "Couldn't apply hold",
+            description:
+              result.reason === "conflict"
+                ? "An active hold already exists for this submission."
+                : "Failed to apply the hold. Try again.",
+            variant: "destructive",
+          });
+          return;
+        }
+        setHoldReason("");
+        toast({ title: "Retention hold applied" });
+        await refreshSelected(registration.id);
+      } catch (error) {
+        logError("retention", "hold-apply-ui", error);
+        toast({
+          title: "Error",
+          description: "Failed to apply the hold. Try again.",
+          variant: "destructive",
+        });
+      }
+    }, `hold-${registration.id}`);
+  };
+
+  const releaseHold = (registration: AnimalRegistration) => {
+    mutation.run(async () => {
+      try {
+        const result = await releaseRetentionHoldAction(
+          "registration_submission",
+          registration.id,
+        );
+        if (!result.ok) {
+          toast({
+            title: "Couldn't release hold",
+            description: "Failed to release the hold. Try again.",
+            variant: "destructive",
+          });
+          return;
+        }
+        toast({ title: "Retention hold released" });
+        await refreshSelected(registration.id);
+      } catch (error) {
+        logError("retention", "hold-release-ui", error);
+        toast({
+          title: "Error",
+          description: "Failed to release the hold. Try again.",
+          variant: "destructive",
+        });
+      }
+    }, `hold-release-${registration.id}`);
   };
 
   const registerAnimal = (animalId: string) => {
@@ -636,7 +719,22 @@ export default function RegistrationsPage() {
                     </TableCell>
                     <TableCell>${registration.totalFee ?? "—"}</TableCell>
                     <TableCell>
-                      <RegistrationStatusBadge status={registration.status} />
+                      <div className="flex items-center gap-1 flex-wrap">
+                        <RegistrationStatusBadge status={registration.status} />
+                        {registration.retentionHold && (
+                          <Badge
+                            variant="secondary"
+                            title={registration.retentionHold.reason}
+                          >
+                            Hold
+                          </Badge>
+                        )}
+                        {registration.receiptPurgedAt && (
+                          <Badge variant="outline" title="Receipt file deleted by retention policy">
+                            Receipt removed
+                          </Badge>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-2">
@@ -851,6 +949,54 @@ export default function RegistrationsPage() {
                         ? "Loading…"
                         : "View Receipt"}
                     </Button>
+                  )}
+                </div>
+                {selected.receiptPurgedAt && (
+                  <p className="text-muted-foreground">
+                    Receipt file removed by the retention policy on{" "}
+                    {formatRegistrationTimestamp(selected.receiptPurgedAt)}.
+                    Payment and audit records are unaffected.
+                  </p>
+                )}
+                <div className="border-t pt-3 space-y-2">
+                  <h4 className="font-medium flex items-center gap-1">
+                    <Shield className="h-4 w-4" /> Retention hold
+                  </h4>
+                  {selected.retentionHold ? (
+                    <div className="space-y-2">
+                      <Badge variant="secondary">On hold</Badge>
+                      <p className="text-muted-foreground">
+                        {selected.retentionHold.reason} —{" "}
+                        {selected.retentionHold.createdByLabel},{" "}
+                        {formatRegistrationTimestamp(selected.retentionHold.createdAt)}.
+                        This record is exempt from automated retention
+                        cleanup until the hold is released.
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={mutation.pending}
+                        onClick={() => releaseHold(selected)}
+                      >
+                        Release hold
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <Input
+                        value={holdReason}
+                        onChange={(e) => setHoldReason(e.target.value)}
+                        placeholder="Reason — e.g. dispute, audit, legal"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={mutation.pending}
+                        onClick={() => applyHold(selected)}
+                      >
+                        Apply
+                      </Button>
+                    </div>
                   )}
                 </div>
               </div>

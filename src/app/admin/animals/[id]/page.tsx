@@ -530,6 +530,7 @@ export default function AnimalMedicalPage() {
         registrations={registry.registrations}
         payments={registry.payments}
         paymentEvents={registry.paymentEvents}
+        registrationHolds={registry.retentionHolds}
         currentYear={currentRegistrationYear(today)}
         today={today}
         onChanged={loadRecord}
