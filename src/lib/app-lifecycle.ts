@@ -71,10 +71,15 @@ export function isPrelaunchDemo(lifecycle: AppLifecycle): boolean {
 let lifecycleReadFailed = false;
 
 export async function getAppLifecycle(
-  db: RegistryDb = getRegistryDb(),
+  db?: RegistryDb,
 ): Promise<AppLifecycle> {
   try {
-    const [row] = await db
+    // Resolved inside the try: getRegistryDb() throws when DATABASE_URL
+    // is absent (e.g. a deployment that never touches the registry),
+    // and a default-parameter evaluation would escape this catch and
+    // fail every proxied request instead of resolving 'live'.
+    const registry = db ?? getRegistryDb();
+    const [row] = await registry
       .select({ lifecycle: appState.lifecycle })
       .from(appState)
       .where(eq(appState.id, 1))
