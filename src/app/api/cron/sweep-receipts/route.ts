@@ -20,6 +20,8 @@ import { adminReceiptBucket } from "@/lib/firebase-admin-storage";
 import { getRegistryDb } from "@/lib/db/client";
 import { sweepOrphanedReceipts } from "@/lib/registry/receipt-sweep";
 import { sweepOrphanedVetDocuments } from "@/lib/registry/vet-document-sweep";
+import { getAppLifecycleStrict } from "@/lib/app-lifecycle";
+import { APP_LIFECYCLE_LIVE } from "@/lib/app-lifecycle-label";
 import { logError } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
@@ -38,6 +40,23 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // Pre-launch demo guard (#275): the orphan oracle is Postgres rows —
+    // during the demo window everything deletable would be a demo object
+    // anyway, and the demo reset already reclaims them. Skipping the
+    // sweep outright is the fail-closed choice: no object can be
+    // deleted by a scheduled run while fictional data is live.
+    //
+    // Strict read: an unreadable app_state row must not resolve 'live'
+    // here — during a demo-window outage that would unleash the sweep
+    // on demo objects. Unknown lifecycle skips both sweepers too.
+    const lifecycle = await getAppLifecycleStrict();
+    if (lifecycle !== APP_LIFECYCLE_LIVE) {
+      return NextResponse.json({
+        ok: true,
+        skipped: lifecycle ?? "lifecycle-unreadable",
+      });
+    }
+
     const db = getRegistryDb();
     const bucket = adminReceiptBucket();
     const [receipts, vetDocs] = await Promise.all([

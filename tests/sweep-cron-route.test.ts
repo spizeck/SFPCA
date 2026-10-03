@@ -6,19 +6,30 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { mockSweepReceipts, mockSweepVetDocs, mockBucket, mockDb } =
-  vi.hoisted(() => ({
-    mockSweepReceipts: vi.fn(),
-    mockSweepVetDocs: vi.fn(),
-    mockBucket: {},
-    mockDb: {},
-  }));
+const {
+  mockSweepReceipts,
+  mockSweepVetDocs,
+  mockBucket,
+  mockDb,
+  mockLifecycleStrict,
+} = vi.hoisted(() => ({
+  mockSweepReceipts: vi.fn(),
+  mockSweepVetDocs: vi.fn(),
+  mockBucket: {},
+  mockDb: {},
+  mockLifecycleStrict: vi.fn(),
+}));
 
 vi.mock("@/lib/firebase-admin-storage", () => ({
   adminReceiptBucket: () => mockBucket,
 }));
 vi.mock("@/lib/db/client", () => ({
   getRegistryDb: () => mockDb,
+}));
+// The demo-mode guard skips the sweep while prelaunch — resolve 'live'
+// deterministically so these tests exercise the normal path.
+vi.mock("@/lib/app-lifecycle", () => ({
+  getAppLifecycleStrict: mockLifecycleStrict,
 }));
 vi.mock("@/lib/registry/receipt-sweep", () => ({
   sweepOrphanedReceipts: mockSweepReceipts,
@@ -44,6 +55,7 @@ beforeEach(() => {
   vi.stubEnv("CRON_SECRET", SECRET);
   mockSweepReceipts.mockReset().mockResolvedValue({ failed: 0 });
   mockSweepVetDocs.mockReset().mockResolvedValue({ failed: 0 });
+  mockLifecycleStrict.mockReset().mockResolvedValue("live");
 });
 
 describe("GET /api/cron/sweep-receipts", () => {
@@ -84,5 +96,28 @@ describe("GET /api/cron/sweep-receipts", () => {
         expect.objectContaining({ bucket: mockBucket, db: mockDb }),
       );
     }
+  });
+
+  // #275: the sweep is destructive against the shared production bucket —
+  // demo mode and an unreadable lifecycle must both skip it. Fail-open
+  // 'live' resolution would unleash deletions during a demo outage.
+  test("prelaunch-demo skips both sweeps", async () => {
+    mockLifecycleStrict.mockResolvedValue("prelaunch-demo");
+    const response = await GET(authed());
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.skipped).toBe("prelaunch-demo");
+    expect(mockSweepReceipts).not.toHaveBeenCalled();
+    expect(mockSweepVetDocs).not.toHaveBeenCalled();
+  });
+
+  test("an unreadable lifecycle skips both sweeps", async () => {
+    mockLifecycleStrict.mockResolvedValue(undefined);
+    const response = await GET(authed());
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.skipped).toBe("lifecycle-unreadable");
+    expect(mockSweepReceipts).not.toHaveBeenCalled();
+    expect(mockSweepVetDocs).not.toHaveBeenCalled();
   });
 });

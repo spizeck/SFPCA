@@ -96,6 +96,29 @@ describe("environment resolution", () => {
     ).toBe("production");
   });
 
+  // #275: the pre-launch demo label is the ONE override allowed to
+  // outrank VERCEL_ENV=production — board-demo events must never read
+  // as live incidents. Any other override value still loses to it.
+  test("NEXT_PUBLIC_SENTRY_ENVIRONMENT=prelaunch-demo relabels real production", () => {
+    expect(
+      resolveSentryEnvironment({
+        VERCEL_REGION: "iad1",
+        VERCEL_ENV: "production",
+        NEXT_PUBLIC_SENTRY_ENVIRONMENT: "prelaunch-demo",
+      }),
+    ).toBe("prelaunch-demo");
+  });
+
+  test("no other override value can displace production", () => {
+    expect(
+      resolveSentryEnvironment({
+        VERCEL_REGION: "iad1",
+        VERCEL_ENV: "production",
+        NEXT_PUBLIC_SENTRY_ENVIRONMENT: "staging",
+      }),
+    ).toBe("production");
+  });
+
   // The observed bug: `vercel env pull` writes the production project
   // environment into .env.local. VERCEL_ENV / NEXT_PUBLIC_SENTRY_ENVIRONMENT
   // then claim "production" for a process that is not on Vercel at all.
