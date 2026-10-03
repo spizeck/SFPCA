@@ -1,5 +1,5 @@
 {
-  "id": "0d21fb54-bfda-49d5-a6a4-14c16d38a645",
+  "id": "5b922f46-bab8-4fc6-9d3e-91eae965fc56",
   "prevId": "6453cb86-18c0-44b5-8019-325e3f8889cc",
   "version": "7",
   "dialect": "postgresql",
@@ -620,6 +620,67 @@
         "animals_birth_estimate_consistency_check": {
           "name": "animals_birth_estimate_consistency_check",
           "value": "\"animals\".\"birth_date_estimated\" = false OR \"animals\".\"birth_date\" IS NOT NULL"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.app_state": {
+      "name": "app_state",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "default": 1
+        },
+        "lifecycle": {
+          "name": "lifecycle",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'prelaunch-demo'"
+        },
+        "live_at": {
+          "name": "live_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "demo_seeded_at": {
+          "name": "demo_seeded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "demo_seed_version": {
+          "name": "demo_seed_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "app_state_single_row_check": {
+          "name": "app_state_single_row_check",
+          "value": "\"app_state\".\"id\" = 1"
+        },
+        "app_state_lifecycle_check": {
+          "name": "app_state_lifecycle_check",
+          "value": "\"app_state\".\"lifecycle\" IN ('prelaunch-demo','live')"
         }
       },
       "isRLSEnabled": false
@@ -1585,6 +1646,161 @@
           "value": "\"data_quality_reviews\".\"entity_b\" IS NULL OR \"data_quality_reviews\".\"entity_a\" < \"data_quality_reviews\".\"entity_b\""
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.demo_seed_entities": {
+      "name": "demo_seed_entities",
+      "schema": "",
+      "columns": {
+        "run_id": {
+          "name": "run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entity_store": {
+          "name": "entity_store",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entity_table": {
+          "name": "entity_table",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entity_id": {
+          "name": "entity_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "demo_seed_entities_run_idx": {
+          "name": "demo_seed_entities_run_idx",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "demo_seed_entities_run_id_demo_seed_runs_id_fk": {
+          "name": "demo_seed_entities_run_id_demo_seed_runs_id_fk",
+          "tableFrom": "demo_seed_entities",
+          "tableTo": "demo_seed_runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "demo_seed_entities_entity_store_entity_table_entity_id_pk": {
+          "name": "demo_seed_entities_entity_store_entity_table_entity_id_pk",
+          "columns": [
+            "entity_store",
+            "entity_table",
+            "entity_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "demo_seed_entities_store_check": {
+          "name": "demo_seed_entities_store_check",
+          "value": "\"demo_seed_entities\".\"entity_store\" IN ('postgres','firestore','storage','auth')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.demo_seed_runs": {
+      "name": "demo_seed_runs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "seed_version": {
+          "name": "seed_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "seeded_at": {
+          "name": "seeded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "reset_at": {
+          "name": "reset_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "seeded_counts": {
+          "name": "seeded_counts",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "empty_firestore_collections": {
+          "name": "empty_firestore_collections",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "empty_storage_prefixes": {
+          "name": "empty_storage_prefixes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.follow_ups": {
@@ -4598,18 +4814,6 @@
           "notNull": true,
           "default": false
         },
-        "receipt_verified_at": {
-          "name": "receipt_verified_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "receipt_purged_at": {
-          "name": "receipt_purged_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
         "total_fee_cents": {
           "name": "total_fee_cents",
           "type": "integer",
@@ -5047,165 +5251,6 @@
         "registrations_resolution_consistency_check": {
           "name": "registrations_resolution_consistency_check",
           "value": "(\"registrations\".\"resolution\" IS NULL) = (\"registrations\".\"resolved_at\" IS NULL)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.retention_holds": {
-      "name": "retention_holds",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "entity_type": {
-          "name": "entity_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "entity_id": {
-          "name": "entity_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_by_label": {
-          "name": "created_by_label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_by_identity_id": {
-          "name": "created_by_identity_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "removed_at": {
-          "name": "removed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "removed_by_label": {
-          "name": "removed_by_label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "removed_by_identity_id": {
-          "name": "removed_by_identity_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "retention_holds_active_key": {
-          "name": "retention_holds_active_key",
-          "columns": [
-            {
-              "expression": "entity_type",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "entity_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"retention_holds\".\"removed_at\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "retention_holds_entity_idx": {
-          "name": "retention_holds_entity_idx",
-          "columns": [
-            {
-              "expression": "entity_type",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "entity_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "retention_holds_created_by_identity_id_auth_identities_id_fk": {
-          "name": "retention_holds_created_by_identity_id_auth_identities_id_fk",
-          "tableFrom": "retention_holds",
-          "tableTo": "auth_identities",
-          "columnsFrom": [
-            "created_by_identity_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "retention_holds_removed_by_identity_id_auth_identities_id_fk": {
-          "name": "retention_holds_removed_by_identity_id_auth_identities_id_fk",
-          "tableFrom": "retention_holds",
-          "tableTo": "auth_identities",
-          "columnsFrom": [
-            "removed_by_identity_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "retention_holds_entity_type_check": {
-          "name": "retention_holds_entity_type_check",
-          "value": "\"retention_holds\".\"entity_type\" IN ('registration_submission','registration')"
-        },
-        "retention_holds_reason_check": {
-          "name": "retention_holds_reason_check",
-          "value": "length(btrim(\"retention_holds\".\"reason\")) > 0"
-        },
-        "retention_holds_removed_consistency_check": {
-          "name": "retention_holds_removed_consistency_check",
-          "value": "(\"retention_holds\".\"removed_at\" IS NULL) = (\"retention_holds\".\"removed_by_label\" IS NULL)"
         }
       },
       "isRLSEnabled": false

@@ -20,6 +20,11 @@ vi.mock("@/lib/firebase-admin-storage", () => ({
 vi.mock("@/lib/db/client", () => ({
   getRegistryDb: () => mockDb,
 }));
+// The demo-mode guard skips the sweep while prelaunch — resolve 'live'
+// deterministically so these tests exercise the normal path.
+vi.mock("@/lib/app-lifecycle", () => ({
+  getAppLifecycle: vi.fn().mockResolvedValue("live"),
+}));
 vi.mock("@/lib/registry/receipt-sweep", () => ({
   sweepOrphanedReceipts: mockSweepReceipts,
 }));

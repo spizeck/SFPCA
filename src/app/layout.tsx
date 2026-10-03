@@ -7,6 +7,7 @@ import { GOOGLE_CONSENT_DENIED } from "@/lib/consent";
 import { Toaster } from "@/components/ui/toaster";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { PrelaunchDemoBanner } from "@/components/prelaunch-demo-banner";
 import {
   getSiteUrl,
   organizationJsonLd,
@@ -121,6 +122,10 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
+          {/* Shown only while the deployment lifecycle reads
+              'prelaunch-demo' — every surface carries the fictional-data
+              notice until go-live. See src/lib/app-lifecycle.ts. */}
+          <PrelaunchDemoBanner />
           <Breadcrumbs />
           {children}
           <Toaster />

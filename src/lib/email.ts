@@ -118,6 +118,64 @@ export function createResendSender(
   };
 }
 
+// --- Pre-launch demo delivery ----------------------------------------------
+// While the deployment lifecycle reads 'prelaunch-demo' (#275 board demo)
+// no application action may emit real email: seeded recipients are
+// fictional (example.* addresses), but that alone is not a control — a
+// board member could type a real address into any form. The demo sender
+// is the boundary:
+//   - default: the inert 'demo-sink' sender accepts every message and
+//     records provider='demo-sink' on the communications row, so the
+//     admin communications ledger shows exactly what WOULD have gone
+//     out while nothing leaves the platform;
+//   - DEMO_EMAIL_OVERRIDE_TO: when the operator wants to show a real
+//     delivered email during the demo, every message is rewritten to
+//     this single owner-controlled address — the fictional recipient can
+//     never be reached either way.
+// The sender always reports provider 'demo-sink'/'resend-demo-override'
+// so ledger rows are visibly demo sends, not real deliveries.
+
+const DEMO_SINK_PROVIDER = "demo-sink";
+const DEMO_OVERRIDE_PROVIDER = "resend-demo-override";
+
+export function createPrelaunchDemoSender(
+  env: Record<string, string | undefined> = process.env,
+): EmailSender {
+  const overrideTo = env.DEMO_EMAIL_OVERRIDE_TO?.trim();
+  const resend = overrideTo ? createResendSender(env) : null;
+
+  if (resend && overrideTo) {
+    return {
+      provider: DEMO_OVERRIDE_PROVIDER,
+      send: (message, idempotencyKey) =>
+        resend.send({ ...message, to: overrideTo }, idempotencyKey),
+    };
+  }
+
+  return {
+    provider: DEMO_SINK_PROVIDER,
+    async send() {
+      // Accept-and-drop: the row is marked sent under the demo-sink
+      // provider label so staff surfaces show the pipeline working.
+      return { ok: true, providerMessageId: null };
+    },
+  };
+}
+
+// Chooses the sender a caller may use for a live (non-dry-run) send:
+// the inert demo boundary while the deployment is pre-launch, the real
+// Resend sender once live. Takes the already-resolved lifecycle so
+// callers that read it for other reasons don't re-query.
+export function createLifecycleAwareSender(
+  lifecycle: string,
+  env: Record<string, string | undefined> = process.env,
+): EmailSender | null {
+  if (lifecycle === "prelaunch-demo") {
+    return createPrelaunchDemoSender(env);
+  }
+  return createResendSender(env);
+}
+
 // --- Webhook verification ------------------------------------------------
 // Resend signs webhooks with the svix scheme: HMAC-SHA256 over
 // "<svix-id>.<svix-timestamp>.<raw body>" keyed by the base64 payload of
