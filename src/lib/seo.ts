@@ -5,6 +5,7 @@
 // per-deployment preview domains and must never become canonical.
 import type { Metadata, MetadataRoute } from "next";
 import { isMaintenanceMode } from "@/lib/maintenance";
+import { APP_LIFECYCLE_PRELAUNCH_DEMO } from "@/lib/app-lifecycle-label";
 
 export const PRODUCTION_SITE_URL = "https://www.sabafpca.com";
 
@@ -110,10 +111,18 @@ const INDEXABLE_PATHS = [
 
 export function buildSitemap(
   env: Record<string, string | undefined> = process.env,
+  lifecycle?: string,
 ): MetadataRoute.Sitemap {
   // Gated public routes must not be advertised to crawlers while the site
   // is under construction; the normal sitemap returns when the gate lifts.
   if (isMaintenanceMode(env)) {
+    return [];
+  }
+
+  // Pre-launch demo: the whole site is fictional data and must not be
+  // indexed — an empty sitemap alongside the disallow-all robots.txt.
+  // Normal SEO resumes the moment the lifecycle row reads 'live'.
+  if (lifecycle === APP_LIFECYCLE_PRELAUNCH_DEMO) {
     return [];
   }
 
@@ -131,10 +140,21 @@ export function buildSitemap(
 
 export function buildRobots(
   env: Record<string, string | undefined> = process.env,
+  lifecycle?: string,
 ): MetadataRoute.Robots {
   // While the public site is gated, discourage crawling/indexing entirely.
   // Normal rules resume automatically once maintenance mode is disabled.
   if (isMaintenanceMode(env)) {
+    return {
+      rules: [{ userAgent: "*", disallow: "/" }],
+    };
+  }
+
+  // Pre-launch demo: the registry is fictional demo data and the site has
+  // no public presence yet — disallow everything. The moment the
+  // lifecycle row reads 'live' this returns to the normal rules, so the
+  // eventual production site can never be left noindexed by the demo.
+  if (lifecycle === APP_LIFECYCLE_PRELAUNCH_DEMO) {
     return {
       rules: [{ userAgent: "*", disallow: "/" }],
     };

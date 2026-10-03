@@ -31,6 +31,8 @@ import {
   RETENTION_BATCH_LIMIT,
 } from "@/lib/retention";
 import { isIsoDateString, todayIsoDate } from "@/lib/vaccinations";
+import { getAppLifecycleStrict } from "@/lib/app-lifecycle";
+import { APP_LIFECYCLE_LIVE } from "@/lib/app-lifecycle-label";
 import { logError } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
@@ -77,6 +79,18 @@ export async function GET(request: NextRequest) {
   // Report-only until the flag is set — a scheduled run before rollout
   // produces the same counts as an explicit dry run.
   const dryRun = dryRunRequested || !purgeEnabled;
+
+  // Pre-launch demo guard (#276): no scheduled deletion while fictional
+  // data is live — the demo reset already reclaims demo objects, and an
+  // unreadable lifecycle must not resolve 'live' and unleash a purge
+  // during a demo-window outage. Dry runs stay available (report only).
+  const lifecycle = await getAppLifecycleStrict();
+  if (lifecycle !== APP_LIFECYCLE_LIVE && !dryRun) {
+    return NextResponse.json({
+      ok: true,
+      skipped: lifecycle ?? "lifecycle-unreadable",
+    });
+  }
 
   try {
     const result = await runRetentionPass({
