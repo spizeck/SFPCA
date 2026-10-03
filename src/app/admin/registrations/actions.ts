@@ -16,6 +16,13 @@ import {
   type RegistrationQueues,
 } from "@/lib/registry/registrations";
 import {
+  applyRetentionHold,
+  listActiveHoldsFor,
+  releaseRetentionHold,
+} from "@/lib/registry/retention";
+import { isRetentionHoldEntityType } from "@/lib/retention";
+import { getIdentityByProviderUid } from "@/lib/registry/persons";
+import {
   searchAnimals,
   type AnimalSearchHit,
 } from "@/lib/registry/animals";
@@ -49,6 +56,8 @@ function toRegistration(
       isFixed: (a.isFixed ?? "") as "yes" | "no" | "",
     })),
     paymentReceipt: dto.paymentReceiptPath,
+    receiptVerifiedAt: dto.receiptVerifiedAt,
+    receiptPurgedAt: dto.receiptPurgedAt,
     totalFee: dto.totalFeeCents / 100,
     status: dto.status as AnimalRegistration["status"],
     createdAt: dto.submittedAt,
@@ -61,7 +70,88 @@ export async function listRegistrationsAction(): Promise<
 > {
   const { authorized } = await requireAdmin();
   if (!authorized) throw new Error("Unauthorized");
-  return (await listRegistrationSubmissions()).map(toRegistration);
+  const submissions = await listRegistrationSubmissions();
+  const holds = await listActiveHoldsFor(
+    "registration_submission",
+    submissions.map((s) => s.id),
+  );
+  return submissions.map((s) => {
+    const hold = holds.get(s.id);
+    return {
+      ...toRegistration(s),
+      retentionHold: hold
+        ? {
+            reason: hold.reason,
+            createdByLabel: hold.createdByLabel,
+            createdAt: hold.createdAt,
+          }
+        : null,
+    };
+  });
+}
+
+// --- Retention holds (#130) -------------------------------------------------
+// The deliberate exemption mechanism: an active hold shields the entity
+// from every automated purge/anonymize path until released. Reason is
+// required and audited; both actions re-authorize server-side.
+
+export interface HoldActionResult {
+  ok: boolean;
+  reason?: "invalid" | "conflict" | "not-found";
+}
+
+export async function applyRetentionHoldAction(
+  entityType: string,
+  entityId: string,
+  reason: string,
+): Promise<HoldActionResult> {
+  const { authorized, user } = await requireAdmin();
+  if (!authorized) throw new Error("Unauthorized");
+  if (!isRetentionHoldEntityType(entityType)) {
+    return { ok: false, reason: "invalid" };
+  }
+  try {
+    const identity = user?.uid
+      ? await getIdentityByProviderUid(user.uid)
+      : null;
+    const result = await applyRetentionHold(
+      entityType,
+      entityId,
+      reason,
+      user?.email ?? "unknown",
+      identity?.id ?? null,
+    );
+    return result.ok ? { ok: true } : { ok: false, reason: result.reason };
+  } catch (error) {
+    logError("retention", "hold-apply", error);
+    return { ok: false };
+  }
+}
+
+export async function releaseRetentionHoldAction(
+  entityType: string,
+  entityId: string,
+): Promise<HoldActionResult> {
+  const { authorized, user } = await requireAdmin();
+  if (!authorized) throw new Error("Unauthorized");
+  if (!isRetentionHoldEntityType(entityType)) {
+    return { ok: false, reason: "invalid" };
+  }
+  try {
+    const identity = user?.uid
+      ? await getIdentityByProviderUid(user.uid)
+      : null;
+    const result = await releaseRetentionHold(
+      entityType,
+      entityId,
+      user?.email ?? "unknown",
+      identity?.id ?? null,
+    );
+    return result.ok ? { ok: true } : { ok: false, reason: result.reason };
+  } catch (error) {
+    logError("retention", "hold-release", error);
+    return { ok: false };
+  }
 }
 
 export interface StatusActionResult {

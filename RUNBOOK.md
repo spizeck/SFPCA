@@ -25,6 +25,7 @@ Firestore CMS write ──► onFirestoreChange ──► deploy hook POST
 (authenticated HTTPS)   ──► triggerRebuild ──► same deploy hook
 Vercel cron (daily)     ──► /api/cron/sweep-receipts ──► Storage cleanup
 Vercel cron (daily)     ──► /api/cron/reminders ──► evaluate → queue → send (Resend)
+Vercel cron (daily)     ──► /api/cron/retention ──► policy purge/anonymize (§30)
 Resend webhook          ──► /api/webhooks/resend ──► delivered/bounced/failed onto rows
 
 Firebase deploy (manual, CLI):
@@ -49,6 +50,7 @@ everything.
 | `triggerRebuild` | `functions/index.js` | Cloud Functions v2 | manual `firebase deploy` | same | Cloud Logging |
 | Storage sweep | `src/app/api/cron/sweep-receipts/route.ts`, `src/lib/registry/receipt-sweep.ts`, `src/lib/registry/vet-document-sweep.ts` | Vercel cron (`vercel.json`, daily 06:00 UTC) | automatic with Vercel deploy | Vercel → Deployments → Cron / Functions logs | Vercel → Logs, `subsystem:"receipt-cleanup"` + `subsystem:"vet-doc-cleanup"`; partial failures return 500 |
 | Reminder send | `src/app/api/cron/reminders/route.ts`, `src/lib/registry/reminders.ts`, `src/lib/registry/communications.ts` | Vercel cron (`vercel.json`, daily 12:00 UTC = 08:00 AST) | automatic with Vercel deploy | Vercel → Deployments → Cron; `/admin/communications` | Vercel → Logs, `subsystem:"communications"`; 503 when provider unconfigured |
+| Retention purge | `src/app/api/cron/retention/route.ts`, `src/lib/registry/retention.ts`, `src/lib/retention.ts` | Vercel cron (`vercel.json`, daily 05:30 UTC) | automatic with Vercel deploy; destructive pass requires `RETENTION_PURGE_ENABLED=1` (§30) | Vercel → Deployments → Cron | Vercel → Logs, `subsystem:"retention"`; partial row failures → summary `failed` count + 200, never silent |
 | Resend webhook | `src/app/api/webhooks/resend/route.ts` | Resend dashboard (endpoint + signing secret) | manual provider config | Resend dashboard → Webhooks | signature failures → 400; no secret → 503 |
 | Firestore rules | `firestore.rules` | Firestore | manual `firebase deploy --only firestore:rules` | Firebase console → Firestore → Rules | denied requests surface as `permission-denied` in app logs |
 | Storage rules | `storage.rules` | Cloud Storage | manual `firebase deploy --only storage` | Firebase console → Storage → Rules | `storage/unauthorized` in app logs |
@@ -632,8 +634,10 @@ Deployment failed — WHERE did it fail? (read the stages in order)
   → Cron routes on preview answering 403: with the #271 guard merged,
     live sweeps/sends are production-only — only
     /api/cron/reminders?dry_run=1 works on preview (the sweep route
-    has no dry-run mode). If the guard is not deployed, a preview 403
-    comes from deployment protection or another access control instead.
+    has no dry-run mode). /api/cron/retention is dry-run-only on
+    preview by design — a preview deployment can never purge (§30).
+    If the guard is not deployed, a preview 403 comes from deployment
+    protection or another access control instead.
 ```
 
 ## 14. Automatic content rebuilds (post-#94)
@@ -1350,11 +1354,12 @@ unrecoverable (re-collect from the registrant).
 - Soft-deleted `receipts/` and `vet-docs/` objects are PII held for the
   recovery window only — `vet-docs/` additionally carries clinical
   records — this is **recovery retention, not business retention**.
-  When #130 defines a retention policy, deliberate deletions still age
-  out of soft delete on the same 56-day clock; the mechanism cannot
-  turn a deletion decision into permanent storage. If #130 ever
-  requires immediate PII destruction, an operator must explicitly purge
-  the soft-deleted object — document that in the retention policy.
+  The #130 retention policy (§30) is now defined: deliberate receipt
+  deletions still age out of soft delete on the same 56-day clock; the
+  mechanism cannot turn a deletion decision into permanent storage.
+  Immediate destruction below the soft-delete window requires an
+  operator to explicitly purge the soft-deleted object (§18d) — that
+  gap is documented in the policy itself, not hidden.
 - Restore access inherits bucket IAM (project editors/owners) — keep it
   that way; never grant receipt or clinical-document reads to satisfy a
   recovery workflow.
@@ -2383,3 +2388,83 @@ boundary itself (`receipt.finalize` is counted before a byte is
 read), but a determined distributed actor could still submit at up to
 N-per-IP. Acceptable for SFPCA; revisit with #130 retention work if
 `rate_limit_windows` retention needs a formal policy.
+
+## 30. Data retention & purge (#130)
+
+The approved retention policy, enforced centrally by
+`src/lib/registry/retention.ts` (`runRetentionPass`). All period
+constants live in `src/lib/retention.ts` — change policy there, never
+inline in routes.
+
+| Data | Rule | Action at expiry |
+|---|---|---|
+| Completed registration/payment records | 7 years after the end of the applicable registration year | **Anonymize**: submission owner name/contacts and free-text notes/references removed; canonical animal, registration, ledger, and audit facts kept |
+| Uploaded payment receipts (`receipts/`) | 90 days after `receipt_verified_at` | **Delete the Storage object**; `payment_receipt_path` nulled + `receipt_purged_at` stamped; payment/audit facts kept |
+| Pending submissions never decided | 12 months after `submitted_at` | **Delete the row** (plus its receipt object), but only when no registration/payment descends from it |
+| Rejected submissions | 12 months after `decided_at` | Same delete path |
+| `retention_holds` active row | — | Skips the entity (and, for registrations, its linked submission/payment family) in every phase until released |
+
+Registration-year end is **December 31 23:59:59.999 UTC** of the
+registration's calendar `year` (`registrationYearEnd`), matching the
+registration-period definition in `src/lib/registrations.ts`. A
+submission's 7-year clock follows its newest linked registration year
+when one exists.
+
+**Trigger stamp.** `receipt_verified_at` is set by the first
+trustworthy signal — staff submission approval or the first confirmed
+payment (`stampReceiptVerified`, called inside the verifying
+transaction). Upload time is deliberately NOT used. The 0022 migration
+backfills existing receipts from `decided_at`/first confirmed
+`payment_events` row; rows with neither stay NULL and fail closed —
+never purge-eligible.
+
+**Cron.** `/api/cron/retention` (Vercel cron, daily 05:30 UTC) uses the
+same `CRON_SECRET` bearer auth and preview guard as the other crons.
+Query controls: `?dry_run=1` forces a read-only count pass; `&as_of=YYYY-MM-DD`
+runs "as of" a controlled date for operator review.
+
+**Rollout gate.** Destructive passes require
+`RETENTION_PURGE_ENABLED=1` in the environment. Without it the route
+returns a dry-run summary even in production — deploy code first, run
+`/api/cron/retention?dry_run=1` (CRON_SECRET bearer), inspect the
+counts, verify the Privacy Policy text is published, THEN set the env
+var. Preview deployments are **always** dry-run regardless of the env
+var — a preview can never purge.
+
+**Holds.** Staff apply/release holds from the submission detail dialog
+(`/admin/registrations`) or the animal profile's Registrations panel.
+Hold = `retention_holds` row (required reason, author label, audit
+event); release stamps `removed_*` rather than deleting the row, so the
+exemption history is auditable. One active hold per entity (partial
+unique index). Both mutations are `requireAdmin` server actions.
+
+**Logging.** Every pass emits one structured summary under
+`subsystem:"retention"` with counts per phase (eligible / purged /
+heldSkipped / linkedSkipped / failed) — never names, emails, receipt
+paths, or entity ids. Row failures log `errorCode` only and the run
+continues; the summary `failed` count is the alarm signal.
+
+**Idempotency.** Eligibility is re-derived from current state every
+run; already-purged receipts (`payment_receipt_path` NULL or
+`receipt_purged_at` set) and already-anonymized submissions (PII fields
+absent) are invisible to subsequent passes. A missing Storage object is
+tolerated, not a failure.
+
+**Legacy/ambiguous data.** Missing timestamps mean "keep": receipts
+without `receipt_verified_at` are never eligible, rejected submissions
+without `decided_at` never age out. Deploying the migration deletes
+nothing by itself.
+
+**Backup implications.** Purging the live database does not rewrite
+history:
+
+- `db-backups/` dumps keep the newest 8 daily objects — a deleted
+  submission's row survives inside dumps for roughly a week (§19g). A
+  dump restore reintroduces it; re-run the retention pass after any
+  restore touching intake tables.
+- Storage soft delete retains a purged receipt object for up to 56
+  days (§18b/f). Recovery-window retention, not business retention;
+  an operator must explicitly purge soft-deleted objects only if
+  immediate destruction below that window is ever required.
+- `payment_events`/`audit_events` rows are never purged — they are the
+  canonical ledger/audit trail the policy exists to preserve.

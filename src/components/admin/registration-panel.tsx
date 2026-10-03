@@ -36,6 +36,11 @@ import type {
   PaymentEventRecord,
   PaymentRecord,
 } from "@/lib/registry/payments";
+import type { RetentionHoldRecord } from "@/lib/registry/retention";
+import {
+  applyRetentionHoldAction,
+  releaseRetentionHoldAction,
+} from "@/app/admin/registrations/actions";
 import {
   PAYMENT_EVENT_LABELS,
   PAYMENT_KIND_LABELS,
@@ -61,7 +66,7 @@ import {
   type SaveResult,
 } from "@/app/admin/animals/[id]/actions";
 import { logError } from "@/lib/logger";
-import { CircleAlert, Plus } from "lucide-react";
+import { CircleAlert, Plus, Shield, ShieldCheck } from "lucide-react";
 
 type Editor =
   | { kind: "register" }
@@ -73,7 +78,8 @@ type Editor =
   | { kind: "resolve"; record: RegistrationRecord }
   | { kind: "cancel"; record: RegistrationRecord }
   | { kind: "correct-amount"; record: RegistrationRecord }
-  | { kind: "notes"; record: RegistrationRecord };
+  | { kind: "notes"; record: RegistrationRecord }
+  | { kind: "hold"; record: RegistrationRecord };
 
 const CANCELLATION_LABELS: Record<string, string> = {
   correction: "Corrected — recorded in error",
@@ -101,6 +107,7 @@ export function RegistrationPanel({
   registrations = [],
   payments = [],
   paymentEvents = [],
+  registrationHolds = [],
   currentYear,
   today,
   onChanged,
@@ -109,6 +116,9 @@ export function RegistrationPanel({
   registrations?: RegistrationRecord[];
   payments?: PaymentRecord[];
   paymentEvents?: PaymentEventRecord[];
+  // Active retention holds on these registrations (#130) — the
+  // documented exemption from automated cleanup.
+  registrationHolds?: RetentionHoldRecord[];
   currentYear: number;
   today: string;
   onChanged: () => void;
@@ -315,6 +325,21 @@ export function RegistrationPanel({
             note || null,
           );
           break;
+        case "hold": {
+          if (!reason.trim()) {
+            toast({
+              title: "A reason is required to hold a record",
+              variant: "destructive",
+            });
+            return;
+          }
+          result = await applyRetentionHoldAction(
+            "registration",
+            editor.record.id,
+            reason.trim(),
+          );
+          break;
+        }
       }
       if (result?.ok) {
         // Only close the editor this submission came from — a save that
@@ -336,6 +361,28 @@ export function RegistrationPanel({
   const active = registrations.filter((r) => r.status === "active");
   const cancelled = registrations.filter((r) => r.status === "cancelled");
   const current = active.find((r) => r.year === currentYear);
+  const holdsById = new Map(registrationHolds.map((h) => [h.entityId, h]));
+
+  const releaseHold = async (registrationId: string) => {
+    setBusy(true);
+    try {
+      const result = await releaseRetentionHoldAction(
+        "registration",
+        registrationId,
+      );
+      if (result?.ok) {
+        toast({ title: "Retention hold released" });
+        onChanged();
+      } else {
+        fail(result);
+      }
+    } catch (error) {
+      logError("retention", "hold-release-ui", error);
+      fail();
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const eventsFor = (paymentId: string) =>
     paymentEvents.filter((e) => e.paymentId === paymentId);
@@ -473,6 +520,14 @@ export function RegistrationPanel({
             ] ?? r.resolution}
           </Badge>
         )}
+        {holdsById.has(r.id) && (
+          <Badge
+            variant="secondary"
+            title={holdsById.get(r.id)!.reason}
+          >
+            Retention hold
+          </Badge>
+        )}
       </div>
       <p className="text-muted-foreground">
         {formatMoney(r.amountDueCents, r.currency)} due
@@ -545,6 +600,31 @@ export function RegistrationPanel({
           </Button>
         </div>
       )}
+      {holdsById.has(r.id) ? (
+        <div className="flex gap-2 flex-wrap">
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={() => releaseHold(r.id)}
+          >
+            <ShieldCheck className="h-4 w-4 mr-1" />
+            Release hold
+          </Button>
+        </div>
+      ) : (
+        <div className="flex gap-2 flex-wrap">
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={() => open({ kind: "hold", record: r })}
+          >
+            <Shield className="h-4 w-4 mr-1" />
+            Retention hold
+          </Button>
+        </div>
+      )}
     </li>
   );
 
@@ -571,6 +651,8 @@ export function RegistrationPanel({
         return `Correct assessed amount — ${registrationPeriodLabel(editor.record.year)}`;
       case "notes":
         return `Staff notes — ${registrationPeriodLabel(editor.record.year)}`;
+      case "hold":
+        return `Retention hold — ${registrationPeriodLabel(editor.record.year)}`;
     }
   };
 
@@ -804,9 +886,14 @@ export function RegistrationPanel({
 
               {(editor.kind === "void" ||
                 editor.kind === "refund" ||
-                editor.kind === "adjustment") && (
+                editor.kind === "adjustment" ||
+                editor.kind === "hold") && (
                 <div className="space-y-1 sm:col-span-2">
-                  <Label>Reason (required)</Label>
+                  <Label>
+                    {editor.kind === "hold"
+                      ? "Hold reason (required)"
+                      : "Reason (required)"}
+                  </Label>
                   <Input
                     value={reason}
                     onChange={(e) => setReason(e.target.value)}
@@ -815,30 +902,41 @@ export function RegistrationPanel({
                         ? "Why this pending entry is being cancelled"
                         : editor.kind === "refund"
                           ? "Why money is being returned"
-                          : "What was wrong and what this corrects"
+                          : editor.kind === "hold"
+                            ? "Why this record is exempt from retention cleanup (e.g. dispute, audit)"
+                            : "What was wrong and what this corrects"
+                    }
+                  />
+                  {editor.kind === "hold" && (
+                    <p className="text-muted-foreground">
+                      An active hold exempts this registration and its
+                      linked submission/payment details from automated
+                      retention cleanup until released.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {editor.kind !== "hold" && (
+                <div className="space-y-1 sm:col-span-2">
+                  <Label>
+                    {editor.kind === "cancel"
+                      ? "Reason (required for corrections)"
+                      : editor.kind === "notes"
+                        ? "Notes"
+                        : "Note (optional)"}
+                  </Label>
+                  <Input
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                    placeholder={
+                      editor.kind === "cancel"
+                        ? "What was wrong / why withdrawn"
+                        : undefined
                     }
                   />
                 </div>
               )}
-
-              <div className="space-y-1 sm:col-span-2">
-                <Label>
-                  {editor.kind === "cancel"
-                    ? "Reason (required for corrections)"
-                    : editor.kind === "notes"
-                      ? "Notes"
-                      : "Note (optional)"}
-                </Label>
-                <Input
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder={
-                    editor.kind === "cancel"
-                      ? "What was wrong / why withdrawn"
-                      : undefined
-                  }
-                />
-              </div>
             </div>
 
             <div className="flex gap-2">

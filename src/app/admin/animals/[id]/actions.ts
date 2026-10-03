@@ -199,6 +199,7 @@ export async function getAnimalMedicalAction(
       registrations: [],
       payments: [],
       paymentEvents: [],
+      retentionHolds: [],
       documents: [],
       auditTrail: [],
     },

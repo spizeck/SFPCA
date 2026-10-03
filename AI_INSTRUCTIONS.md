@@ -282,8 +282,15 @@ targets `/api/receipts/[submissionId]` on the **existing** row — the
 route re-claims the released receipt slot rather than creating a new
 submission.
 
-**Retention:** no formal retention period exists — the policy question
-is #130. Submissions persist indefinitely.
+**Retention (#130):** a formal policy now exists and is enforced by
+`src/lib/registry/retention.ts` + the `/api/cron/retention` cron
+(RUNBOOK §30). Constants live in `src/lib/retention.ts`: completed
+records 7 years after registration-year end (anonymize, never delete
+canonical history), verified receipts 90 days after the server-side
+`receipt_verified_at` stamp (delete the Storage object, keep ledger
+facts), abandoned/rejected submissions 12 months (delete). Active rows
+in `retention_holds` exempt an entity from every automated path until
+released.
 
 ## Authoritative registrations (canonical, #169)
 

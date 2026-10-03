@@ -106,6 +106,19 @@ export interface AnimalRegistration {
   // when no receipt was provided. Resolved to a download URL only in the
   // admin view via the Storage SDK.
   paymentReceipt?: string | null;
+  // Receipt lifecycle (#130): receiptVerifiedAt is the server-side
+  // stamp the 90-day retention clock runs from; receiptPurgedAt means
+  // the binary was intentionally deleted under the retention policy —
+  // render "removed", never a download button.
+  receiptVerifiedAt?: string | null;
+  receiptPurgedAt?: string | null;
+  // Active retention hold, when staff exempted this submission from
+  // automated purge/anonymization (#130).
+  retentionHold?: {
+    reason: string;
+    createdByLabel: string;
+    createdAt: string;
+  } | null;
   totalFee: number;
   status: "pending" | "approved" | "rejected";
   createdAt: string;
