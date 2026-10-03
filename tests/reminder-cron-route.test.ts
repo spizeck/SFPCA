@@ -5,10 +5,13 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const { mockRunCycle, mockCreateSender } = vi.hoisted(() => ({
-  mockRunCycle: vi.fn(),
-  mockCreateSender: vi.fn(),
-}));
+const { mockRunCycle, mockCreateSender, mockLifecycleStrict } = vi.hoisted(
+  () => ({
+    mockRunCycle: vi.fn(),
+    mockCreateSender: vi.fn(),
+    mockLifecycleStrict: vi.fn(),
+  }),
+);
 
 vi.mock("@/lib/registry/reminders", () => ({
   runReminderCycle: mockRunCycle,
@@ -24,7 +27,7 @@ vi.mock("@/lib/email", () => ({
 // Deterministic 'live' posture: lifecycle is a database read in real
 // operation, but unit tests have no registry — resolve it directly.
 vi.mock("@/lib/app-lifecycle", () => ({
-  getAppLifecycle: vi.fn().mockResolvedValue("live"),
+  getAppLifecycleStrict: mockLifecycleStrict,
 }));
 
 import { GET } from "@/app/api/cron/reminders/route";
@@ -56,6 +59,7 @@ beforeEach(() => {
     delivery: { claimed: 0, sent: 0, requeued: 0, failed: 0, malformed: 0, reclaimed: 0 },
   });
   mockCreateSender.mockReset().mockReturnValue({ provider: "resend", send: vi.fn() });
+  mockLifecycleStrict.mockReset().mockResolvedValue("live");
 });
 
 describe("GET /api/cron/reminders", () => {
@@ -153,6 +157,29 @@ describe("GET /api/cron/reminders", () => {
     expect(response.status).toBe(200);
     expect(mockRunCycle).toHaveBeenCalledWith(
       expect.objectContaining({ asOf: "2026-09-23", dryRun: false, sender }),
+    );
+  });
+
+  // #275: an unreadable app_state row must fail CLOSED — during a demo
+  // window the fail-open 'live' resolution would select the real Resend
+  // sender and emit mail to board-entered addresses.
+  test("an unreadable lifecycle refuses sends instead of falling back to Resend", async () => {
+    mockLifecycleStrict.mockResolvedValue(undefined);
+    const response = await GET(authed());
+    expect(response.status).toBe(503);
+    expect(mockRunCycle).not.toHaveBeenCalled();
+    expect(mockCreateSender).not.toHaveBeenCalled();
+  });
+
+  test("a prelaunch-demo lifecycle selects the lifecycle-aware sender", async () => {
+    mockLifecycleStrict.mockResolvedValue("prelaunch-demo");
+    const sink = { provider: "demo-sink", send: vi.fn() };
+    mockCreateSender.mockReturnValue(sink);
+    const response = await GET(authed("?as_of=2026-09-23"));
+    expect(response.status).toBe(200);
+    expect(mockCreateSender).toHaveBeenCalledWith("prelaunch-demo");
+    expect(mockRunCycle).toHaveBeenCalledWith(
+      expect.objectContaining({ sender: sink }),
     );
   });
 

@@ -15,6 +15,10 @@ vi.mock("resend", () => ({
 import {
   resolveAppLifecycle,
   isPrelaunchDemo,
+  getAppLifecycle,
+  getAppLifecycleStrict,
+  getCachedAppLifecycle,
+  resetCachedAppLifecycle,
   APP_LIFECYCLE_PRELAUNCH_DEMO,
   APP_LIFECYCLE_LIVE,
 } from "@/lib/app-lifecycle";
@@ -36,6 +40,73 @@ describe("resolveAppLifecycle", () => {
       expect(resolveAppLifecycle(v)).toBe(APP_LIFECYCLE_LIVE);
     }
     expect(isPrelaunchDemo(APP_LIFECYCLE_LIVE)).toBe(false);
+  });
+});
+
+const brokenDb = {
+  select: () => {
+    throw new Error("db down");
+  },
+} as any;
+const emptyDb = {
+  select: () => ({
+    from: () => ({ where: () => ({ limit: () => Promise.resolve([]) }) }),
+  }),
+} as any;
+
+describe("lifecycle read failure directions", () => {
+  // The two callers disagree on the safe failure direction: presentation
+  // (banner/SEO) fails OPEN to 'live' so a post-launch outage never
+  // re-enables demo surfaces, while side-effecting paths (email sends,
+  // destructive sweeps) must fail CLOSED.
+  test("strict read returns undefined on db error (fail closed)", async () => {
+    expect(await getAppLifecycleStrict(brokenDb)).toBeUndefined();
+  });
+
+  test("presentation read resolves live on db error (fail open)", async () => {
+    expect(await getAppLifecycle(brokenDb)).toBe(APP_LIFECYCLE_LIVE);
+  });
+
+  test("strict read resolves a missing row to live", async () => {
+    expect(await getAppLifecycleStrict(emptyDb)).toBe(APP_LIFECYCLE_LIVE);
+  });
+});
+
+describe("getCachedAppLifecycle stickiness", () => {
+  // A confirmed demo lifecycle must survive a later read failure — an
+  // outage during the demo window must not drop noindex/robots
+  // protections by resolving 'live'. A cold-start failure still
+  // resolves 'live' (a fresh live deploy has nothing to preserve).
+  let failNext = false;
+  const flakyDb = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: () =>
+            failNext
+              ? Promise.reject(new Error("db down"))
+              : Promise.resolve([{ lifecycle: "prelaunch-demo" }]),
+        }),
+      }),
+    }),
+  } as any;
+
+  test("read failure preserves a confirmed demo lifecycle", async () => {
+    failNext = false;
+    resetCachedAppLifecycle();
+    expect(await getCachedAppLifecycle(flakyDb)).toBe(
+      APP_LIFECYCLE_PRELAUNCH_DEMO,
+    );
+    failNext = true;
+    // ttl=0 forces a fresh read past the memo window.
+    expect(await getCachedAppLifecycle(flakyDb, 0)).toBe(
+      APP_LIFECYCLE_PRELAUNCH_DEMO,
+    );
+  });
+
+  test("cold-start read failure resolves live", async () => {
+    resetCachedAppLifecycle();
+    expect(await getCachedAppLifecycle(brokenDb)).toBe(APP_LIFECYCLE_LIVE);
   });
 });
 

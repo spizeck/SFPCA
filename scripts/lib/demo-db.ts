@@ -210,10 +210,14 @@ export interface PostgresResetReport {
   ephemeralCleared: number;
 }
 
-// Deletes the complete Postgres demo footprint. Caller has already
-// verified lifecycle='prelaunch-demo' and the active seed run — this
-// function is the mechanism, not the gate.
-export async function resetPostgresDemo(
+// Deletes the Postgres demo footprint DATA ONLY — the manifest and
+// run/lifecycle bookkeeping are deliberately NOT touched here, so a
+// failure later in the reset flow leaves an active run the operator
+// can simply reset again. Call inside a transaction together with
+// finalizePostgresReset, and only AFTER non-Postgres stores are clean.
+// Caller has already verified lifecycle='prelaunch-demo' and the active
+// seed run — this function is the mechanism, not the gate.
+export async function resetPostgresDemoData(
   db: DemoDb,
   seededAt: string,
 ): Promise<PostgresResetReport> {
@@ -239,11 +243,11 @@ export async function resetPostgresDemo(
   // 2. Window tables: only rows created during the demo window go —
   //    pre-seed staff/identity rows are real and stay.
   for (const table of WINDOW_DELETE_TABLES) {
-    const result = (await db.execute(
+    const result = await db.execute(
       sql.raw(
         `delete from "${table}" where created_at >= '${seededAt}'::timestamptz`,
       ),
-    ));
+    );
     report.windowDeleted[table] = affectedOf(result);
   }
 
@@ -253,9 +257,15 @@ export async function resetPostgresDemo(
   );
   report.ephemeralCleared = affectedOf(eph);
 
-  // 4. Tooling state: clear the manifest and mark the run reset; the
-  //    lifecycle row stays 'prelaunch-demo' (re-seed remains possible)
-  //    but is no longer "seeded".
+  return report;
+}
+
+// The finalizing step: clear the manifest, mark the run reset, and
+// clear the seeded markers on the lifecycle row (which stays
+// 'prelaunch-demo' — re-seed remains possible). Call LAST, inside the
+// same transaction as resetPostgresDemoData, only once every other
+// store has been cleaned successfully.
+export async function finalizePostgresReset(db: DemoDb): Promise<void> {
   const run = await activeSeedRun(db);
   if (run) {
     await db.execute(
@@ -268,7 +278,15 @@ export async function resetPostgresDemo(
   await db.execute(
     sql`update app_state set demo_seeded_at = null, demo_seed_version = null, updated_at = now() where id = 1`,
   );
+}
 
+// Convenience wrapper for tests: data + finalize in one call.
+export async function resetPostgresDemo(
+  db: DemoDb,
+  seededAt: string,
+): Promise<PostgresResetReport> {
+  const report = await resetPostgresDemoData(db, seededAt);
+  await finalizePostgresReset(db);
   return report;
 }
 

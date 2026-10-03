@@ -28,7 +28,7 @@ import { config } from "dotenv";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { sql } from "drizzle-orm";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   activeSeedRun,
@@ -37,7 +37,9 @@ import {
   listPublicTables,
   readLifecycleRow,
   requirePrelaunchLifecycle,
-  resetPostgresDemo,
+  resetPostgresDemoData,
+  finalizePostgresReset,
+  type PostgresResetReport,
   tableCounts,
   transitionToLive,
   verifyPostgresClean,
@@ -113,8 +115,7 @@ function parseArgs(argv: string[]) {
 interface Target {
   mode: "production" | "local";
   sql: ReturnType<typeof postgres>;
-   
-  db: any;
+  db: ReturnType<typeof drizzle>;
   projectId: string;
   bucketName: string;
 }
@@ -208,9 +209,21 @@ async function resolveTarget(opts: {
       `identity ok: neon primary '${primary!.name}' @ ${host}; firebase project '${projectId}'`,
     );
   } else {
-    // The local target must not secretly be production: refuse if the
-    // host resolves to the Neon primary endpoint when we can check.
-    if (process.env.NEON_API_KEY) {
+    // The local target must not secretly be production — fail CLOSED:
+    // a remote DATABASE_URL is only acceptable once the Neon API
+    // confirms the host is not the production primary endpoint. No
+    // API key / failed lookup / unknown host class → refuse.
+    const localHosts = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+    if (!localHosts.has(host) && !host.endsWith(".local")) {
+      if (!process.env.NEON_API_KEY) {
+        fail(
+          `--local against remote DATABASE_URL host '${host}' cannot be ` +
+            "verified — set NEON_API_KEY + NEON_PROJECT_ID so the " +
+            "endpoint can be checked against the production primary, " +
+            "or point DATABASE_URL at a local database.",
+        );
+      }
+      let hosts: string[] = [];
       try {
         const project = neonProjectId();
         const [branches, endpoints] = await Promise.all([
@@ -218,19 +231,20 @@ async function resolveTarget(opts: {
           listEndpoints(process.env.NEON_API_KEY, project),
         ]);
         const primary = branches.find((b) => b.primary);
-        const hosts = primary
+        hosts = primary
           ? endpoints.filter((e) => e.branch_id === primary.id).map((e) => e.host)
           : [];
-        if (hosts.includes(host)) {
-          fail(
-            `DATABASE_URL host '${host}' IS the production primary endpoint — ` +
-              "remove production credentials before using --local.",
-          );
-        }
       } catch (error) {
         if (error instanceof DemoRefusal) throw error;
-        console.warn(
-          `warning: could not verify Neon primary endpoint (${error instanceof Error ? error.message : error}) — continuing`,
+        fail(
+          `--local against remote DATABASE_URL host '${host}' could not ` +
+            `be verified against the Neon API (${error instanceof Error ? error.message : error}) — refusing.`,
+        );
+      }
+      if (hosts.includes(host)) {
+        fail(
+          `DATABASE_URL host '${host}' IS the production primary endpoint — ` +
+            "remove production credentials before using --local.",
         );
       }
     }
@@ -254,24 +268,30 @@ function section(title: string) {
 }
 
 async function migrationStatus(db: ReturnType<typeof drizzle>): Promise<string> {
-  const files = readdirSync("drizzle").filter((f) => f.endsWith(".sql")).sort();
-  let applied: string[] = [];
+  // drizzle-orm's journal table is (id, hash, created_at) — there is no
+  // tag column; created_at is the journal entry's `when` (folderMillis).
+  const journal = JSON.parse(
+    readFileSync(join("drizzle", "meta", "_journal.json"), "utf8"),
+  ) as { entries: { tag: string; when: number }[] };
+  let applied: Set<number>;
   try {
     const result = await db.execute(
-      sql`select tag from drizzle.__drizzle_migrations order by id`,
+      sql`select created_at from drizzle.__drizzle_migrations`,
     );
     const rows = (Array.isArray(result)
       ? result
-      : (result as { rows: { tag: string }[] }).rows) as { tag: string }[];
-    applied = rows.map((r) => r.tag);
+      : (result as { rows: { created_at: unknown }[] }).rows) as {
+      created_at: unknown;
+    }[];
+    applied = new Set(rows.map((r) => Number(r.created_at)));
   } catch {
     return `unknown — drizzle.__drizzle_migrations unreadable`;
   }
-  const pending = files.filter(
-    (f) => !applied.some((t) => f.startsWith(t)),
-  );
+  const pending = journal.entries
+    .filter((e) => !applied.has(e.when))
+    .map((e) => e.tag);
   return pending.length === 0
-    ? `current (${applied.length} applied)`
+    ? `current (${applied.size} applied)`
     : `PENDING: ${pending.join(", ")}`;
 }
 
@@ -703,22 +723,17 @@ async function cmdReset(t: Target, confirm?: string) {
   const bucket = getStorage(getAdminApp()).bucket(t.bucketName);
   const seededAt = run.seededAt;
 
-  // Read the manifest FIRST — resetPostgresDemo clears it as part of
-  // cleanup, so anything needed for non-Postgres stores must be
+  // Read the manifest FIRST — finalizePostgresReset clears it as part
+  // of cleanup, so anything needed for non-Postgres stores must be
   // captured now.
   const manifestDocs = await manifestEntities(t.db, run.id, "firestore");
   const manifestObjects = await manifestEntities(t.db, run.id, "storage");
 
-  // --- Postgres ---
-  section("postgres reset");
-  const report = await resetPostgresDemo(t.db, seededAt);
-  console.log(`  truncated domain tables: ${report.truncatedTables.length}`);
-  for (const [table, n] of Object.entries(report.windowDeleted)) {
-    if (n > 0) console.log(`  window-deleted ${table}: ${n} row(s)`);
-  }
-  if (report.ephemeralCleared > 0) {
-    console.log(`  cleared rate-limit windows: ${report.ephemeralCleared}`);
-  }
+  // ORDERING IS THE SAFETY PROPERTY: external stores are cleaned FIRST
+  // while the seed run is still 'active'. If any step fails, the run
+  // remains active and `reset` can simply be re-run — every step below
+  // is idempotent. The Postgres data reset + manifest/run finalization
+  // happens LAST, atomically in one transaction.
 
   // --- Firebase Auth ---
   // Delete users created during the demo window whose email is NOT in the
@@ -737,8 +752,17 @@ async function cmdReset(t: Target, confirm?: string) {
     const created = new Date(u.metadata.creationTime);
     const email = (u.email ?? "").toLowerCase();
     if (created >= new Date(seededAt) && !preserve.has(email)) {
-      await auth.deleteUser(u.uid);
-      deletedUsers++;
+      try {
+        await auth.deleteUser(u.uid);
+        deletedUsers++;
+      } catch (error) {
+        // Idempotent retry: a user gone since the listing is fine.
+        if (
+          (error as { code?: string }).code !== "auth/user-not-found"
+        ) {
+          throw error;
+        }
+      }
     }
   }
   console.log(`  deleted demo-window users: ${deletedUsers}`);
@@ -777,6 +801,26 @@ async function cmdReset(t: Target, confirm?: string) {
     }
   }
   console.log("  manifest objects removed");
+
+  // --- Postgres (LAST, atomically) ---
+  // Only reached when every external store is clean. The data reset and
+  // the manifest/run/lifecycle finalization commit together — a failure
+  // anywhere earlier leaves an active run and a fully retryable reset.
+  section("postgres reset");
+  const report: PostgresResetReport = await t.db.transaction(
+    async (tx) => {
+      const r = await resetPostgresDemoData(tx, seededAt);
+      await finalizePostgresReset(tx);
+      return r;
+    },
+  );
+  console.log(`  truncated domain tables: ${report.truncatedTables.length}`);
+  for (const [table, n] of Object.entries(report.windowDeleted)) {
+    if (n > 0) console.log(`  window-deleted ${table}: ${n} row(s)`);
+  }
+  if (report.ephemeralCleared > 0) {
+    console.log(`  cleared rate-limit windows: ${report.ephemeralCleared}`);
+  }
 
   section("reset complete");
   console.log("run `verify` to confirm all stores are clean.");

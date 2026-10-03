@@ -68,7 +68,9 @@ npm run production-demo -- go-live --production --confirm "GO LIVE"
 
 Local sandbox variants (PGlite/emulator targets) use `--local` and the
 `*LOCAL*` phrases; `--local` hard-refuses if the emulator env vars are
-absent or the database host resolves to the production Neon endpoint.
+absent or the database host cannot be proven safe — a remote
+`DATABASE_URL` is refused unless `NEON_API_KEY` + `NEON_PROJECT_ID`
+successfully verify it is not the production primary endpoint.
 
 `seed` and `reset` in production mode additionally require:
 
@@ -81,11 +83,13 @@ absent or the database host resolves to the production Neon endpoint.
 
 ## Before the board demo
 
-1. **Deploy** the reviewed build including migration `0022` — the
+1. **Vercel env FIRST**: set `NEXT_PUBLIC_SENTRY_ENVIRONMENT=prelaunch-demo`
+   on the production project **before deploying** — it is inlined at
+   build time, so a deploy made before the variable exists keeps the
+   `production` label for the whole demo window. Also ensure
+   `SITE_MAINTENANCE_MODE` is **off** so the board can reach the site.
+2. **Deploy** the reviewed build including migration `0022` — the
    `app_state` row is created as `prelaunch-demo` automatically.
-2. **Vercel env**: confirm `NEXT_PUBLIC_SENTRY_ENVIRONMENT=prelaunch-demo`
-   is set for the production deployment; ensure `SITE_MAINTENANCE_MODE`
-   is **off** so the board can reach the site.
 3. **Operator env** (`.env.local`): `DATABASE_URL`/`DATABASE_URL_UNPOOLED`,
    `FIREBASE_ADMIN_*`, `NEON_API_KEY`, `ADMIN_EMAILS`,
    `DEMO_ACCOUNT_PASSWORD`.
@@ -125,8 +129,11 @@ absent or the database host resolves to the production Neon endpoint.
 6. Prove the tooling is retired:
    `npm run production-demo -- seed --production --confirm "SEED PRODUCTION DEMO"`
    must now print a refusal.
-7. Remove `NEXT_PUBLIC_SENTRY_ENVIRONMENT` from Vercel (next deploy
-   reports `production` again).
+7. Remove `NEXT_PUBLIC_SENTRY_ENVIRONMENT` from Vercel and trigger a
+   redeploy (the env var is build-time — until the next deploy, events
+   remain labelled `prelaunch-demo`, the safe direction: real events
+   look like demo noise rather than demo errors masquerading as
+   production incidents).
 8. Verify on the live site: banner gone, `robots.txt` shows normal rules,
    `/api/app-state` returns `{"lifecycle":"live"}`.
 9. Only now allow the first real SFPCA record.
