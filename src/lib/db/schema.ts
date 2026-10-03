@@ -1987,6 +1987,107 @@ export const householdMerges = pgTable(
   ],
 );
 
+// --- Environment lifecycle & demo provenance --------------------------------
+// Single-row deployment lifecycle marker. Every migrated database starts
+// in 'prelaunch-demo' — the honest state of a fresh, empty registry — and
+// the ONLY forward transition is to 'live', performed deliberately by the
+// operator when real records begin. A database trigger makes 'live'
+// terminal: once set, the row can never be updated or deleted again
+// without dropping the trigger itself.
+//
+// While lifecycle = 'prelaunch-demo' the app is in board-demo posture:
+// a visible "PRE-LAUNCH DEMO" banner renders on every surface,
+// crawlers are told not to index, and the reminder pipeline's email
+// sender is replaced by an inert sink so no board action can emit real
+// mail. After 'live' the site behaves exactly as before — banner gone,
+// normal SEO, real delivery. The scripts/production-demo.ts lifecycle
+// (check/seed/status/reset/verify/go-live) only operates while the row
+// reads 'prelaunch-demo', which is what makes the reset safe: it can
+// only ever run in a window where no real operational data can exist.
+export const appState = pgTable(
+  "app_state",
+  {
+    // Single-row table — CHECK pins the only legal primary key.
+    id: integer("id").primaryKey().default(1),
+    lifecycle: text("lifecycle").notNull().default("prelaunch-demo"),
+    liveAt: timestamp("live_at", { withTimezone: true, mode: "date" }),
+    // Start of the current (or most recent) demo seed run — the window
+    // boundary the reset uses to distinguish demo-window rows from
+    // pre-seed rows. Null when no demo seed is applied.
+    demoSeededAt: timestamp("demo_seeded_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    demoSeedVersion: integer("demo_seed_version"),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check("app_state_single_row_check", sql`${t.id} = 1`),
+    check(
+      "app_state_lifecycle_check",
+      sql`${t.lifecycle} IN ('prelaunch-demo','live')`,
+    ),
+  ],
+);
+
+// One row per demo seed application. Runs persist after reset (marked
+// reset_at) so the demo history survives the cleanup it describes; the
+// seeded manifest lives in demo_seed_entities and is cleared at reset.
+// The run also snapshots which Firestore collections / Storage prefixes
+// were EMPTY at seed time — the reset rule "wipe what was empty, delete
+// only manifest rows elsewhere" is derived from these lists.
+export const demoSeedRuns = pgTable("demo_seed_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  seedVersion: integer("seed_version").notNull(),
+  seededAt: timestamp("seeded_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+  resetAt: timestamp("reset_at", { withTimezone: true, mode: "date" }),
+  // Per-table seeded row counts — the status report's expected baseline.
+  seededCounts: jsonb("seeded_counts").notNull().default(sql`'{}'::jsonb`),
+  // Firestore collection names verified empty at seed time (safe to
+  // wipe wholesale at reset — everything in them is demo data).
+  emptyFirestoreCollections: jsonb("empty_firestore_collections")
+    .notNull()
+    .default(sql`'[]'::jsonb`),
+  // Storage object prefixes verified empty at seed time.
+  emptyStoragePrefixes: jsonb("empty_storage_prefixes")
+    .notNull()
+    .default(sql`'[]'::jsonb`),
+  createdAt: createdAt(),
+});
+
+// The seeded footprint manifest — one row per entity the seed created
+// across every store, so status can report "which seeded rows are
+// gone" and reset can delete exactly what was written. entity_table is
+// the Postgres table name, Firestore collection name, or 'auth'/
+// 'storage'; entity_id is the row uuid, document path, uid, or object
+// path. Postgres rows created during the demo window do NOT appear
+// here — created_at >= seeded_at already identifies them; this table
+// exists to name the ORIGINAL seeded set.
+export const demoSeedEntities = pgTable(
+  "demo_seed_entities",
+  {
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => demoSeedRuns.id, { onDelete: "cascade" }),
+    entityStore: text("entity_store").notNull(),
+    entityTable: text("entity_table").notNull(),
+    entityId: text("entity_id").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({
+      columns: [t.entityStore, t.entityTable, t.entityId],
+    }),
+    index("demo_seed_entities_run_idx").on(t.runId),
+    check(
+      "demo_seed_entities_store_check",
+      sql`${t.entityStore} IN ('postgres','firestore','storage','auth')`,
+    ),
+  ],
+);
+
 // --- Public-intake abuse throttling (#219) ---------------------------------
 // Fixed-window counters backing the server-side rate limiter for the
 // unauthenticated intake surfaces (public registration, public sighting

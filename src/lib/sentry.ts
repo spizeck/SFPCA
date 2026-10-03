@@ -105,6 +105,16 @@ function sentryEnvironmentOverride(
   return env.NEXT_PUBLIC_SENTRY_ENVIRONMENT || env.SENTRY_ENVIRONMENT;
 }
 
+// The pre-launch demo Sentry label (#275). On a real Vercel PRODUCTION
+// deployment, setting NEXT_PUBLIC_SENTRY_ENVIRONMENT=prelaunch-demo in
+// the Vercel env tags every event from the board-demo window with this
+// environment instead of 'production' — demo traffic can never
+// masquerade as live incidents. This is the ONE value allowed to
+// outrank VERCEL_ENV=production: it narrows toward "not real traffic",
+// never toward more trust, and removing the variable (next deploy)
+// restores 'production' automatically.
+export const SENTRY_PRELAUNCH_DEMO_ENV = "prelaunch-demo";
+
 // The single environment decision for every runtime. `environment` is
 // a Sentry LABEL, never proof of deployment: off Vercel infrastructure
 // it can resolve to "development" or "test" but NEVER "production" —
@@ -118,8 +128,13 @@ export function resolveSentryEnvironment(
     // environments report "preview"). The explicit override remains as
     // a documented escape hatch for a missing/unexpected VERCEL_ENV —
     // it can never run ahead of it, so a mis-scoped override cannot
-    // relabel a preview deployment as production.
-    if (env.VERCEL_ENV === "production") return "production";
+    // relabel a preview deployment as production. The single deliberate
+    // exception is the pre-launch demo label on production (see above).
+    if (env.VERCEL_ENV === "production") {
+      return env.NEXT_PUBLIC_SENTRY_ENVIRONMENT === SENTRY_PRELAUNCH_DEMO_ENV
+        ? SENTRY_PRELAUNCH_DEMO_ENV
+        : "production";
+    }
     if (env.VERCEL_ENV === "preview") return "preview";
     return sentryEnvironmentOverride(env) || "development";
   }

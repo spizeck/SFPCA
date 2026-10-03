@@ -118,6 +118,38 @@ test("maintenance robots disallows everything and drops the sitemap", () => {
   assert.equal(robots.sitemap, undefined);
 });
 
+// --- Pre-launch demo lifecycle (#275) -------------------------------------
+// While the lifecycle row reads 'prelaunch-demo' the fictional dataset
+// must never reach an index; the moment it reads 'live' the normal
+// rules resume — the demo can never leave the real site noindexed.
+
+const DEMO = "prelaunch-demo";
+const LIVE = "live";
+
+test("prelaunch-demo lifecycle returns an empty sitemap", () => {
+  assert.deepEqual(buildSitemap(OFF, DEMO), []);
+});
+
+test("prelaunch-demo robots disallows everything and drops the sitemap", () => {
+  const robots = buildRobots(OFF, DEMO);
+  const rule = Array.isArray(robots.rules) ? robots.rules[0] : robots.rules;
+  assert.equal(rule?.disallow, "/");
+  assert.equal(robots.sitemap, undefined);
+});
+
+test("live lifecycle preserves the normal sitemap", () => {
+  const urls = buildSitemap(OFF, LIVE).map((e) => e.url);
+  assert.ok(urls.includes(`${PRODUCTION_SITE_URL}/faq`));
+  assert.ok(urls.includes(`${PRODUCTION_SITE_URL}/contact`));
+});
+
+test("live lifecycle preserves the normal robots rules", () => {
+  const robots = buildRobots(OFF, LIVE);
+  const rule = Array.isArray(robots.rules) ? robots.rules[0] : robots.rules;
+  assert.equal(rule?.allow, "/");
+  assert.equal(robots.sitemap, `${PRODUCTION_SITE_URL}/sitemap.xml`);
+});
+
 // --- Structured data ------------------------------------------------------
 
 test("organization JSON-LD contains only verified facts", () => {

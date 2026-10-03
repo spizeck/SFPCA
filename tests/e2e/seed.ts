@@ -57,6 +57,16 @@ export async function seedE2ERegistry(
   db: RegistryDb,
   ownerUid: string,
 ): Promise<void> {
+  // E2E exercises LIVE behavior (no demo banner, real sender plumbing,
+  // normal SEO). Freshly-migrated databases begin 'prelaunch-demo' by
+  // design (#275) and truncateRegistry drops the row — an absent row
+  // already resolves 'live', but pinning it makes the test posture
+  // explicit rather than an accident of the reset order.
+  await db.execute(
+    sql`insert into app_state (id, lifecycle) values (1, 'live')
+        on conflict (id) do nothing`,
+  );
+
   // The admin_users row is what authorizes the E2E admin's session — the
   // same record production reads; no ADMIN_EMAILS bootstrap is needed.
   await db.insert(adminUsers).values({

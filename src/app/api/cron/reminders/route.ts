@@ -19,7 +19,8 @@
 // is lost.
 
 import { NextRequest, NextResponse } from "next/server";
-import { createResendSender } from "@/lib/email";
+import { createLifecycleAwareSender } from "@/lib/email";
+import { getAppLifecycle } from "@/lib/app-lifecycle";
 import { runReminderCycle } from "@/lib/registry/reminders";
 import { isIsoDateString, todayIsoDate } from "@/lib/vaccinations";
 import { logError, logWarn } from "@/lib/logger";
@@ -56,7 +57,13 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const sender = dryRun ? null : createResendSender();
+  // Pre-launch demo boundary (#275): while the lifecycle row reads
+  // 'prelaunch-demo' the sender is the inert demo-sink (or a single
+  // configured override inbox) — board actions exercise the real
+  // pipeline but no email can reach a real address. Once live, this is
+  // the ordinary Resend sender.
+  const lifecycle = await getAppLifecycle();
+  const sender = dryRun ? null : createLifecycleAwareSender(lifecycle);
   if (!dryRun && !sender) {
     logWarn("communications", "reminder-cron", "email provider not configured");
     return NextResponse.json(

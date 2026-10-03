@@ -16,6 +16,15 @@ vi.mock("@/lib/registry/reminders", () => ({
 
 vi.mock("@/lib/email", () => ({
   createResendSender: mockCreateSender,
+  // The route now resolves through the lifecycle-aware factory — the
+  // same mock sender exercises it.
+  createLifecycleAwareSender: mockCreateSender,
+}));
+
+// Deterministic 'live' posture: lifecycle is a database read in real
+// operation, but unit tests have no registry — resolve it directly.
+vi.mock("@/lib/app-lifecycle", () => ({
+  getAppLifecycle: vi.fn().mockResolvedValue("live"),
 }));
 
 import { GET } from "@/app/api/cron/reminders/route";
