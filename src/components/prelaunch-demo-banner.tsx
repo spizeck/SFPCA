@@ -85,7 +85,13 @@ export function PrelaunchDemoBanner() {
 
     const load = () =>
       fetch("/api/app-state", { cache: "no-store" })
-        .then((res) => (res.ok ? res.json() : null))
+        .then((res) => {
+          // A 503 'unavailable' is an unconfirmed lifecycle — retry
+          // once like a network failure rather than silently dropping
+          // the persisted label check.
+          if (!res.ok) throw new Error(`app-state ${res.status}`);
+          return res.json();
+        })
         .then((body) => {
           if (cancelled) return;
           const lifecycle = body?.lifecycle as string | undefined;

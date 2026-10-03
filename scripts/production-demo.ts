@@ -746,9 +746,18 @@ async function cmdReset(t: Target, confirm?: string) {
       .map((e) => e.trim().toLowerCase())
       .filter(Boolean),
   );
-  const users = await auth.listUsers(1000);
+  // listUsers is a single-batch call — follow pageToken until the
+  // whole project is listed so a demo account outside the first page
+  // can never survive reset while the run still finalizes.
+  const listed: Awaited<ReturnType<typeof auth.listUsers>>["users"] = [];
+  let pageToken: string | undefined;
+  do {
+    const page = await auth.listUsers(1000, pageToken);
+    listed.push(...page.users);
+    pageToken = page.pageToken;
+  } while (pageToken);
   let deletedUsers = 0;
-  for (const u of users.users) {
+  for (const u of listed) {
     const created = new Date(u.metadata.creationTime);
     const email = (u.email ?? "").toLowerCase();
     if (created >= new Date(seededAt) && !preserve.has(email)) {

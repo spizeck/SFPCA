@@ -6,10 +6,11 @@ with clearly fictional data so the SFPCA board can explore every workflow
 on their own devices. Before the first real SFPCA record is entered, the
 entire demo footprint is removed and verified clean.
 
-> **This workflow is only legal while production is pre-launch and empty.**
-> The tooling enforces that. Once the lifecycle row reads `live`, every
-> destructive command refuses permanently — enforced by a database trigger,
-> not just a script check.
+> **This workflow is only legal while production is pre-launch.**
+> The empty-domain requirement applies to *seeding* — `reset` and
+> `verify` are expected to run while demo rows exist. Once the
+> lifecycle row reads `live`, every destructive command refuses
+> permanently — enforced by a database trigger, not just a script check.
 
 ## Architecture summary
 
@@ -98,7 +99,10 @@ successfully verify it is not the production primary endpoint.
    current, stores reachable.
 5. **Seed**:
    `npm run production-demo -- seed --production --confirm "SEED PRODUCTION DEMO"`
-   — creates a pre-seed Neon snapshot automatically, then seeds.
+   — attempts a pre-seed Neon snapshot first (best-effort: it warns and
+   continues if the snapshot API fails; if you require a snapshot,
+   verify the `neon snapshot` line in the output or pass
+   `--no-snapshot` explicitly only when you're sure).
 6. **Confirm**: `npm run production-demo:status` — baseline counts shown.
 7. **Smoke test** one page of each surface (public, /admin, /portal) —
    the amber PRE-LAUNCH DEMO banner must be visible everywhere.

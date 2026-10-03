@@ -32,11 +32,38 @@ CREATE TABLE "demo_seed_runs" (
 --> statement-breakpoint
 ALTER TABLE "demo_seed_entities" ADD CONSTRAINT "demo_seed_entities_run_id_demo_seed_runs_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."demo_seed_runs"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "demo_seed_entities_run_idx" ON "demo_seed_entities" USING btree ("run_id");--> statement-breakpoint
--- The lifecycle row: fresh databases begin in 'prelaunch-demo' so the
--- production deploy enters demo posture automatically. E2E/dev
--- fixtures that need live behavior UPDATE it to 'live' after
--- migrating (still legal — the trigger only freezes a 'live' row).
-INSERT INTO "app_state" ("id", "lifecycle") VALUES (1, 'prelaunch-demo');--> statement-breakpoint
+-- The lifecycle row: fresh EMPTY databases begin in 'prelaunch-demo' so
+-- the production deploy enters demo posture automatically. A database
+-- that already carries operational (domain) rows starts 'live' instead
+-- — populated data must never silently drop into demo posture (banner,
+-- noindex, demo email sink, sweep skip). The exempt set mirrors
+-- scripts/lib/demo-db.ts: tooling tables, the preserved-by-window
+-- staff/identity tables (operator accounts may legitimately pre-exist),
+-- and ephemeral rate-limit state. E2E/dev fixtures that need live
+-- behavior UPDATE it to 'live' after migrating (still legal — the
+-- trigger only freezes a 'live' row).
+DO $$
+DECLARE
+  t record;
+  n bigint;
+BEGIN
+  FOR t IN
+    SELECT tablename FROM pg_tables
+    WHERE schemaname = 'public'
+      AND tablename NOT IN (
+        'app_state', 'demo_seed_runs', 'demo_seed_entities',
+        'household_members', 'admin_users', 'auth_identities',
+        'households', 'audit_events', 'persons', 'rate_limit_windows'
+      )
+  LOOP
+    EXECUTE format('SELECT count(*) FROM %I', t.tablename) INTO n;
+    IF n > 0 THEN
+      INSERT INTO "app_state" ("id", "lifecycle") VALUES (1, 'live');
+      RETURN;
+    END IF;
+  END LOOP;
+  INSERT INTO "app_state" ("id", "lifecycle") VALUES (1, 'prelaunch-demo');
+END $$;--> statement-breakpoint
 -- One-way lifecycle enforcement: once the row reads 'live' it can
 -- never be UPDATEd or DELETEd — the prelaunch-demo state is frozen
 -- into the past and the demo tooling can never be re-engaged without
