@@ -227,6 +227,15 @@ describe("seed → reset → verify-clean", () => {
       Number((animals as unknown as { rows: { n: number }[] }).rows[0].n),
     ).toBe(0);
 
+    // Seeded audit rows fall inside the demo window and are gone too
+    // (a backdated created_at would escape the window predicate).
+    const audits = await db.execute(
+      sql`select count(*)::int as n from audit_events`,
+    );
+    expect(
+      Number((audits as unknown as { rows: { n: number }[] }).rows[0].n),
+    ).toBe(0);
+
     // The pre-seed person survived; the window person did not.
     const persons = await db.execute(
       sql`select id from persons`,

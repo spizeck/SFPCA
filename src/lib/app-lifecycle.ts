@@ -63,21 +63,15 @@ export function isPrelaunchDemo(lifecycle: AppLifecycle): boolean {
   return lifecycle === APP_LIFECYCLE_PRELAUNCH_DEMO;
 }
 
-// Read the lifecycle row. On any database failure this resolves to
-// 'live' — the same fail-safe direction as a missing row — and warns
-// once per process so the outage is diagnosable rather than silently
-// flipping demo surfaces off (or a live site into a non-indexable
-// state) on a transient error.
-let lifecycleReadFailed = false;
-
-export async function getAppLifecycle(
+// Strict lifecycle read for side-effecting paths (reminder sends,
+// destructive sweeps): never guess 'live' on a read failure.
+// `undefined` means "unknown" and the caller must fail closed.
+export async function getAppLifecycleStrict(
   db?: RegistryDb,
-): Promise<AppLifecycle> {
+): Promise<AppLifecycle | undefined> {
   try {
     // Resolved inside the try: getRegistryDb() throws when DATABASE_URL
-    // is absent (e.g. a deployment that never touches the registry),
-    // and a default-parameter evaluation would escape this catch and
-    // fail every proxied request instead of resolving 'live'.
+    // is absent (e.g. a deployment that never touches the registry).
     const registry = db ?? getRegistryDb();
     const [row] = await registry
       .select({ lifecycle: appState.lifecycle })
@@ -86,18 +80,26 @@ export async function getAppLifecycle(
       .limit(1);
     return resolveAppLifecycle(row?.lifecycle);
   } catch (error) {
-    if (!lifecycleReadFailed) {
-      lifecycleReadFailed = true;
-      logWarn(
-        "admin",
-        "app-lifecycle read",
-        `app_state read failed; resolving as 'live': ${
-          error instanceof Error ? error.message : "unknown"
-        }`,
-      );
-    }
-    return APP_LIFECYCLE_LIVE;
+    logWarn(
+      "admin",
+      "app-lifecycle read",
+      `app_state read failed; lifecycle unknown: ${
+        error instanceof Error ? error.message : "unknown"
+      }`,
+    );
+    return undefined;
   }
+}
+
+// Read the lifecycle row for presentation surfaces (banner, SEO,
+// proxy). On any database failure this resolves to 'live' — the same
+// fail-safe direction as a missing row — so a LIVE site never flashes a
+// demo banner or deindexes on a transient error. Side-effecting
+// callers must use getAppLifecycleStrict instead.
+export async function getAppLifecycle(
+  db?: RegistryDb,
+): Promise<AppLifecycle> {
+  return (await getAppLifecycleStrict(db)) ?? APP_LIFECYCLE_LIVE;
 }
 
 // Per-instance memoized read for the per-request proxy — one tiny query
@@ -115,7 +117,16 @@ export async function getCachedAppLifecycle(
   if (cached && Date.now() - cached.at < ttlMs) {
     return cached.value;
   }
-  const value = await getAppLifecycle(db);
+  const value = await getAppLifecycleStrict(db);
+  if (value === undefined) {
+    // Read failure: preserve the last CONFIRMED state rather than
+    // guessing. A demo-window outage then keeps the noindex posture
+    // instead of flipping the demo site to live SEO; post-go-live the
+    // cache only ever holds 'live', so an outage can never resurrect
+    // the demo presentation. A cold-start failure still resolves
+    // 'live' — the fail-safe direction for a fresh deploy.
+    return cached?.value ?? APP_LIFECYCLE_LIVE;
+  }
   cached = { value, at: Date.now() };
   return value;
 }

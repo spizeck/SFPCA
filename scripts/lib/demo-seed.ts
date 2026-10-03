@@ -1238,13 +1238,17 @@ export async function applyDemoPostgresSeed(
   ]).returning();
   track("auth_identities", identities);
 
+  // audit_events is a WINDOW table — these rows must keep the default
+  // created_at (>= seeded_at) so the reset's demo-window delete and
+  // verify-clean's residual check can see them. Backdating them would
+  // make them invisible to both and leak fictional history into live.
   await db.insert(auditEvents).values([
-    { actorLabel: "SFPCA Staff", entityType: "animal", entityId: biscuit.id, action: "create", createdAt: tsDaysAgo(ctx.asOf, 365 * 4) },
-    { actorLabel: "SFPCA Staff", entityType: "animal", entityId: rexSr.id, action: "lifecycle-transition", after: { to: "deceased" }, createdAt: tsDaysAgo(ctx.asOf, 100) },
-    { actorLabel: "SFPCA Staff", entityType: "registration", entityId: biscuitReg26.id, action: "create", createdAt: tsDaysAgo(ctx.asOf, 44) },
-    { actorLabel: "SFPCA Staff", entityType: "registration", entityId: rexReg26.id, action: "cancel", after: { reason: "withdrawn" }, createdAt: tsDaysAgo(ctx.asOf, 100) },
-    { actorLabel: "SFPCA Staff", entityType: "lost-found-case", entityId: maxCase.id, action: "publish", createdAt: tsDaysAgo(ctx.asOf, 5) },
-    { actorLabel: "SFPCA Staff", entityType: "person", entityId: dorothy.id, action: "update", createdAt: tsDaysAgo(ctx.asOf, 30) },
+    { actorLabel: "SFPCA Staff", entityType: "animal", entityId: biscuit.id, action: "create" },
+    { actorLabel: "SFPCA Staff", entityType: "animal", entityId: rexSr.id, action: "lifecycle-transition", after: { to: "deceased" } },
+    { actorLabel: "SFPCA Staff", entityType: "registration", entityId: biscuitReg26.id, action: "create" },
+    { actorLabel: "SFPCA Staff", entityType: "registration", entityId: rexReg26.id, action: "cancel", after: { reason: "withdrawn" } },
+    { actorLabel: "SFPCA Staff", entityType: "lost-found-case", entityId: maxCase.id, action: "publish" },
+    { actorLabel: "SFPCA Staff", entityType: "person", entityId: dorothy.id, action: "update" },
   ]);
   counts["audit_events"] = 6;
 
