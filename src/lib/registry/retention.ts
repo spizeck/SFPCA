@@ -212,6 +212,22 @@ async function linkedRegistrationIds(
   return rows.map((r) => r.id);
 }
 
+// Lock family keys in the one canonical order — submissions first,
+// then registrations, both sorted — so concurrent passes and hold
+// mutations can never deadlock on crossed lock order.
+async function lockFamilyKeys(
+  tx: Pick<RegistryDb, "execute">,
+  submissionIds: string[],
+  registrationIds: string[],
+): Promise<void> {
+  for (const id of [...new Set(submissionIds)].sort()) {
+    await lockRetentionEntity(tx, "registration_submission", id);
+  }
+  for (const id of [...new Set(registrationIds)].sort()) {
+    await lockRetentionEntity(tx, "registration", id);
+  }
+}
+
 // Lock a submission and its whole registration family, then recheck
 // every active hold against committed state. Returns true when a hold
 // (including one applied mid-pass) protects the row.
@@ -219,13 +235,10 @@ async function familyHeld(
   tx: Pick<RegistryDb, "select" | "execute">,
   submissionId: string,
 ): Promise<boolean> {
-  await lockRetentionEntity(tx, "registration_submission", submissionId);
+  const regIds = await linkedRegistrationIds(tx, submissionId);
+  await lockFamilyKeys(tx, [submissionId], regIds);
   if (await activeHoldExists(tx, "registration_submission", [submissionId])) {
     return true;
-  }
-  const regIds = await linkedRegistrationIds(tx, submissionId);
-  for (const regId of regIds) {
-    await lockRetentionEntity(tx, "registration", regId);
   }
   return activeHoldExists(tx, "registration", regIds);
 }
@@ -705,11 +718,21 @@ export async function runRetentionPass({
   // The timestamp equivalent for registration-less payments: occurred_at
   // earlier than the first day AFTER the last eligible year.
   const submittedBefore = new Date(Date.UTC(maxYear + 1, 0, 1));
-  const HELD_REGISTRATION = sql`EXISTS (
-    SELECT 1 FROM ${retentionHolds} h
-    WHERE h.entity_type = 'registration'
-      AND h.entity_id = ${registrations.id}
-      AND h.removed_at IS NULL
+  // A registration is family-held when the hold sits on the
+  // registration itself OR on the submission that produced it — the
+  // family rule is symmetric with HELD_SUBMISSION.
+  const HELD_REGISTRATION = sql`(
+    EXISTS (
+      SELECT 1 FROM ${retentionHolds} h
+      WHERE h.entity_type = 'registration'
+        AND h.entity_id = ${registrations.id}
+        AND h.removed_at IS NULL
+    ) OR EXISTS (
+      SELECT 1 FROM ${retentionHolds} h
+      WHERE h.entity_type = 'registration_submission'
+        AND h.entity_id = ${registrations.submissionId}
+        AND h.removed_at IS NULL
+    )
   )`;
 
   const [eligibleRegs] = await db
@@ -822,7 +845,10 @@ export async function runRetentionPass({
   // cannot starve the batch; the same predicate rides the UPDATE as a
   // committed-state recheck for mid-run holds.
   const regBatch = await db
-    .select({ id: registrations.id })
+    .select({
+      id: registrations.id,
+      submissionId: registrations.submissionId,
+    })
     .from(registrations)
     .where(
       and(
@@ -837,8 +863,11 @@ export async function runRetentionPass({
     )
     .orderBy(asc(registrations.id))
     .limit(limit);
-  const regIds = regBatch.map((r) => r.id);
-  if (regIds.length > 0) {
+  if (regBatch.length > 0) {
+    const regIds = regBatch.map((r) => r.id);
+    const regSubIds = regBatch
+      .map((r) => r.submissionId)
+      .filter((id): id is string => !!id);
     const regUpdateWhere = and(
       inArray(registrations.id, regIds),
       sql`NOT ${HELD_REGISTRATION}`,
@@ -847,16 +876,22 @@ export async function runRetentionPass({
       summary.completedRecords.registrationsAnonymized = regIds.length;
     } else {
       try {
-        const updated = await db
-          .update(registrations)
-          .set({
-            notes: null,
-            resolutionNote: null,
-            cancellationNote: null,
-            updatedAt: new Date(),
-          })
-          .where(regUpdateWhere)
-          .returning();
+        const updated = await db.transaction(async (tx) => {
+          // Serialize with hold mutations on every family key, then
+          // re-evaluate the not-held predicate post-lock — a hold
+          // committed between selection and now wins.
+          await lockFamilyKeys(tx, regSubIds, regIds);
+          return tx
+            .update(registrations)
+            .set({
+              notes: null,
+              resolutionNote: null,
+              cancellationNote: null,
+              updatedAt: new Date(),
+            })
+            .where(regUpdateWhere)
+            .returning();
+        });
         summary.completedRecords.registrationsAnonymized = updated.length;
       } catch (error) {
         summary.completedRecords.failed++;
@@ -887,22 +922,55 @@ export async function runRetentionPass({
         lt(payments.occurredAt, submittedBefore),
       ),
     ),
-    // A hold on the payment's registration shields it too.
+    // Any hold in the payment's family shields its free-text: the
+    // linked registration, the linked submission, or the submission
+    // behind the linked registration.
     sql`NOT EXISTS (
       SELECT 1 FROM ${retentionHolds} h
-      WHERE h.entity_type = 'registration'
-        AND h.entity_id = ${payments.registrationId}
-        AND h.removed_at IS NULL
+      WHERE h.removed_at IS NULL AND (
+        (h.entity_type = 'registration'
+          AND h.entity_id = ${payments.registrationId})
+        OR (h.entity_type = 'registration_submission'
+          AND h.entity_id = ${payments.submissionId})
+        OR (h.entity_type = 'registration_submission'
+          AND h.entity_id IN (
+            SELECT r.submission_id FROM ${registrations} r
+            WHERE r.id = ${payments.registrationId}
+          ))
+      )
     )`,
   );
   const payBatch = await db
-    .select({ id: payments.id })
+    .select({
+      id: payments.id,
+      registrationId: payments.registrationId,
+      submissionId: payments.submissionId,
+    })
     .from(payments)
     .where(paymentFreeTextWhere)
     .orderBy(asc(payments.id))
     .limit(limit);
-  const payIds = payBatch.map((p) => p.id);
-  if (payIds.length > 0) {
+  if (payBatch.length > 0) {
+    const payIds = payBatch.map((p) => p.id);
+    const payRegIds = payBatch
+      .map((p) => p.registrationId)
+      .filter((id): id is string => !!id);
+    const paySubIds = new Set(
+      payBatch
+        .map((p) => p.submissionId)
+        .filter((id): id is string => !!id),
+    );
+    // Submissions behind the batch's linked registrations are family
+    // keys too — a submission hold shields those payments.
+    if (payRegIds.length > 0) {
+      const regSubs = await db
+        .select({ submissionId: registrations.submissionId })
+        .from(registrations)
+        .where(inArray(registrations.id, payRegIds));
+      for (const r of regSubs) {
+        if (r.submissionId) paySubIds.add(r.submissionId);
+      }
+    }
     const payUpdateWhere = and(
       inArray(payments.id, payIds),
       paymentFreeTextWhere,
@@ -911,11 +979,14 @@ export async function runRetentionPass({
       summary.completedRecords.paymentsAnonymized = payIds.length;
     } else {
       try {
-        const updated = await db
-          .update(payments)
-          .set({ reference: null, note: null, updatedAt: new Date() })
-          .where(payUpdateWhere)
-          .returning();
+        const updated = await db.transaction(async (tx) => {
+          await lockFamilyKeys(tx, [...paySubIds], payRegIds);
+          return tx
+            .update(payments)
+            .set({ reference: null, note: null, updatedAt: new Date() })
+            .where(payUpdateWhere)
+            .returning();
+        });
         summary.completedRecords.paymentsAnonymized = updated.length;
       } catch (error) {
         summary.completedRecords.failed++;

@@ -488,6 +488,73 @@ describe("completed records (7 years after year end)", () => {
     );
   });
 
+  test("a submission-level hold protects linked registration and payment free-text", async () => {
+    // Family protection is symmetric: holding the submission must
+    // shield the registration's notes and its payments' reference.
+    const s = await seedSubmission({
+      status: "approved",
+      submittedAt: new Date("2018-06-01T00:00:00Z"),
+    });
+    const reg = await seedRegistration(s.id, 2018);
+    const pay = await seedConfirmedPayment(s.id, reg.id);
+    await db
+      .update(schema.registrations)
+      .set({ notes: "hold-relevant detail" })
+      .where(eq(schema.registrations.id, reg.id));
+    await applyRetentionHold(
+      "registration_submission",
+      s.id,
+      "dispute",
+      "staff",
+      null,
+      db,
+    );
+    const summary = await pass();
+    expect(summary.completedRecords.registrationsAnonymized).toBe(0);
+    expect(summary.completedRecords.paymentsAnonymized).toBe(0);
+    const [regRow] = await db
+      .select()
+      .from(schema.registrations)
+      .where(eq(schema.registrations.id, reg.id));
+    expect(regRow.notes).toBe("hold-relevant detail");
+    const [payRow] = await db
+      .select()
+      .from(schema.payments)
+      .where(eq(schema.payments.id, pay.id));
+    expect(payRow.reference).toBe("bank-ref-1");
+  });
+
+  test("a submission hold protects its registration-less payment's free-text", async () => {
+    // A payment tied only to a submission (no registration) is still
+    // family — the submission hold shields it.
+    const s = await seedSubmission({
+      status: "approved",
+      submittedAt: new Date("2018-06-01T00:00:00Z"),
+    });
+    const pay = await seedConfirmedPayment(s.id);
+    // Registration-less payments age by occurred_at — make it expired.
+    await db
+      .update(schema.payments)
+      .set({ occurredAt: new Date("2018-06-01T00:00:00Z") })
+      .where(eq(schema.payments.id, pay.id));
+    await applyRetentionHold(
+      "registration_submission",
+      s.id,
+      "dispute",
+      "staff",
+      null,
+      db,
+    );
+    const summary = await pass();
+    expect(summary.completedRecords.paymentsAnonymized).toBe(0);
+    const [payRow] = await db
+      .select()
+      .from(schema.payments)
+      .where(eq(schema.payments.id, pay.id));
+    expect(payRow.reference).toBe("bank-ref-1");
+    expect(payRow.note).toBe("walked in");
+  });
+
   test("held registrations are excluded from bounded anonymization batches", async () => {
     // Held registration has notes and is older; the free one must
     // still be anonymized in the same bounded batch.
