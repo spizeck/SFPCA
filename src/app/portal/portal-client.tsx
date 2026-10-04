@@ -9,6 +9,7 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
+import { motion } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
@@ -40,16 +41,47 @@ import type {
   PortalPastAnimal,
 } from "@/lib/registry/ownership";
 import { getAnimalLifecycleLabel } from "@/lib/animal-lifecycle";
-import { REGISTRATION_PAYMENT_STATE_LABELS } from "@/lib/registrations";
+import { useMotionTransition } from "@/lib/animations";
+import {
+  OUTSTANDING_PAYMENT_STATES,
+  REGISTRATION_PAYMENT_STATE_LABELS,
+  registrationPeriodLabel,
+} from "@/lib/registrations";
 import type { HouseholdRecord, PersonRecord } from "@/lib/registry/persons";
 import type { OwnerRequestRecord, OwnerRequestKind } from "@/lib/registry/owner-requests";
 import { CheckCircle2, PawPrint, CircleAlert } from "lucide-react";
 
 const REPORTABLE_KINDS = OWNER_SUBMITTABLE_KINDS;
 
-function AnimalCard({ animal }: { animal: PortalAnimal }) {
+const MONTH_ABBR = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+] as const;
+
+// ISO date (YYYY-MM-DD) → "Oct 4, 2026". Formatted from the parts, not
+// through Date, so a date-only string never shifts a day across zones.
+function formatIsoDate(iso: string): string {
+  const [year, month, day] = iso.slice(0, 10).split("-").map(Number);
+  if (!year || !month || !day) return iso;
+  return `${MONTH_ABBR[month - 1]} ${day}, ${year}`;
+}
+
+// Owner-facing money display: USD (the only currency registrations are
+// assessed in today) reads "$95.00"; anything else keeps its code.
+function formatMoney(cents: number, currency: string): string {
+  const amount = (cents / 100).toFixed(2);
+  return currency === "USD" ? `$${amount}` : `${amount} ${currency}`;
+}
+
+// Exported for component tests — the status presentation carries the
+// confirmation-vs-registration distinction owners must understand.
+export function AnimalCard({ animal }: { animal: PortalAnimal }) {
   const { toast } = useToast();
   const [pending, startTransition] = useTransition();
+  const statusTransition = useMotionTransition({
+    duration: 0.25,
+    ease: "easeOut",
+  });
   const [reportKind, setReportKind] = useState<OwnerRequestKind | "">("");
   const [detail, setDetail] = useState("");
   const [targetName, setTargetName] = useState("");
@@ -60,13 +92,20 @@ function AnimalCard({ animal }: { animal: PortalAnimal }) {
   const [missingLocation, setMissingLocation] = useState("");
   const [missingDetail, setMissingDetail] = useState("");
 
+  // Historical registration years only — the current-period year is
+  // already the status area's subject, so listing it again as history
+  // would blur it.
+  const priorRegistrationYears = animal.registrationYears.filter(
+    (y) => y !== animal.registration?.year,
+  );
+
   const confirm = () => {
     startTransition(async () => {
       const result = await confirmAnimalAction(animal.ownershipId);
       toast({
         title: result.ok ? "Confirmed" : "Couldn't confirm",
         description: result.ok
-          ? `Thanks — ${animal.name} is confirmed for this year.`
+          ? `Thanks — ${animal.name} is confirmed as still living on Saba with you.`
           : result.error,
         variant: result.ok ? "default" : "destructive",
       });
@@ -148,69 +187,145 @@ function AnimalCard({ animal }: { animal: PortalAnimal }) {
               {animal.basis === "household" && (
                 <Badge variant="secondary">{animal.householdName}</Badge>
               )}
-              {animal.confirmationDue ? (
-                <Badge variant="destructive" className="gap-1">
-                  <CircleAlert className="h-3 w-3" />
-                  Confirmation due
-                </Badge>
-              ) : (
-                <Badge variant="outline" className="gap-1">
-                  <CheckCircle2 className="h-3 w-3" />
-                  Confirmed {animal.lastConfirmedOn ?? animal.validFrom}
-                </Badge>
-              )}
             </div>
             <p className="text-sm text-muted-foreground capitalize">
               {animal.species} · {animal.sex}
               {animal.approxAge ? ` · ${animal.approxAge}` : ""}
             </p>
             <p className="text-xs text-muted-foreground">
-              Registered with you since {animal.validFrom}
+              With you since {formatIsoDate(animal.validFrom)}
             </p>
             {animal.chipNumber && (
               <p className="text-xs text-muted-foreground">
                 Microchip: <span className="font-mono">{animal.chipNumber}</span>
               </p>
             )}
-            {/* Current-period registration state (#169) — plain-language
-                status plus any money still owed; history stays a simple
-                year list. No staff notes or payment internals. */}
-            {animal.registration ? (
-              <p className="text-xs text-muted-foreground">
-                {animal.registration.year} registration:{" "}
-                {animal.registration.paymentState === "unpaid" ||
-                animal.registration.paymentState === "partial" ? (
-                  <span className="text-destructive font-medium">
-                    {(animal.registration.outstandingCents / 100).toFixed(2)}{" "}
-                    {animal.registration.currency} outstanding
-                    {animal.registration.paidCents > 0 &&
-                      ` (${(animal.registration.paidCents / 100).toFixed(2)} of ${(animal.registration.amountDueCents / 100).toFixed(2)} paid)`}
-                  </span>
-                ) : (
+          </div>
+        </div>
+
+        {/* Two separate annual obligations live on this card (#295):
+            - the annual confirmation is an ownership/residency
+              attestation — "still living on Saba with me" (#166) —
+              self-served by the button below;
+            - the yearly registration is the authoritative registry
+              record (#169) with a ledger-derived fee (#170), reached
+              through the public intake form.
+            Each gets its own labelled status area so one can never be
+            mistaken for the other. */}
+        <div className="grid gap-4 border-t pt-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Annual confirmation
+            </p>
+            {/* The keyed remount animates due → confirmed on success
+                while the registration area stays visibly untouched. */}
+            <motion.div
+              key={animal.confirmationDue ? "due" : "confirmed"}
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={statusTransition}
+            >
+              {animal.confirmationDue ? (
+                <p className="flex items-center gap-1.5 text-sm font-medium text-destructive">
+                  <CircleAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  Due now
+                </p>
+              ) : (
+                <p className="flex items-center gap-1.5 text-sm font-medium">
+                  <CheckCircle2
+                    className="h-4 w-4 shrink-0 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                  Confirmed{" "}
+                  {formatIsoDate(animal.lastConfirmedOn ?? animal.validFrom)}
+                </p>
+              )}
+            </motion.div>
+            <p className="text-xs text-muted-foreground">
+              Confirms {animal.name} still lives on Saba with you.
+            </p>
+            {animal.confirmationDue && (
+              <Button size="sm" onClick={confirm} disabled={pending}>
+                Confirm still living on Saba with me
+              </Button>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {registrationPeriodLabel(animal.registrationYear)}
+            </p>
+            {animal.registration === null ? (
+              <>
+                <p className="flex items-center gap-1.5 text-sm font-medium text-destructive">
+                  <CircleAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  Not registered
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Required for every animal each year.
+                </p>
+                {/* The existing intake path: the public form lands in
+                    staff review, which produces the registration row. */}
+                <Button size="sm" variant="outline" asChild>
+                  <Link href="/animal-registration#form">
+                    Start {animal.registrationYear} registration
+                  </Link>
+                </Button>
+              </>
+            ) : OUTSTANDING_PAYMENT_STATES.includes(
+                animal.registration.paymentState,
+              ) ? (
+              <>
+                <p className="text-sm font-medium text-destructive">
+                  {formatMoney(
+                    animal.registration.outstandingCents,
+                    animal.registration.currency,
+                  )}{" "}
+                  outstanding
+                </p>
+                {animal.registration.paidCents > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {formatMoney(
+                      animal.registration.paidCents,
+                      animal.registration.currency,
+                    )}{" "}
+                    of{" "}
+                    {formatMoney(
+                      animal.registration.amountDueCents,
+                      animal.registration.currency,
+                    )}{" "}
+                    paid
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  <Link href="/contact" className="text-primary underline">
+                    Contact us
+                  </Link>{" "}
+                  to arrange payment.
+                </p>
+              </>
+            ) : (
+              <p className="flex items-center gap-1.5 text-sm font-medium">
+                <CheckCircle2
+                  className="h-4 w-4 shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                {
                   REGISTRATION_PAYMENT_STATE_LABELS[
                     animal.registration.paymentState
                   ]
-                )}
-              </p>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                Not registered for the current year
+                }
               </p>
             )}
-            {animal.registrationYears.length > 0 && (
+            {priorRegistrationYears.length > 0 && (
               <p className="text-xs text-muted-foreground">
-                Registered: {animal.registrationYears.join(", ")}
+                Previously registered: {priorRegistrationYears.join(", ")}
               </p>
             )}
           </div>
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" onClick={confirm} disabled={pending || !animal.confirmationDue}>
-            {animal.confirmationDue
-              ? "Confirm still living on Saba with me"
-              : "Confirmed for this year"}
-          </Button>
           {/* Missing is a direct lost/found case (#176), not a
               staff-reviewed change request — no ambiguity to
               adjudicate, and speed matters when an animal is lost. */}
@@ -429,6 +544,10 @@ export function PortalClient({
 
       <section className="space-y-3">
         <h2 className="text-lg font-medium">Your animals</h2>
+        <p className="text-sm text-muted-foreground">
+          Each animal needs two separate things every year — a confirmation
+          that it still lives on Saba with you, and its annual registration.
+        </p>
         {animals.length === 0 ? (
           <Card>
             <CardContent className="pt-6 text-sm text-muted-foreground">

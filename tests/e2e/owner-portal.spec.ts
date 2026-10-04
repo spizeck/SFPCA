@@ -75,12 +75,22 @@ test.describe("owner portal", () => {
     // identical toast; the assertion is about the confirmation landing.
     await expect(
       page
-        .getByText("Thanks — Rexley is confirmed for this year.")
+        .getByText(
+          "Thanks — Rexley is confirmed as still living on Saba with you.",
+        )
         .first(),
     ).toBeVisible();
+    // The confirmation status flips due → confirmed while registration
+    // stays untouched; no disabled button carries the completed state.
+    const rexleyCard = page
+      .locator("[class*=bg-card]")
+      .filter({ has: page.getByRole("heading", { name: "Rexley" }) });
+    await expect(rexleyCard.getByText(/^Confirmed /)).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Confirmed for this year" }).first(),
-    ).toBeDisabled();
+      rexleyCard.getByRole("button", {
+        name: "Confirm still living on Saba with me",
+      }),
+    ).toBeHidden();
   });
 
   test("owner files a report and staff resolves it; the animal leaves the portal", async ({
