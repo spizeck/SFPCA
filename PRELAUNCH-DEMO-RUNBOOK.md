@@ -109,7 +109,8 @@ Only relevant while the audited pre-launch condition holds: the owner
 confirmed production contains **no live data**, but migration `0023`
 initialized `lifecycle='live'` because legacy seeded `animals` rows
 existed. Two deliberate steps return the environment to
-`prelaunch-demo`:
+`prelaunch-demo` — order-insensitive: the migration only fires when
+the data is exactly the audited fixture (present or already removed):
 
 ```bash
 npm run prelaunch-cleanup:audit    # read-only: exact-shape verification + remove/preserve report
@@ -126,9 +127,12 @@ npm run db:migrate                 # applies migration 0024 — the one-time lif
   `team-photos/`/`db-backups/` objects are all preserved.
 - Migration `0024` flips `live` → `prelaunch-demo` only when
   `live_at IS NULL` (live was migration-initialized, never a real
-  go-live) **and** every domain table is empty; otherwise it refuses.
-  The finality trigger is re-armed inside the same transaction — this
-  is not a reusable "reopen demo" path.
+  go-live) **and** the data is exactly the audited fixture — every
+  other domain table empty and `animals` a subset of the three known
+  legacy ids (so it works whether it runs before or after cleanup).
+  Anything else aborts the migration. The finality trigger is
+  re-armed inside the same transaction — this is not a reusable
+  "reopen demo" path.
 
 This remediation is intentionally single-use: after the board demo,
 `go-live` stamps `live_at` and the 0024 condition can never be met

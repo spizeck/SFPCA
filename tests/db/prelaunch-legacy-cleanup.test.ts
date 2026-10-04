@@ -211,15 +211,43 @@ describe("migration 0024 — one-time lifecycle correction", () => {
     ).toBe(1);
   });
 
+  test("flips when the exact audited fixture animals are still present", async () => {
+    // The prod-copy case: a Neon preview branch carries the exact
+    // legacy rows — migrate-first ordering must work too.
+    await db.execute(sql`insert into app_state (id, lifecycle) values (1, 'live')`);
+    for (const id of LEGACY_PG_ANIMAL_IDS) {
+      await db.insert(schema.animals).values({
+        id,
+        name: "Legacy Fixture",
+        species: "dog",
+        sex: "male",
+      });
+    }
+    await runMigration0024();
+    expect((await lifecycleState()).lifecycle).toBe("prelaunch-demo");
+    // The fixture rows themselves are untouched — removal is the
+    // cleanup script's job, not the migration's.
+    expect(await count("animals")).toBe(3);
+  });
+
   test("refuses when a domain table still holds records", async () => {
     await db.execute(sql`insert into app_state (id, lifecycle) values (1, 'live')`);
-    await db.insert(schema.animals).values({
-      name: "Leftover",
-      species: "dog",
-      sex: "male",
+    await db.insert(schema.registrationSubmissions).values({
+      ownerName: "Unexpected Owner",
     });
     await expect(runMigration0024()).rejects.toThrow(/still holds/);
     // Whole migration rolled back: still live, trigger intact.
+    expect((await lifecycleState()).lifecycle).toBe("live");
+  });
+
+  test("refuses when animals holds rows outside the audited fixture", async () => {
+    await db.execute(sql`insert into app_state (id, lifecycle) values (1, 'live')`);
+    await db.insert(schema.animals).values({
+      name: "Real Dog",
+      species: "dog",
+      sex: "male",
+    });
+    await expect(runMigration0024()).rejects.toThrow(/outside the audited legacy fixture/);
     expect((await lifecycleState()).lifecycle).toBe("live");
   });
 
