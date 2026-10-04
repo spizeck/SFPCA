@@ -50,11 +50,15 @@ export interface ButtonProps
   // aria-busy, and shows a centred spinner over the hidden label —
   // the label keeps its layout box so the button never changes size
   // mid-interaction, and the accessible name becomes "Loading…".
+  // Pass loadingText when the in-flight verb matters ("Deleting…"):
+  // it replaces the label outright — allowed to shift width, callers
+  // pick it deliberately for consequential actions.
   loading?: boolean;
+  loadingText?: string;
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, loading = false, disabled, children, ...props }, ref) => {
+  ({ className, variant, size, asChild = false, loading = false, loadingText, disabled, children, ...props }, ref) => {
     const Comp = asChild ? Slot : "button";
     return (
       <Comp
@@ -69,21 +73,28 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         {...props}
       >
         {loading ? (
-          <>
-            <span
-              className="inline-flex items-center justify-center gap-2 opacity-0"
-              aria-hidden="true"
-            >
-              {children}
-            </span>
-            <span
-              className="absolute inset-0 flex items-center justify-center"
-              aria-hidden="true"
-            >
+          loadingText !== undefined ? (
+            <>
               <Spinner />
-            </span>
-            <span className="sr-only">Loading…</span>
-          </>
+              {loadingText}
+            </>
+          ) : (
+            <>
+              <span
+                className="inline-flex items-center justify-center gap-2 opacity-0"
+                aria-hidden="true"
+              >
+                {children}
+              </span>
+              <span
+                className="absolute inset-0 flex items-center justify-center"
+                aria-hidden="true"
+              >
+                <Spinner />
+              </span>
+              <span className="sr-only">Loading…</span>
+            </>
+          )
         ) : (
           children
         )}
