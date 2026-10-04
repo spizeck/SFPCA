@@ -29,7 +29,13 @@
     "test:e2e:maintenance": "tsx scripts/emulators.ts exec --only auth,firestore,storage --project demo-sfpca \"playwright test --config playwright.maintenance.config.ts\"",
     "test:e2e:headed": "tsx scripts/emulators.ts exec --only auth,firestore,storage --project demo-sfpca \"playwright test --headed\"",
     "deploy:functions": "node scripts/deploy-functions.js",
-    "check:admin-import": "node scripts/check-admin-import.mjs"
+    "check:admin-import": "node scripts/check-admin-import.mjs",
+    "production-demo": "tsx scripts/production-demo.ts",
+    "production-demo:check": "tsx scripts/production-demo.ts check",
+    "production-demo:status": "tsx scripts/production-demo.ts status",
+    "production-demo:verify": "tsx scripts/production-demo.ts verify",
+    "prelaunch-cleanup": "tsx scripts/cleanup-prelaunch-legacy-seed.ts",
+    "prelaunch-cleanup:audit": "tsx scripts/cleanup-prelaunch-legacy-seed.ts audit"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.11",

@@ -25,11 +25,14 @@
 // Secrets are never printed — reports show names, counts, and ids only.
 
 import { config } from "dotenv";
-import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { sql } from "drizzle-orm";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+  resolveDemoTarget,
+  type DemoTarget,
+} from "./lib/demo-target";
 import {
   activeSeedRun,
   findNonEmptyDomainTables,
@@ -58,18 +61,12 @@ import {
 } from "./lib/demo-seed";
 import {
   listBranches,
-  listEndpoints,
   neonApi,
   neonProjectId,
-  NEON_API_BASE,
 } from "./lib/neon";
 import { getAdminApp } from "../src/lib/firebase-admin-app";
 
 config({ path: ".env.local" });
-
-// --- Identity ------------------------------------------------------------------
-
-const EXPECTED_FIREBASE_PROJECT = "saba-sfpca";
 
 // Collections the public site reads — the demo fills only missing/empty
 // ones and records which were empty so reset can restore that state.
@@ -110,156 +107,6 @@ function parseArgs(argv: string[]) {
   };
 }
 
-// --- Environment resolution -------------------------------------------------------
-
-interface Target {
-  mode: "production" | "local";
-  sql: ReturnType<typeof postgres>;
-  db: ReturnType<typeof drizzle>;
-  projectId: string;
-  bucketName: string;
-}
-
-async function resolveTarget(opts: {
-  production: boolean;
-  local: boolean;
-}): Promise<Target> {
-  if (opts.production === opts.local) {
-    fail("pass exactly one of --production or --local");
-  }
-
-  const emulatorMode = Boolean(
-    process.env.FIRESTORE_EMULATOR_HOST || process.env.FIREBASE_AUTH_EMULATOR_HOST,
-  );
-  // The project the Admin SDK will actually attach to — under emulators
-  // NEXT_PUBLIC_FIREBASE_PROJECT_ID takes precedence (getAdminApp).
-  const projectId = emulatorMode
-    ? (process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ??
-      process.env.FIREBASE_ADMIN_PROJECT_ID)
-    : process.env.FIREBASE_ADMIN_PROJECT_ID;
-  const bucket =
-    process.env.FIREBASE_ADMIN_STORAGE_BUCKET ??
-    process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
-
-  if (opts.local) {
-    // Local mode is the safe sandbox: it MUST run against the Firebase
-    // emulators — a real project id here would make "local" commands
-    // mutate production resources.
-    if (!emulatorMode) {
-      fail(
-        "--local requires the Firebase emulators (FIRESTORE_EMULATOR_HOST/" +
-          "FIREBASE_AUTH_EMULATOR_HOST). Start `firebase emulators` first, or export them.",
-      );
-    }
-    if (!projectId || !projectId.startsWith("demo-")) {
-      fail(
-        "--local requires a demo-* Firebase project id (emulator convention), " +
-          `got '${projectId ?? "unset"}' — refusing to touch what may be a real project.`,
-      );
-    }
-  } else {
-    if (emulatorMode) {
-      fail(
-        "emulator env vars are set — production mode refuses to run " +
-          "against emulators (use --local for emulator targets).",
-      );
-    }
-    if (projectId !== EXPECTED_FIREBASE_PROJECT) {
-      fail(
-        `FIREBASE_ADMIN_PROJECT_ID is '${projectId ?? "unset"}', expected ` +
-          `'${EXPECTED_FIREBASE_PROJECT}' — identity could not be proven.`,
-      );
-    }
-    if (!process.env.NEON_API_KEY) {
-      fail(
-        "NEON_API_KEY is required in production mode — it is how the " +
-          "command proves DATABASE_URL points at the primary Neon branch.",
-      );
-    }
-  }
-
-  const url =
-    process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL;
-  if (!url || !/^postgres(ql)?:\/\//.test(url)) {
-    fail("DATABASE_URL (or _UNPOOLED) is not a Postgres connection string");
-  }
-  const host = new URL(url!).hostname;
-
-  if (opts.production) {
-    // Prove the Postgres target is the production primary branch by
-    // matching its endpoint host against the Neon API.
-    const project = neonProjectId();
-    const key = process.env.NEON_API_KEY!;
-    const [branches, endpoints] = await Promise.all([
-      listBranches(key, project),
-      listEndpoints(key, project),
-    ]);
-    const primary = branches.find((b) => b.primary);
-    if (!primary) fail("could not resolve the primary Neon branch");
-    const hosts = endpoints
-      .filter((e) => e.branch_id === primary!.id)
-      .map((e) => e.host);
-    if (!hosts.includes(host)) {
-      fail(
-        `DATABASE_URL host '${host}' is not an endpoint of the primary ` +
-          `branch '${primary!.name}' (${hosts.join(", ") || "no endpoints"}).`,
-      );
-    }
-    console.log(
-      `identity ok: neon primary '${primary!.name}' @ ${host}; firebase project '${projectId}'`,
-    );
-  } else {
-    // The local target must not secretly be production — fail CLOSED:
-    // a remote DATABASE_URL is only acceptable once the Neon API
-    // confirms the host is not the production primary endpoint. No
-    // API key / failed lookup / unknown host class → refuse.
-    const localHosts = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
-    if (!localHosts.has(host) && !host.endsWith(".local")) {
-      if (!process.env.NEON_API_KEY) {
-        fail(
-          `--local against remote DATABASE_URL host '${host}' cannot be ` +
-            "verified — set NEON_API_KEY + NEON_PROJECT_ID so the " +
-            "endpoint can be checked against the production primary, " +
-            "or point DATABASE_URL at a local database.",
-        );
-      }
-      let hosts: string[] = [];
-      try {
-        const project = neonProjectId();
-        const [branches, endpoints] = await Promise.all([
-          listBranches(process.env.NEON_API_KEY, project),
-          listEndpoints(process.env.NEON_API_KEY, project),
-        ]);
-        const primary = branches.find((b) => b.primary);
-        hosts = primary
-          ? endpoints.filter((e) => e.branch_id === primary.id).map((e) => e.host)
-          : [];
-      } catch (error) {
-        if (error instanceof DemoRefusal) throw error;
-        fail(
-          `--local against remote DATABASE_URL host '${host}' could not ` +
-            `be verified against the Neon API (${error instanceof Error ? error.message : error}) — refusing.`,
-        );
-      }
-      if (hosts.includes(host)) {
-        fail(
-          `DATABASE_URL host '${host}' IS the production primary endpoint — ` +
-            "remove production credentials before using --local.",
-        );
-      }
-    }
-    console.log(`identity ok (local): host=${host}; project='${projectId}'`);
-  }
-
-  const sqlClient = postgres(url!, { max: 2, prepare: false });
-  return {
-    mode: opts.production ? "production" : "local",
-    sql: sqlClient,
-    db: drizzle(sqlClient),
-    projectId: projectId!,
-    bucketName: bucket!,
-  };
-}
 
 // --- Shared reporting ---------------------------------------------------------------
 
@@ -297,7 +144,7 @@ async function migrationStatus(db: ReturnType<typeof drizzle>): Promise<string> 
 
 // --- Commands ---------------------------------------------------------------------
 
-async function cmdCheck(t: Target) {
+async function cmdCheck(t: DemoTarget) {
   section("environment");
   console.log(`mode:            ${t.mode}`);
   console.log(`firebase project: ${t.projectId}`);
@@ -396,7 +243,7 @@ async function cmdCheck(t: Target) {
   );
 }
 
-async function cmdSeed(t: Target, confirm?: string, snapshot = true) {
+async function cmdSeed(t: DemoTarget, confirm?: string, snapshot = true) {
   const wanted = CONFIRMATIONS.seed[t.mode];
   if (confirm !== wanted) {
     fail(`seed requires --confirm "${wanted}"`);
@@ -619,7 +466,7 @@ async function cmdSeed(t: Target, confirm?: string, snapshot = true) {
   );
 }
 
-async function cmdStatus(t: Target) {
+async function cmdStatus(t: DemoTarget) {
   const lifecycle = await readLifecycleRow(t.db);
   console.log(`lifecycle: ${lifecycle?.lifecycle ?? "absent → live"}`);
   const run = await latestSeedRun(t.db);
@@ -704,7 +551,7 @@ async function cmdStatus(t: Target) {
   }
 }
 
-async function cmdReset(t: Target, confirm?: string) {
+async function cmdReset(t: DemoTarget, confirm?: string) {
   const wanted = CONFIRMATIONS.reset[t.mode];
   if (confirm !== wanted) {
     fail(`reset requires --confirm "${wanted}"`);
@@ -854,7 +701,7 @@ async function manifestEntities(
   }));
 }
 
-async function cmdVerify(t: Target): Promise<boolean> {
+async function cmdVerify(t: DemoTarget): Promise<boolean> {
   const run = await latestSeedRun(t.db);
   const seededAt = run?.seededAt ?? null;
   const failures: string[] = [];
@@ -956,7 +803,7 @@ async function cmdVerify(t: Target): Promise<boolean> {
   return false;
 }
 
-async function cmdGoLive(t: Target, confirm?: string) {
+async function cmdGoLive(t: DemoTarget, confirm?: string) {
   const wanted = CONFIRMATIONS["go-live"][t.mode];
   if (confirm !== wanted) {
     fail(`go-live requires --confirm "${wanted}"`);
@@ -1100,7 +947,7 @@ async function main() {
     case "check": {
       // Read-only — no --production/--local needed, but the mode still
       // selects which identity rules are verified.
-      const t = await resolveTarget({
+      const t = await resolveDemoTarget({
         production: opts.production || !opts.local,
         local: opts.local,
       });
@@ -1112,7 +959,7 @@ async function main() {
       break;
     }
     case "status": {
-      const t = await resolveTarget({
+      const t = await resolveDemoTarget({
         production: opts.production || !opts.local,
         local: opts.local,
       });
@@ -1124,7 +971,7 @@ async function main() {
       break;
     }
     case "verify": {
-      const t = await resolveTarget({
+      const t = await resolveDemoTarget({
         production: opts.production || !opts.local,
         local: opts.local,
       });
@@ -1137,7 +984,7 @@ async function main() {
       break;
     }
     case "seed": {
-      const t = await resolveTarget(opts);
+      const t = await resolveDemoTarget(opts);
       try {
         await cmdSeed(t, opts.confirm, opts.snapshot);
       } finally {
@@ -1146,7 +993,7 @@ async function main() {
       break;
     }
     case "reset": {
-      const t = await resolveTarget(opts);
+      const t = await resolveDemoTarget(opts);
       try {
         await cmdReset(t, opts.confirm);
       } finally {
@@ -1155,7 +1002,7 @@ async function main() {
       break;
     }
     case "go-live": {
-      const t = await resolveTarget(opts);
+      const t = await resolveDemoTarget(opts);
       try {
         await cmdGoLive(t, opts.confirm);
       } finally {

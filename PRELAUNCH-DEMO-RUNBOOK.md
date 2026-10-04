@@ -56,7 +56,28 @@ can ever be contacted or impersonated by them.
 
 ## Commands
 
-All commands run from the repo root with `.env.local` populated:
+All commands run from the repo root with `.env.local` populated.
+
+### Operator environment (required)
+
+These commands talk to production **from the operator's machine** —
+they are not run inside Vercel. `.env.local` must contain real
+production values:
+
+- `DATABASE_URL` / `DATABASE_URL_UNPOOLED` — the production Neon
+  connection strings
+- `NEON_API_KEY` (+ `NEON_PROJECT_ID`) — proves the Postgres target is
+  the primary branch
+- `FIREBASE_ADMIN_PROJECT_ID` (= `saba-sfpca`),
+  `FIREBASE_ADMIN_CLIENT_EMAIL`, `FIREBASE_ADMIN_PRIVATE_KEY` (or
+  `FIREBASE_SERVICE_ACCOUNT_PATH`) — Firebase Admin credentials
+- `ADMIN_EMAILS` — the bootstrap admin set (protects real accounts)
+- `DEMO_ACCOUNT_PASSWORD` — seed only, ≥8 chars
+
+> Production secret values **cannot** be pulled with `vercel env pull`
+> (`Secret values cannot be pulled from the production Environment`).
+> Obtain them from the team's secret store and place them in
+> `.env.local` manually — the file is gitignored.
 
 ```bash
 npm run production-demo:check                   # read-only audit
@@ -81,6 +102,41 @@ successfully verify it is not the production primary endpoint.
 - `DEMO_ACCOUNT_PASSWORD` (seed only, ≥8 chars)
 - lifecycle `prelaunch-demo` (database-enforced)
 - every domain table **empty** (seed only)
+
+## One-time legacy remediation (#278)
+
+Only relevant while the audited pre-launch condition holds: the owner
+confirmed production contains **no live data**, but migration `0023`
+initialized `lifecycle='live'` because legacy seeded `animals` rows
+existed. Two deliberate steps return the environment to
+`prelaunch-demo` — order-insensitive: the migration only fires when
+the data is exactly the audited fixture (present or already removed):
+
+```bash
+npm run prelaunch-cleanup:audit    # read-only: exact-shape verification + remove/preserve report
+npm run prelaunch-cleanup -- apply --production --confirm "REMOVE PRELAUNCH LEGACY SEED"
+npm run db:migrate                 # applies migration 0024 — the one-time lifecycle correction
+```
+
+- `audit` refuses (exit 2) on **any** record outside the audited
+  fixture manifest — unexpected Postgres rows, Firestore docs,
+  Firebase Auth users, or Storage objects all fail closed.
+- `apply` deletes only the exact expected legacy rows (3 Postgres
+  `animals`, 3 Firestore `animals` docs). Bootstrap admin accounts,
+  operator identities, audit rows, CMS content, Auth users, and
+  `team-photos/`/`db-backups/` objects are all preserved.
+- Migration `0024` flips `live` → `prelaunch-demo` only when
+  `live_at IS NULL` (live was migration-initialized, never a real
+  go-live) **and** the data is exactly the audited fixture — every
+  other domain table empty and `animals` a subset of the three known
+  legacy ids (so it works whether it runs before or after cleanup).
+  Anything else aborts the migration. The finality trigger is
+  re-armed inside the same transaction — this is not a reusable
+  "reopen demo" path.
+
+This remediation is intentionally single-use: after the board demo,
+`go-live` stamps `live_at` and the 0024 condition can never be met
+again.
 
 ## Before the board demo
 
@@ -126,8 +182,9 @@ successfully verify it is not the production primary endpoint.
 1. Optionally stop board access (re-enable `SITE_MAINTENANCE_MODE`).
 2. `npm run production-demo -- reset --production --confirm "RESET PRODUCTION DEMO"`
 3. `npm run production-demo:verify` — must print `VERIFY-CLEAN PASS`.
-4. Independently spot-check: `npm run db:preview` counts, the Firebase
-   console (Auth users, Storage objects), Firestore collections.
+4. Independently spot-check: `npm run production-demo:check` (per-table
+   counts), the Firebase console (Auth users, Storage objects),
+   Firestore collections.
 5. `npm run production-demo -- go-live --production --confirm "GO LIVE"`
    — refuses unless verify passes; the transition is permanent.
 6. Prove the tooling is retired:
