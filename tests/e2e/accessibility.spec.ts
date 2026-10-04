@@ -436,5 +436,35 @@ test.describe("authenticated accessibility", () => {
       ),
       "critical/serious axe violations on /portal (signed-in owner)",
     ).toEqual([]);
+
+    // The portal-native registration request dialog (#297) — labelled
+    // fields, dialog semantics, no color-only state.
+    await page
+      .locator("div.rounded-lg.border")
+      .filter({ has: page.getByRole("heading", { name: "Reggie" }) })
+      .getByRole("button", { name: /Register Reggie for/ })
+      .click();
+    const requestDialog = page.getByRole("dialog");
+    await expect(requestDialog).toBeVisible();
+    // Radix's enter animation fades/zooms the content in — scanning
+    // mid-animation composites it over the dark overlay and every
+    // foreground fails color-contrast. Wait for the final opacity.
+    await expect
+      .poll(() =>
+        requestDialog.evaluate((el) => getComputedStyle(el).opacity),
+      )
+      .toBe("1");
+    const dialogScan = await scan(page);
+    await test.info().attach("axe-violations-_portal-request.json", {
+      body: JSON.stringify(dialogScan.results.violations, null, 2),
+      contentType: "application/json",
+    });
+    expect(
+      dialogScan.highImpact.map(
+        (v) =>
+          `${v.id} (${v.impact}): ${v.nodes.map((n) => n.target.join(" ")).join(" | ")}`,
+      ),
+      "critical/serious axe violations on the registration request dialog",
+    ).toEqual([]);
   });
 });

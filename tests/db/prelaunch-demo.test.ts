@@ -269,17 +269,17 @@ describe("seed → reset → verify-clean", () => {
   test("verify-clean catches leftovers a partial reset missed", async () => {
     const run = await beginRun();
     await applyDemoPostgresSeed(db, SEED_CTX);
-    // Simulate a partial cleanup: drop only the animals. (TRUNCATE
-    // CASCADE also wipes their FK dependents — registrations, medical,
-    // chips — so the leftover we assert on is a submission row, which
-    // has no animal FK.)
-    await db.execute(sql`truncate animals cascade`);
+    // Simulate a partial cleanup: drop the person/owner layer.
+    // (TRUNCATE CASCADE also wipes their FK dependents — ownerships,
+    // submissions, registrations — while the animal side stays put, so
+    // an animals row is a guaranteed leftover. registration_submissions
+    // gained an animal FK in #297, so the animals side is no longer a
+    // surviving residual when the tree is cut at animals.)
+    await db.execute(sql`truncate persons cascade`);
     const clean = await verifyPostgresClean(db, run.seeded_at);
     expect(Object.keys(clean.domainResiduals).length).toBeGreaterThan(0);
     expect(clean.domainResiduals.persons).toBeUndefined(); // window table
-    expect(
-      clean.domainResiduals.registration_submissions,
-    ).toBeGreaterThan(0);
+    expect(clean.domainResiduals.animals).toBeGreaterThan(0);
   });
 
   test("an active seed run is visible until reset, then historical", async () => {

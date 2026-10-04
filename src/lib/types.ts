@@ -121,6 +121,17 @@ export interface AnimalRegistration {
   } | null;
   totalFee: number;
   status: "pending" | "approved" | "rejected";
+  // Portal-originated request provenance (#297): 'portal' rows carry
+  // the canonical animal/person linkage the owner already had, so staff
+  // never re-match. Public intake rows leave every one of these unset.
+  source?: "public" | "portal";
+  linkedAnimalId?: string | null;
+  linkedAnimalName?: string | null;
+  linkedAnimalRegistryRef?: string | null;
+  requestedYear?: number | null;
+  // Owner-supplied "something changed" claim — staff review it, it is
+  // never auto-applied to canonical records.
+  ownerNote?: string | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -518,6 +518,28 @@ export const registrationSubmissions = pgTable(
     personId: uuid("person_id").references(() => persons.id, {
       onDelete: "set null",
     }),
+    // Portal-originated requests (#297): provenance plus the canonical
+    // linkage an authenticated owner already has — staff never re-match
+    // a linked animal. Public intake rows keep every one of these NULL:
+    // their animal claims stay in `animals` jsonb and matching remains
+    // the staff member's choice. animal_id is restrictive (history is
+    // evidence); the relationship/identity links may legitimately
+    // disappear later, so they set null like owner_requests.
+    source: text("source").notNull().default("public"),
+    animalId: uuid("animal_id").references(() => animals.id),
+    ownershipId: uuid("ownership_id").references(() => ownerships.id, {
+      onDelete: "set null",
+    }),
+    authIdentityId: uuid("auth_identity_id").references(
+      () => authIdentities.id,
+      { onDelete: "set null" },
+    ),
+    // The registration period a portal request asks for — stored so a
+    // request submitted near year-end still means what it meant.
+    requestedYear: integer("requested_year"),
+    // Bounded free-text "something changed" note from an authenticated
+    // owner. A claim for staff review, never an auto-applied edit.
+    ownerNote: text("owner_note"),
     // Firebase Storage object path (receipts/<id>) — a reference, never
     // the object itself; binary data does not live in Postgres. The
     // upload route claims this slot atomically (see
@@ -560,6 +582,17 @@ export const registrationSubmissions = pgTable(
   },
   (t) => [
     uniqueIndex("registration_submissions_legacy_id_key").on(t.legacyId),
+    // One in-flight portal request per (animal, year) — enforced by the
+    // database, so concurrent submits serialize and exactly one wins.
+    // Same pattern as owner_requests_pending_dedup.
+    uniqueIndex("registration_submissions_pending_animal_year_key")
+      .on(t.animalId, t.requestedYear)
+      .where(sql`${t.status} = 'pending' AND ${t.animalId} IS NOT NULL`),
+    // The owner-side "latest request for this animal/year" read.
+    index("registration_submissions_animal_year_idx").on(
+      t.animalId,
+      t.requestedYear,
+    ),
     check(
       "registration_submissions_status_check",
       sql`${t.status} IN ('pending','approved','rejected')`,
@@ -567,6 +600,21 @@ export const registrationSubmissions = pgTable(
     check(
       "registration_submissions_fee_check",
       sql`${t.totalFeeCents} >= 0`,
+    ),
+    check(
+      "registration_submissions_source_check",
+      sql`${t.source} IN ('public','portal')`,
+    ),
+    check(
+      "registration_submissions_requested_year_check",
+      sql`${t.requestedYear} IS NULL OR ${t.requestedYear} BETWEEN 2000 AND 2200`,
+    ),
+    // Durable portal invariants — the columns that can never be nulled
+    // by FK behavior. The softer links (ownership/identity/person) are
+    // populated by the service and audit, not constrained here.
+    check(
+      "registration_submissions_portal_linkage_check",
+      sql`${t.source} <> 'portal' OR (${t.animalId} IS NOT NULL AND ${t.requestedYear} IS NOT NULL)`,
     ),
   ],
 );

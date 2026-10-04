@@ -299,6 +299,40 @@ export default function RegistrationsPage() {
     }
   };
 
+  // Portal-originated requests (#297): the canonical animal/year are
+  // already on the row — a single deliberate click creates the
+  // registration through the same service, no re-matching needed.
+  const registerPortalRequest = (registration: AnimalRegistration) => {
+    mutation.run(async () => {
+      try {
+        const result = await createRegistrationFromSubmissionAction(
+          null,
+          registration.id,
+        );
+        if (!result.ok) {
+          toast({
+            title: "Couldn't register",
+            description:
+              result.reason === "conflict"
+                ? "That animal already has a registration for this period."
+                : "Failed to create the registration. Try again.",
+            variant: "destructive",
+          });
+          return;
+        }
+        toast({ title: "Registration created and linked" });
+        await loadAll();
+      } catch (error) {
+        logError("registration", "registration-link", error);
+        toast({
+          title: "Error",
+          description: "Failed to create the registration. Try again.",
+          variant: "destructive",
+        });
+      }
+    }, `register-portal-${registration.id}`);
+  };
+
   const linkSubmission = (animalId: string) => {
     if (!linking) return;
     mutation.run(async () => {
@@ -715,12 +749,32 @@ export default function RegistrationsPage() {
                             </div>
                           </div>
                         ))}
+                        {/* Portal requests carry the canonical animal —
+                            staff verify rather than re-match (#297). */}
+                        {registration.linkedAnimalId && (
+                          <div className="text-sm">
+                            <Link
+                              href={`/admin/animals/${registration.linkedAnimalId}`}
+                              className="text-primary underline"
+                            >
+                              {registration.linkedAnimalName ?? "Linked animal"}
+                            </Link>
+                            {registration.linkedAnimalRegistryRef && (
+                              <span className="font-mono text-xs text-muted-foreground ml-1">
+                                {registration.linkedAnimalRegistryRef}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell>${registration.totalFee ?? "—"}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1 flex-wrap">
                         <RegistrationStatusBadge status={registration.status} />
+                        {registration.source === "portal" && (
+                          <Badge variant="secondary">Owner portal</Badge>
+                        )}
                         {registration.retentionHold && (
                           <Badge
                             variant="secondary"
@@ -746,19 +800,32 @@ export default function RegistrationsPage() {
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          aria-label="Register a claimed animal"
-                          disabled={mutation.pending}
-                          onClick={() => {
-                            setLinking(registration);
-                            setLinkQuery("");
-                            setLinkResults([]);
-                          }}
-                        >
-                          <Link2 className="h-4 w-4" />
-                        </Button>
+                        {/* Portal requests are pre-linked server-side —
+                            one deliberate click registers them; public
+                            submissions still need the animal picker. */}
+                        {registration.source === "portal" ? (
+                          <Button
+                            size="sm"
+                            disabled={mutation.pending}
+                            onClick={() => registerPortalRequest(registration)}
+                          >
+                            Register
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            aria-label="Register a claimed animal"
+                            disabled={mutation.pending}
+                            onClick={() => {
+                              setLinking(registration);
+                              setLinkQuery("");
+                              setLinkResults([]);
+                            }}
+                          >
+                            <Link2 className="h-4 w-4" />
+                          </Button>
+                        )}
                         {registration.paymentReceipt && (
                           <Button
                             variant="outline"
@@ -913,7 +980,36 @@ export default function RegistrationsPage() {
                 <div className="flex items-center gap-2">
                   <span className="font-medium">Status:</span>
                   <RegistrationStatusBadge status={selected.status} />
+                  {selected.source === "portal" && (
+                    <Badge variant="secondary">Owner portal</Badge>
+                  )}
                 </div>
+                {selected.source === "portal" && (
+                  <div>
+                    <h4 className="font-medium mb-1">Portal request</h4>
+                    <p className="text-muted-foreground">
+                      {selected.requestedYear ?? "—"} registration · linked to{" "}
+                      {selected.linkedAnimalId ? (
+                        <Link
+                          href={`/admin/animals/${selected.linkedAnimalId}`}
+                          className="text-primary underline"
+                        >
+                          {selected.linkedAnimalName ?? "animal"}
+                        </Link>
+                      ) : (
+                        "—"
+                      )}
+                      {selected.linkedAnimalRegistryRef &&
+                        ` (${selected.linkedAnimalRegistryRef})`}
+                    </p>
+                    {selected.ownerNote && (
+                      <p className="mt-1">
+                        <span className="font-medium">Owner note:</span>{" "}
+                        {selected.ownerNote}
+                      </p>
+                    )}
+                  </div>
+                )}
                 <div>
                   <h4 className="font-medium mb-1">Owner</h4>
                   <p>{selected.ownerInfo?.name ?? "—"}</p>

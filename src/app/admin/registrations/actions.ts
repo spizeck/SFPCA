@@ -10,6 +10,7 @@ import { adminReceiptBucket } from "@/lib/firebase-admin-storage";
 import {
   createRegistration,
   getRegistrationQueues,
+  getSubmissionLinkTarget,
   listRegistrationSubmissions,
   updateSubmissionStatus,
   type AdminRegistrationSubmission,
@@ -58,6 +59,14 @@ function toRegistration(
     paymentReceipt: dto.paymentReceiptPath,
     receiptVerifiedAt: dto.receiptVerifiedAt,
     receiptPurgedAt: dto.receiptPurgedAt,
+    source: (dto.source === "portal" ? "portal" : "public") as
+      | "public"
+      | "portal",
+    linkedAnimalId: dto.animalId,
+    linkedAnimalName: dto.linkedAnimalName,
+    linkedAnimalRegistryRef: dto.linkedAnimalRegistryRef,
+    requestedYear: dto.requestedYear,
+    ownerNote: dto.ownerNote,
     totalFee: dto.totalFeeCents / 100,
     status: dto.status as AnimalRegistration["status"],
     createdAt: dto.submittedAt,
@@ -213,19 +222,36 @@ export async function getRegistrationQueuesAction(): Promise<RegistrationQueues>
   return getRegistrationQueues();
 }
 
-// Link a reviewed submission's animal claim to a registry animal and
-// create the authoritative registration. Matching is ALWAYS the
-// staff member's choice via the animal picker — intake data never
-// auto-matches (#178 owns generic duplicate detection).
+// Link a reviewed submission to a registry animal and create the
+// authoritative registration. For PUBLIC submissions matching is
+// ALWAYS the staff member's choice via the animal picker — intake data
+// never auto-matches (#178 owns generic duplicate detection). For
+// PORTAL-originated requests the canonical animal and year are already
+// stored on the row (server-resolved at submit time); passing
+// animalId=null makes the server use them rather than trusting the
+// client's pick.
 export async function createRegistrationFromSubmissionAction(
-  animalId: string,
+  animalId: string | null,
   submissionId: string,
 ): Promise<StatusActionResult> {
   const { authorized, user } = await requireAdmin();
   if (!authorized) throw new Error("Unauthorized");
   try {
+    const target = await getSubmissionLinkTarget(submissionId);
+    if (!target) return { ok: false, reason: "not-found" };
+    const resolvedAnimalId =
+      target.source === "portal" && target.animalId
+        ? target.animalId
+        : animalId;
+    if (!resolvedAnimalId) return { ok: false, reason: "invalid" };
     const result = await createRegistration(
-      { animalId, submissionId },
+      {
+        animalId: resolvedAnimalId,
+        submissionId,
+        ...(target.source === "portal" && target.requestedYear !== null
+          ? { year: target.requestedYear }
+          : {}),
+      },
       user?.email ?? "unknown",
     );
     return result.ok ? { ok: true } : { ok: false, reason: result.reason };

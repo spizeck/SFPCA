@@ -20,6 +20,12 @@ import {
   type OwnerRequestKind,
 } from "@/lib/registry/owner-request-kinds";
 import { reportMissingByOwner } from "@/lib/registry/lost-found";
+import {
+  createPortalRegistrationRequest,
+  PORTAL_REQUEST_NOTE_MAX,
+} from "@/lib/registry/registrations";
+import { checkRateLimit, warnThrottled } from "@/lib/rate-limit";
+import { subjectForPrincipal } from "@/lib/request-identity";
 import { logError } from "@/lib/logger";
 
 export interface PortalActionResult {
@@ -228,6 +234,84 @@ export async function cancelOwnerRequestAction(
     return { ok: true };
   } catch (error) {
     logError("portal", "cancel-owner-request", error);
+    return { ok: false, error: "Something went wrong. Please try again." };
+  }
+}
+
+export interface RequestRegistrationInput {
+  ownershipId: string;
+  // Client-generated uuid — the receipt object name and the idempotent
+  // retry handle, same contract as the public intake.
+  submissionId: string;
+  // Optional "something changed" note for staff — a claim reviewed by
+  // humans, never an auto-applied edit to canonical records.
+  note?: string;
+  wantsReceipt?: boolean;
+}
+
+export type RequestRegistrationResult =
+  | { ok: true; submissionId: string }
+  | { ok: false; error: string };
+
+// "Please register my animal for this year" (#297). Creates a
+// staff-reviewed submission in the SAME intake queue as the public
+// form — never an authoritative registration. The service re-verifies
+// the ownership relationship, animal eligibility, and (animal, year)
+// slot server-side; the client supplies no ids beyond the ownership.
+export async function requestRegistrationAction(
+  input: RequestRegistrationInput,
+): Promise<RequestRegistrationResult> {
+  const ctx = await requireLinkedOwner();
+  if (!ctx.ok) return { ok: false, error: ctx.error };
+
+  if (input.note && input.note.length > PORTAL_REQUEST_NOTE_MAX) {
+    return { ok: false, error: "Note is too long." };
+  }
+
+  // Authenticated abuse is bounded by the unique pending-request index
+  // and staff pacing, but a user-scoped limiter is still cheap
+  // defense-in-depth — keyed by identity, never by shared-IP heuristics.
+  const gate = await checkRateLimit(
+    "registration.submit",
+    subjectForPrincipal("owner", ctx.identity.id),
+  );
+  if (!gate.allowed) {
+    warnThrottled("registration", "registration.submit", gate);
+    return {
+      ok: false,
+      error: "Too many requests. Please wait a moment and try again.",
+    };
+  }
+
+  try {
+    const result = await createPortalRegistrationRequest(
+      {
+        ownershipId: input.ownershipId,
+        personId: ctx.person.id,
+        authIdentityId: ctx.identity.id,
+        submissionId: input.submissionId,
+        ownerNote: input.note,
+        receiptRequested: input.wantsReceipt === true,
+      },
+      ctx.identity.email ?? ctx.person.fullName,
+    );
+    if (!result.ok) {
+      return {
+        ok: false,
+        error:
+          result.reason === "not-owner"
+            ? "That animal is not associated with you."
+            : result.reason === "conflict"
+              ? `This animal already has a registration or a pending request for this year.`
+              : result.reason === "not-eligible"
+                ? "This animal isn't eligible for registration right now."
+                : "Invalid request. Please try again.",
+      };
+    }
+    revalidatePath("/portal");
+    return { ok: true, submissionId: result.submissionId };
+  } catch (error) {
+    logError("portal", "request-registration", error);
     return { ok: false, error: "Something went wrong. Please try again." };
   }
 }

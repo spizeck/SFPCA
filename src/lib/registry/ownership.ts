@@ -51,6 +51,7 @@ import {
   personMerges,
   persons,
   registrations,
+  registrationSubmissions,
 } from "../db/schema";
 import { getRegistryDb } from "../db/client";
 import {
@@ -528,6 +529,17 @@ export interface PortalAnimal {
   // Every year with an active registration — the owner's own
   // registration history, newest first. No staff notes or internals.
   registrationYears: number[];
+  // The latest PORTAL-ORIGINATED registration request (#297) for the
+  // current period — 'pending'/'approved' means staff have it,
+  // 'rejected' means declined. Only the owner-safe status and date are
+  // exposed — never staff internals or the receipt path.
+  registrationRequest: {
+    status: string;
+    submittedAt: string;
+  } | null;
+  // A cancelled current-period registration still holds the (animal,
+  // year) slot — owners cannot request over it; staff resolve it.
+  registrationCancelled: boolean;
   // Annual-confirmation state (#166): the latest deliberate
   // confirmation on this relationship and the date the next one falls
   // due. Never derived from updated_at or profile edits.
@@ -691,6 +703,58 @@ export async function listPortalAnimals(
     years.sort((a, b) => b - a);
   }
 
+  // Portal registration requests + cancelled slots (#297) — two small
+  // batch reads so each card can render the real in-flight state rather
+  // than a fresh CTA. A cancelled row keeps its (animal, year) slot, so
+  // its animal can look "not registered" while a request is impossible.
+  const cancelledForPeriod = new Set(
+    animalIds.length > 0
+      ? (
+          await db
+            .select({ animalId: registrations.animalId })
+            .from(registrations)
+            .where(
+              and(
+                inArray(registrations.animalId, animalIds),
+                eq(registrations.year, periodYear),
+                eq(registrations.status, "cancelled"),
+              ),
+            )
+        ).map((r) => r.animalId)
+      : [],
+  );
+  const requestRows =
+    animalIds.length > 0
+      ? await db
+          .select({
+            animalId: registrationSubmissions.animalId,
+            status: registrationSubmissions.status,
+            submittedAt: registrationSubmissions.submittedAt,
+          })
+          .from(registrationSubmissions)
+          .where(
+            and(
+              inArray(registrationSubmissions.animalId, animalIds),
+              eq(registrationSubmissions.source, "portal"),
+              eq(registrationSubmissions.requestedYear, periodYear),
+            ),
+          )
+          .orderBy(desc(registrationSubmissions.submittedAt))
+      : [];
+  // Rows arrive newest-first — the first row per animal is the state
+  // the owner should see.
+  const latestRequestByAnimal = new Map<
+    string,
+    { status: string; submittedAt: string }
+  >();
+  for (const r of requestRows) {
+    if (!r.animalId || latestRequestByAnimal.has(r.animalId)) continue;
+    latestRequestByAnimal.set(r.animalId, {
+      status: r.status,
+      submittedAt: r.submittedAt.toISOString(),
+    });
+  }
+
   // One card per animal: when a person reaches the same animal through
   // both a direct and a household ownership, the direct relationship
   // wins — the household row is still real history, just redundant for
@@ -724,6 +788,9 @@ export async function listPortalAnimals(
       registration: currentRegByAnimal.get(row.animalId) ?? null,
       registrationYear: periodYear,
       registrationYears: regYearsByAnimal.get(row.animalId) ?? [],
+      registrationRequest:
+        latestRequestByAnimal.get(row.animalId) ?? null,
+      registrationCancelled: cancelledForPeriod.has(row.animalId),
       lastConfirmedOn: row.lastConfirmedOn,
       confirmationDueOn: dueOn,
       confirmationDue: dueOn <= asOf,

@@ -93,6 +93,79 @@ test.describe("owner portal", () => {
     ).toBeHidden();
   });
 
+  test("owner requests annual registration and staff completes it (#297)", async ({
+    page,
+  }) => {
+    // --- Owner submits a portal-native registration request ---------
+    // Reggie is the dedicated #169 fixture: portal-owned, prior-year
+    // registration history, unregistered for the current year.
+    await signIn(page, E2E_OWNER_EMAIL, E2E_OWNER_PASSWORD);
+    await expect(page).toHaveURL("/portal");
+
+    const reggieCard = page
+      .locator("div.rounded-lg.border")
+      .filter({ has: page.getByRole("heading", { name: "Reggie" }) });
+    await reggieCard
+      .getByRole("button", { name: /Register Reggie for/ })
+      .click();
+
+    // The dialog is prefilled from canonical records — nothing is
+    // typed from scratch.
+    const dialog = page.getByRole("dialog");
+    await expect(
+      dialog.getByRole("heading", { name: /Register Reggie for/ }),
+    ).toBeVisible();
+    await expect(dialog.getByText("E2E Owner")).toBeVisible();
+    await dialog
+      .getByLabel("Anything changed? (optional)")
+      .fill("Please call before visiting");
+    await dialog.getByRole("button", { name: "Submit request" }).click();
+
+    // The card flips to the in-between state: not registered, but no
+    // fresh call to action either — exactly one in-flight request.
+    await expect(reggieCard.getByText("Request submitted")).toBeVisible();
+    await expect(
+      reggieCard.getByText(/Awaiting SFPCA review/),
+    ).toBeVisible();
+    await expect(
+      reggieCard.getByRole("button", { name: /Register Reggie for/ }),
+    ).toBeHidden();
+
+    // --- Staff reviews it in the existing intake queue ---------------
+    await signOut(page);
+    await signIn(page, E2E_ADMIN_EMAIL, E2E_ADMIN_PASSWORD);
+    await expect(page).toHaveURL("/admin");
+
+    await page.goto("/admin/registrations");
+    await expect(
+      page.getByRole("heading", { name: "Animal Registrations" }),
+    ).toBeVisible();
+    const submissionRow = page
+      .locator("#submissions")
+      .getByRole("row", { name: /Reggie/ });
+    await expect(submissionRow.getByText("Owner portal")).toBeVisible();
+    await submissionRow
+      .getByRole("button", { name: "Register" })
+      .click();
+    await expect(
+      page.getByText("Registration created and linked", { exact: true }),
+    ).toBeVisible();
+
+    // --- Owner sees the normal registered state ----------------------
+    await signOut(page);
+    await signIn(page, E2E_OWNER_EMAIL, E2E_OWNER_PASSWORD);
+    await expect(page).toHaveURL("/portal");
+    const finalCard = page
+      .locator("div.rounded-lg.border")
+      .filter({ has: page.getByRole("heading", { name: "Reggie" }) });
+    // The request state is gone — the real registration with its
+    // derived balance is now the truth.
+    await expect(
+      finalCard.getByText("$100.00 outstanding"),
+    ).toBeVisible();
+    await expect(finalCard.getByText("Request submitted")).toBeHidden();
+  });
+
   test("owner files a report and staff resolves it; the animal leaves the portal", async ({
     page,
   }) => {

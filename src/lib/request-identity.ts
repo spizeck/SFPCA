@@ -70,6 +70,17 @@ export function subjectForIp(
     .digest("hex");
 }
 
+// Limiter subject for an authenticated principal — the stable account
+// id, not an IP. Shared NATs and mobile carrier exits shouldn't bind a
+// household's submissions to a stranger's traffic.
+export function subjectForPrincipal(
+  kind: string,
+  id: string,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  return subjectForIp(`${kind}:${id}`, env);
+}
+
 // Server actions call this to get the current request's limiter subject.
 // Never expose the returned value to the client or Sentry context.
 export async function publicIntakeSubject(): Promise<string> {
