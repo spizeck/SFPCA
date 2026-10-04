@@ -71,6 +71,13 @@ describe("Button loading", () => {
       </Button>,
     );
     expect(screen.getByRole("button")).toHaveAttribute("aria-busy", "true");
+    rerender(
+      <Button loading={false} onClick={onClick}>
+        Save changes
+      </Button>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(onClick).toHaveBeenCalledTimes(2);
   });
 });
 

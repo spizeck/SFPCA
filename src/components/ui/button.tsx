@@ -12,11 +12,12 @@ import { Spinner } from "@/components/ui/spinner";
 //   acknowledges the press before the network round-trip. Kept to 2%
 //   so it reads as weight, not a bounce. The `link` variant opts out —
 //   a text link should underline, not shrink.
-// - transition-all + --duration-fast: colour/hover/active changes ride
+// - explicit transition list + --duration-fast: colour/hover/active
+//   changes ride
 //   the shared timing tokens. Reduced-motion users get the same states
 //   instantly via the global transition cap in globals.css.
 const buttonVariants = cva(
-  "relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-all duration-fast active:duration-press cursor-pointer select-none active:scale-[0.98] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  "relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-[color,background-color,border-color,box-shadow,opacity,transform] duration-fast active:duration-press cursor-pointer select-none active:scale-[0.98] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
@@ -67,12 +68,14 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         // Native `disabled` blocks re-clicks on real buttons; slotted
         // children (usually <a>) get aria-disabled + pointer-events-none
         // instead since anchors have no disabled attribute.
+        {...props}
+        // Spread props first so a caller's aria-busy/aria-disabled
+        // can't weaken the loading guards below.
         disabled={asChild ? undefined : disabled || loading}
         aria-disabled={asChild && (disabled || loading) ? true : undefined}
         aria-busy={loading || undefined}
-        {...props}
       >
-        {loading ? (
+        {loading && !asChild ? (
           loadingText !== undefined ? (
             <>
               <Spinner />

@@ -14,7 +14,7 @@ const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background transition-colors duration-fast cursor-pointer placeholder:text-muted-foreground enabled:hover:border-foreground/30 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1 data-[state=open]:border-ring data-[state=open]:[&_svg]:rotate-180",
+      "group flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background transition-colors duration-fast cursor-pointer placeholder:text-muted-foreground enabled:hover:border-foreground/30 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1 data-[state=open]:border-ring",
       className
     )}
     {...props}
@@ -22,8 +22,9 @@ const SelectTrigger = React.forwardRef<
     {children}
     <SelectPrimitive.Icon asChild>
       {/* Chevron flips while the menu is open so the trigger visibly
-          owns the open state — data-[state=open] lives on the trigger. */}
-      <ChevronDown className="h-4 w-4 opacity-50 transition-transform duration-fast" />
+          owns the open state. Scoped via `group` so svgs passed as
+          children aren't rotated too. */}
+      <ChevronDown className="h-4 w-4 opacity-50 transition-transform duration-fast group-data-[state=open]:rotate-180" />
     </SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>
 ));
