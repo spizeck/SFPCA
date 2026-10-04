@@ -44,6 +44,17 @@
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
+
+  /* Shared interaction timing (#280). Three durations cover every
+     micro-interaction so component code never scatters magic numbers:
+       press — pointer-down/active feedback (immediate)
+       fast  — hover, focus, colour/state transitions
+       ui    — menus, popovers, small panel entrances
+     Larger entrances keep tw-animate-css's defaults. */
+  --duration-press: 100ms;
+  --duration-fast: 150ms;
+  --duration-ui: 200ms;
+  --ease-ui: cubic-bezier(0.2, 0, 0, 1);
 }
 
 @layer base {
@@ -148,6 +159,24 @@
   .animate-out {
     animation: none;
   }
+
+  /* State changes go instant (#280): every CSS transition collapses to
+     ~0ms so hover/press/focus feedback still applies without motion.
+     Keyframe animations are left alone on purpose — the entrance
+     animations above are already suppressed, and remaining keyframe
+     uses (loading spinners) are functional indicators, not decoration.
+     The skeleton pulse opt-outs via motion-safe: instead. */
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
+
+  /* Anchored scrolling counts as decorative motion here. */
+  html {
+    scroll-behavior: auto;
+  }
 }
 
 /* ---------- Klaro consent UI ----------
@@ -212,6 +241,7 @@
   min-height: 2.5rem;
   padding: 0.5rem 1rem;
   margin-right: 0;
+  cursor: pointer;
   border: 1px solid hsl(var(--border));
   border-radius: calc(var(--radius) - 2px);
   background-color: hsl(var(--secondary));
