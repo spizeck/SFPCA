@@ -521,6 +521,10 @@ export interface PortalAnimal {
     outstandingCents: number;
     currency: string;
   } | null;
+  // The period year `registration` was matched against — exposed so
+  // the portal labels "the current year's registration" with the same
+  // period the server used rather than re-deriving it client-side.
+  registrationYear: number;
   // Every year with an active registration — the owner's own
   // registration history, newest first. No staff notes or internals.
   registrationYears: number[];
@@ -718,6 +722,7 @@ export async function listPortalAnimals(
       validFrom: row.validFrom,
       chipNumber: chipByAnimal.get(row.animalId) ?? null,
       registration: currentRegByAnimal.get(row.animalId) ?? null,
+      registrationYear: periodYear,
       registrationYears: regYearsByAnimal.get(row.animalId) ?? [],
       lastConfirmedOn: row.lastConfirmedOn,
       confirmationDueOn: dueOn,

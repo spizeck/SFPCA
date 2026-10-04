@@ -163,10 +163,10 @@ test.describe("annual registrations (#169)", () => {
       .locator("[class*=bg-card]")
       .filter({ has: page.getByRole("heading", { name: "Reggie" }) });
     await expect(
-      reggieCard.getByText(`${year} registration:`),
+      reggieCard.getByText(`${year} registration`),
     ).toBeVisible();
     await expect(reggieCard.getByText(/Paid/)).toBeVisible();
-    await expect(reggieCard.getByText(/Registered:/)).toContainText(
+    await expect(reggieCard.getByText(/Previously registered:/)).toContainText(
       String(year - 1),
     );
   });
@@ -279,8 +279,11 @@ test.describe("registration payment ledger (#170)", () => {
       .locator("[class*=bg-card]")
       .filter({ has: page.getByRole("heading", { name: "Penny" }) });
     await expect(
-      pennyCard.getByText(`${year} registration:`),
+      pennyCard.getByText(`${year} registration`),
     ).toBeVisible();
-    await expect(pennyCard.getByText(/25\.00 USD outstanding/)).toBeVisible();
+    await expect(pennyCard.getByText(/\$25\.00 outstanding/)).toBeVisible();
+    await expect(
+      pennyCard.getByText("$75.00 of $100.00 paid"),
+    ).toBeVisible();
   });
 });
