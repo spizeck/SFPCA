@@ -37,6 +37,7 @@ import { OWNER_REQUEST_KIND_LABELS } from "@/lib/registry/owner-request-kinds";
 import type { HouseholdRecord, PersonRecord } from "@/lib/registry/persons";
 import { logError } from "@/lib/logger";
 import { LoadError } from "@/components/admin/load-error";
+import { AdminLoading } from "@/components/admin/admin-loading";
 
 type ResolveDecision = "approved" | "rejected";
 
@@ -318,7 +319,7 @@ export default function OwnerRequestsPage() {
     load();
   }, []);
 
-  if (loading) return <div>Loading...</div>;
+  if (loading) return <AdminLoading label="requests" />;
   if (loadError || !data) {
     return <LoadError label="owner requests" onRetry={load} />;
   }

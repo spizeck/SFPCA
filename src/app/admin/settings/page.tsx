@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@/hooks/use-mutation";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes";
 import { LoadError } from "@/components/admin/load-error";
+import { AdminLoading } from "@/components/admin/admin-loading";
 import { logError } from "@/lib/logger";
 import { safeEmbedUrl } from "@/lib/url-safety";
 
@@ -99,7 +100,7 @@ export default function SettingsPage() {
   };
 
   if (loading) {
-    return <div>Loading...</div>;
+    return <AdminLoading label="settings" />;
   }
 
   if (loadError) {
@@ -110,8 +111,8 @@ export default function SettingsPage() {
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Site Settings</h1>
-        <Button onClick={handleSave} disabled={saveMutation.pending}>
-          {saveMutation.pending ? "Saving..." : "Save Changes"}
+        <Button onClick={handleSave} loading={saveMutation.pending}>
+          Save Changes
         </Button>
       </div>
 
@@ -272,8 +273,8 @@ export default function SettingsPage() {
       </Card>
 
       <div className="flex justify-end">
-        <Button onClick={handleSave} disabled={saveMutation.pending} size="lg">
-          {saveMutation.pending ? "Saving..." : "Save All Changes"}
+        <Button onClick={handleSave} loading={saveMutation.pending} size="lg">
+          Save All Changes
         </Button>
       </div>
     </div>

@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { logError } from "@/lib/logger";
+import { AdminLoading } from "@/components/admin/admin-loading";
 import { CircleAlert, GitMerge, KeyRound, TriangleAlert } from "lucide-react";
 
 function PersonCard({
@@ -216,7 +217,7 @@ function PersonMergeReview() {
       </Card>
     );
   }
-  if (!pair) return <p>Loading…</p>;
+  if (!pair) return <AdminLoading label="candidate pair" rows={2} />;
 
   return (
     <div className="space-y-6">
@@ -405,7 +406,7 @@ export default function PersonMergePage() {
           </Link>
         </p>
       </div>
-      <Suspense fallback={<p>Loading…</p>}>
+      <Suspense fallback={<AdminLoading label="candidate pair" rows={2} />}>
         <PersonMergeReview />
       </Suspense>
     </div>

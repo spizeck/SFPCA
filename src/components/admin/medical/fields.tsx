@@ -63,9 +63,9 @@ export function MedicalDialog({
           <Button
             onClick={onSubmit}
             className="w-full"
-            disabled={pending}
+            loading={pending}
           >
-            {pending ? "Saving…" : submitLabel}
+            {submitLabel}
           </Button>
         </div>
       </DialogContent>

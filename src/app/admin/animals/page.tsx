@@ -45,6 +45,7 @@ import { Plus, Pencil, Trash, Search } from "lucide-react";
 import { logError } from "@/lib/logger";
 import { ConfirmDialog } from "@/components/admin/confirm-dialog";
 import { LoadError } from "@/components/admin/load-error";
+import { AdminLoading } from "@/components/admin/admin-loading";
 
 const STERILIZATION_LABELS: Record<string, string> = {
   unknown: "Unknown",
@@ -469,12 +470,8 @@ export default function AnimalsManager() {
                   Enter a direct URL to the animal photo
                 </p>
               </div>
-              <Button onClick={handleSubmit} className="w-full" disabled={mutation.pending}>
-                {mutation.pending
-                  ? "Saving…"
-                  : editingAnimal
-                    ? "Update Animal"
-                    : "Add Animal"}
+              <Button onClick={handleSubmit} className="w-full" loading={mutation.pending}>
+                {editingAnimal ? "Update Animal" : "Add Animal"}
               </Button>
             </div>
           </DialogContent>
@@ -533,7 +530,7 @@ export default function AnimalsManager() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div>Loading...</div>
+            <AdminLoading label="animals" rows={4} />
           ) : loadError ? (
             <LoadError label="animals" onRetry={loadAnimals} />
           ) : (

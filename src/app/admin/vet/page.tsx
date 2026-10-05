@@ -46,6 +46,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { LoadError } from "@/components/admin/load-error";
+import { AdminLoading } from "@/components/admin/admin-loading";
 import { logError } from "@/lib/logger";
 
 type KindFilter = "all" | VetQueueItem["kind"];
@@ -238,7 +239,7 @@ export default function VetQueuePage() {
   }, [loadQueue]);
 
   if (loading) {
-    return <div>Loading...</div>;
+    return <AdminLoading label="vet queue" />;
   }
   if (loadError) {
     return <LoadError label="veterinary queue" onRetry={loadQueue} />;

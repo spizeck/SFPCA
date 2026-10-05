@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   ArrowRight,
   CircleCheck,
@@ -63,7 +64,7 @@ function WorkItemRow({ item }: { item: DashboardWorkItem }) {
     <li>
       <Link
         href={item.href}
-        className="flex items-center gap-3 py-3 px-2 -mx-2 rounded-md hover:bg-muted/50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring group"
+        className="flex items-center gap-3 py-3 px-2 -mx-2 rounded-md transition-colors duration-fast hover:bg-muted/50 active:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring group"
         aria-label={`${item.label} — ${DASHBOARD_URGENCY_LABELS[item.urgency]}. Open the ${item.domain} queue.`}
       >
         <span className="text-2xl font-bold tabular-nums w-10 text-center shrink-0">
@@ -85,7 +86,7 @@ function FailureRow({ failure }: { failure: DashboardFailure }) {
     <li>
       <Link
         href={failure.href}
-        className="flex items-center gap-3 py-3 px-2 -mx-2 rounded-md hover:bg-muted/50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex items-center gap-3 py-3 px-2 -mx-2 rounded-md transition-colors duration-fast hover:bg-muted/50 active:bg-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
       >
         <CircleAlert
           className="h-5 w-5 text-amber-600 shrink-0"
@@ -201,8 +202,15 @@ async function WorkQueues({ role }: { role: "admin" | "editor" }) {
 }
 
 function WorkQueuesFallback() {
+  // Skeleton rows match the real list shape so the dashboard doesn't
+  // reflow when the queues land (#280).
   return (
-    <section aria-labelledby="needs-attention-heading" className="mb-8">
+    <section
+      aria-labelledby="needs-attention-heading"
+      className="mb-8"
+      role="status"
+    >
+      <span className="sr-only">Loading work queues…</span>
       <h2
         id="needs-attention-heading"
         className="text-xl font-semibold mb-3"
@@ -210,8 +218,17 @@ function WorkQueuesFallback() {
         Needs attention
       </h2>
       <Card>
-        <CardContent className="py-6 text-sm text-muted-foreground">
-          Loading work queues…
+        <CardContent className="py-2 space-y-1">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex items-center gap-3 py-3">
+              <Skeleton className="h-7 w-10 shrink-0" />
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <Skeleton className="h-4 w-48" />
+                <Skeleton className="h-3 w-24" />
+              </div>
+              <Skeleton className="h-5 w-20 rounded-full" />
+            </div>
+          ))}
         </CardContent>
       </Card>
     </section>

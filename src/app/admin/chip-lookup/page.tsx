@@ -142,6 +142,9 @@ function FoundScanForm({
   const [outcome, setOutcome] = useState("");
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
+  // Which open case is being resolved — busy locks every control, but
+  // the spinner belongs on the row the operator actually clicked.
+  const [busyCaseId, setBusyCaseId] = useState<string | null>(null);
   const [resolving, setResolving] = useState<Record<string, string>>({});
 
   const saveNew = async () => {
@@ -191,6 +194,7 @@ function FoundScanForm({
     const chosen = resolving[openCase.id];
     if (!chosen) return;
     setBusy(true);
+    setBusyCaseId(openCase.id);
     try {
       const result = await resolveOpenCaseAction(
         openCase.id,
@@ -216,6 +220,7 @@ function FoundScanForm({
       });
     } finally {
       setBusy(false);
+      setBusyCaseId(null);
     }
   };
 
@@ -282,6 +287,7 @@ function FoundScanForm({
                   <Button
                     size="sm"
                     variant="outline"
+                    loading={busyCaseId === r.id}
                     disabled={busy || !resolving[r.id]}
                     onClick={() => resolve(r)}
                   >
@@ -323,6 +329,7 @@ function FoundScanForm({
         <Button
           size="sm"
           variant="outline"
+          loading={busy && busyCaseId === null}
           disabled={busy}
           onClick={saveNew}
         >

@@ -34,6 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   getPersonDetailAction,
   getPersonsDataAction,
@@ -51,6 +52,7 @@ import type {
 } from "@/lib/registry/persons";
 import { logError } from "@/lib/logger";
 import { LoadError } from "@/components/admin/load-error";
+import { AdminLoading } from "@/components/admin/admin-loading";
 import { Plus } from "lucide-react";
 
 function PersonForm({
@@ -158,7 +160,15 @@ function PersonDetailView({
       .catch((e) => logError("owners", "person-detail", e));
   }, [personId]);
 
-  if (!detail) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (!detail)
+    return (
+      <div role="status" className="space-y-2">
+        <span className="sr-only">Loading person details…</span>
+        <Skeleton className="h-4 w-48" />
+        <Skeleton className="h-4 w-64" />
+        <Skeleton className="h-4 w-40" />
+      </div>
+    );
 
   const merged = detail.merge?.status === "merged";
 
@@ -279,7 +289,7 @@ export default function PersonsPage() {
     load();
   }, []);
 
-  if (loading) return <div>Loading...</div>;
+  if (loading) return <AdminLoading label="people" />;
   if (loadError || !data) return <LoadError label="people" onRetry={load} />;
 
   const q = query.trim().toLowerCase();

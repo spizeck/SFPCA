@@ -41,6 +41,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { logError } from "@/lib/logger";
+import { AdminLoading } from "@/components/admin/admin-loading";
 import { CircleAlert, GitMerge, TriangleAlert } from "lucide-react";
 
 function AnimalCard({
@@ -211,7 +212,7 @@ function MergeReview() {
       </Card>
     );
   }
-  if (!pair) return <p>Loading…</p>;
+  if (!pair) return <AdminLoading label="candidate pair" rows={2} />;
 
   return (
     <div className="space-y-6">
@@ -417,7 +418,7 @@ export default function MergePage() {
           </Link>
         </p>
       </div>
-      <Suspense fallback={<p>Loading…</p>}>
+      <Suspense fallback={<AdminLoading label="candidate pair" rows={2} />}>
         <MergeReview />
       </Suspense>
     </div>
