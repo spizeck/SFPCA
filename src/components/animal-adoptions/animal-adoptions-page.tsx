@@ -155,7 +155,7 @@ export function AnimalAdoptions({
                   transition={reduceMotion ? instantTransition : { duration: 0.5, delay: index * 0.1 }}
                   viewport={{ once: true }}
                 >
-                  <Card className="h-full hover:shadow-lg transition-shadow">
+                  <Card className="h-full">
                     <CardHeader>
                       <div className="flex justify-between items-start">
                         <CardTitle className="text-xl">{animal.name}</CardTitle>

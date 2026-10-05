@@ -67,7 +67,7 @@ export function ServicesSection({ data }: ServicesSectionProps) {
                 delay: index * 0.1,
               }}
             >
-              <Card className="text-center h-full hover:shadow-lg transition-shadow flex flex-col">
+              <Card className="text-center h-full flex flex-col">
                 <CardHeader>
                   <div className="flex justify-center mb-4">
                     {iconMap[index] || <Heart className="h-10 w-10 text-primary" aria-hidden="true" />}

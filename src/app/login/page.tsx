@@ -11,9 +11,16 @@ import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function LoginPage() {
-  const [loading, setLoading] = useState(false);
+  // Which sign-in path is in flight — the pressed button is the one that
+  // shows progress; the other just disables. (#280)
+  const [loadingKind, setLoadingKind] = useState<"email" | "google" | null>(
+    null,
+  );
+  const loading = loadingKind !== null;
+  const [resetting, setResetting] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mounted, setMounted] = useState(false);
@@ -46,14 +53,14 @@ export default function LoginPage() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background px-4">
         <div className="w-full max-w-md">
-          <div className="h-32 bg-muted rounded-lg animate-pulse"></div>
+          <Skeleton className="h-32 rounded-lg" />
         </div>
       </div>
     );
   }
 
   const handleGoogleSignIn = async () => {
-    setLoading(true);
+    setLoadingKind("google");
     try {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
@@ -96,13 +103,13 @@ export default function LoginPage() {
         variant: "destructive",
       });
     } finally {
-      setLoading(false);
+      setLoadingKind(null);
     }
   };
 
   const handleEmailSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    setLoadingKind("email");
     try {
       const result = await signInWithEmailAndPassword(auth, email, password);
       
@@ -145,13 +152,13 @@ export default function LoginPage() {
         variant: "destructive",
       });
     } finally {
-      setLoading(false);
+      setLoadingKind(null);
     }
   };
 
   const handleEmailSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    setLoadingKind("email");
     try {
       const result = await createUserWithEmailAndPassword(auth, email, password);
 
@@ -178,7 +185,7 @@ export default function LoginPage() {
         variant: "destructive",
       });
     } finally {
-      setLoading(false);
+      setLoadingKind(null);
     }
   };
 
@@ -200,6 +207,7 @@ export default function LoginPage() {
       return;
     }
 
+    setResetting(true);
     try {
       await sendPasswordResetEmail(auth, email);
       toast({
@@ -215,6 +223,8 @@ export default function LoginPage() {
           : "Failed to send password reset email. Please try again.",
         variant: "destructive",
       });
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -282,6 +292,8 @@ export default function LoginPage() {
                     variant="link"
                     size="sm"
                     className="h-auto p-0 text-xs"
+                    loading={resetting}
+                    loadingText="Sending reset email…"
                     onClick={handleForgotPassword}
                   >
                     Forgot your password?
@@ -291,11 +303,13 @@ export default function LoginPage() {
             </div>
             <Button
               type="submit"
+              loading={loadingKind === "email"}
+              loadingText={isSignIn ? "Signing in…" : "Creating account…"}
               disabled={loading}
               className="w-full"
               size="lg"
             >
-              {loading ? (isSignIn ? "Signing in..." : "Creating account...") : (isSignIn ? "Sign in" : "Create Account")}
+              {isSignIn ? "Sign in" : "Create Account"}
             </Button>
           </form>
           
@@ -312,12 +326,14 @@ export default function LoginPage() {
           
           <Button
             onClick={handleGoogleSignIn}
+            loading={loadingKind === "google"}
+            loadingText="Signing in…"
             disabled={loading}
             className="w-full"
             variant="outline"
             size="lg"
           >
-            {loading ? "Signing in..." : "Sign in with Google"}
+            Sign in with Google
           </Button>
           
           <p className="text-xs text-muted-foreground text-center pt-4">

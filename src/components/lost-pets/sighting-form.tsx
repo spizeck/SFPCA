@@ -117,8 +117,8 @@ export function SightingForm({ caseId }: { caseId: string }) {
           Something went wrong — please try again or contact SFPCA directly.
         </p>
       )}
-      <Button type="submit" size="sm" disabled={busy}>
-        {busy ? "Sending…" : "Send report"}
+      <Button type="submit" size="sm" loading={busy} loadingText="Sending…">
+        Send report
       </Button>
     </form>
   );
