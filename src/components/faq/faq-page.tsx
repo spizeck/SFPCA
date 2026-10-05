@@ -6,7 +6,8 @@ import { db } from "@/lib/firebase";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, ChevronUp, Phone, Mail, MapPin } from "lucide-react";
+import { ChevronDown, Phone, Mail, MapPin } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 import { instantTransition } from "@/lib/animations";
 import Link from "next/link";
 import { logError } from "@/lib/logger";
@@ -86,7 +87,10 @@ export function FAQ() {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+          <Spinner
+            className="h-8 w-8 mx-auto mb-4 text-primary"
+            label="Loading FAQs…"
+          />
           <p className="text-muted-foreground">Loading FAQs...</p>
         </div>
       </div>
@@ -150,17 +154,16 @@ export function FAQ() {
                             <h3 id={headingId}>
                               <button
                                 type="button"
-                                className="flex w-full items-center justify-between gap-4 px-6 py-4 text-left font-medium text-lg cursor-pointer"
+                                className={`flex w-full items-center justify-between gap-4 px-6 py-4 text-left font-medium text-lg cursor-pointer rounded-lg transition-colors duration-fast hover:bg-accent/40 active:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${isOpen ? "bg-accent/30" : ""}`}
                                 aria-expanded={isOpen}
                                 aria-controls={panelId}
                                 onClick={() => toggleItem(faq.id)}
                               >
                                 {faq.question}
-                                {isOpen ? (
-                                  <ChevronUp className="h-5 w-5 shrink-0" aria-hidden="true" />
-                                ) : (
-                                  <ChevronDown className="h-5 w-5 shrink-0" aria-hidden="true" />
-                                )}
+                                <ChevronDown
+                                  className={`h-5 w-5 shrink-0 text-muted-foreground transition-transform duration-ui ${isOpen ? "rotate-180" : ""}`}
+                                  aria-hidden="true"
+                                />
                               </button>
                             </h3>
                             <AnimatePresence>

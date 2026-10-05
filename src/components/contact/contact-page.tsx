@@ -46,7 +46,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
       icon: <Phone className="h-6 w-6 text-primary" aria-hidden="true" />,
       title: "Phone",
       content: contact ? (
-        <a href={`tel:${contact.phone}`} className="text-foreground hover:text-primary">
+        <a href={`tel:${contact.phone}`} className="text-foreground transition-colors duration-fast hover:text-primary">
           {contact.phone}
         </a>
       ) : null,
@@ -55,7 +55,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
       icon: <Mail className="h-6 w-6 text-primary" aria-hidden="true" />,
       title: "Email",
       content: contact ? (
-        <a href={`mailto:${contact.email}`} className="text-foreground hover:text-primary break-all">
+        <a href={`mailto:${contact.email}`} className="text-foreground transition-colors duration-fast hover:text-primary break-all">
           {contact.email}
         </a>
       ) : null,
@@ -68,7 +68,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
           href={`https://wa.me/${contact.whatsapp.replace(/\D/g, "")}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-foreground hover:text-primary"
+          className="text-foreground transition-colors duration-fast hover:text-primary"
         >
           {contact.whatsapp}
         </a>
@@ -149,7 +149,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
                 viewport={{ once: true }}
                 className={card.wide ? "md:col-span-2" : ""}
               >
-                <Card className="h-full hover:shadow-lg transition-shadow">
+                <Card className="h-full">
                   <CardHeader>
                     <div className="flex items-center gap-3">
                       {card.icon}
@@ -230,7 +230,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
                     href={socialLinks.facebook}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-4 transition-colors"
+                    className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-4 transition-all duration-fast active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     aria-label="Facebook"
                   >
                     <FacebookIcon className="h-6 w-6" aria-hidden="true" />
@@ -241,7 +241,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
                     href={socialLinks.instagram}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-4 transition-colors"
+                    className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-4 transition-all duration-fast active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     aria-label="Instagram"
                   >
                     <InstagramIcon className="h-6 w-6" aria-hidden="true" />
@@ -252,7 +252,7 @@ export function ContactPageContent({ contact, social, mapEmbedUrl }: ContactPage
                     href={socialLinks.twitter}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-4 transition-colors"
+                    className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-4 transition-all duration-fast active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     aria-label="Twitter"
                   >
                     <TwitterIcon className="h-6 w-6" aria-hidden="true" />

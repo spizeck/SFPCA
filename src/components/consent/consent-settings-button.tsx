@@ -8,7 +8,7 @@ export function ConsentSettingsButton({ className }: { className?: string }) {
   return (
     <button
       type="button"
-      className={className}
+      className={`cursor-pointer ${className ?? ""}`}
       onClick={() => {
         window.klaro?.show(window.klaroConfig, true);
       }}

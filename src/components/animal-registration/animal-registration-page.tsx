@@ -536,8 +536,13 @@ export function AnimalRegistration({
                     </div>
                   </div>
 
-                  <Button type="submit" className="w-full" disabled={isSubmitting}>
-                    {isSubmitting ? "Submitting..." : `Submit Registration - $${totalFee}`}
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    loading={isSubmitting}
+                    loadingText="Submitting…"
+                  >
+                    Submit Registration - ${totalFee}
                   </Button>
                 </form>
               </CardContent>

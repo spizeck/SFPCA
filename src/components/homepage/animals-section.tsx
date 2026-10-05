@@ -69,7 +69,7 @@ export function AnimalsSection({ animals }: AnimalsSectionProps) {
                 aria-label={`Learn more about ${animal.name}`}
                 className="block h-full rounded-xl focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               >
-                <Card className="overflow-hidden h-full hover:shadow-lg transition-shadow">
+                <Card interactive className="overflow-hidden h-full">
                   {animal.photos && animal.photos.length > 0 && (
                     <motion.div 
                       className="h-48 w-full bg-muted"

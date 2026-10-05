@@ -111,7 +111,7 @@ export function VeterinaryServices() {
                 transition={reduceMotion ? instantTransition : { duration: 0.5, delay: index * 0.1 }}
                 viewport={{ once: true }}
               >
-                <Card className="h-full hover:shadow-lg transition-shadow">
+                <Card className="h-full">
                   <CardHeader>
                     <div className="text-4xl mb-4" aria-hidden="true">{service.icon}</div>
                     <CardTitle className="text-xl">{service.title}</CardTitle>

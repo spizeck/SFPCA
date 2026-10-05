@@ -160,7 +160,7 @@ export function WhoWeAreSection({ data }: WhoWeAreSectionProps) {
                       animate={{ opacity: 1, y: 0 }}
                       transition={reduceMotion ? instantTransition : { delay: index * 0.1 }}
                     >
-                      <Card className="h-full bg-card shadow-lg hover:shadow-xl transition-shadow">
+                      <Card className="h-full bg-card shadow-lg">
                         <CardContent className="p-6 text-center">
                           {/* Photo */}
                           <div className="mb-6">
