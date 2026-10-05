@@ -319,14 +319,20 @@ export async function createPortalRegistrationRequest(
     const causeCode = (error as { cause?: { code?: unknown } })?.cause
       ?.code;
     if (code === "23505" || causeCode === "23505") {
-      // PK conflict → same client uuid retried after a lost response:
-      // idempotent success. Dedup-index conflict → a pending request
-      // for this animal/year already exists: exactly one concurrent
-      // submit wins, the loser reads 'conflict'.
+      // PK conflict → idempotent retry, but ONLY when the existing row
+      // belongs to this same caller: another owner's submission id is a
+      // conflict, not a borrowed success. Dedup-index conflict → a
+      // pending request for this animal/year already exists: exactly
+      // one concurrent submit wins, the loser reads 'conflict'.
       const [same] = await db
         .select({ id: registrationSubmissions.id })
         .from(registrationSubmissions)
-        .where(eq(registrationSubmissions.id, input.submissionId))
+        .where(
+          and(
+            eq(registrationSubmissions.id, input.submissionId),
+            eq(registrationSubmissions.personId, input.personId),
+          ),
+        )
         .limit(1);
       return same
         ? { ok: true, submissionId: input.submissionId }

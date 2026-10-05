@@ -958,6 +958,34 @@ describe("portal registration requests (#297)", () => {
     }
   });
 
+  test("another owner's submission id is a conflict, never a borrowed success", async () => {
+    // Owner A's submission lands; owner B submits their own eligible
+    // request but presents A's submission id — the PK conflict must not
+    // be mistaken for B's own idempotent retry.
+    const ownerA = await seedOwner();
+    const stolenId = nextSubmissionId();
+    const first = await createPortalRegistrationRequest(
+      requestInput(ownerA, { submissionId: stolenId }),
+      "owner-a@example.com",
+      db,
+    );
+    expect(first.ok).toBe(true);
+
+    const ownerB = await seedOwner({ name: "Other Dog" });
+    const second = await createPortalRegistrationRequest(
+      requestInput(ownerB, { submissionId: stolenId }),
+      "owner-b@example.com",
+      db,
+    );
+    expect(second).toMatchObject({ ok: false, reason: "conflict" });
+    // And nothing was created under owner B's identity.
+    const bRows = await db
+      .select()
+      .from(schema.registrationSubmissions)
+      .where(eq(schema.registrationSubmissions.personId, ownerB.person.id));
+    expect(bRows).toHaveLength(0);
+  });
+
   test("a rejected request does not pin the slot — a fresh request is a new row", async () => {
     const owned = await seedOwner();
     const first = await createPortalRegistrationRequest(
