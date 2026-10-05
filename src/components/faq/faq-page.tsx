@@ -87,7 +87,10 @@ export function FAQ() {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
-          <Spinner className="h-8 w-8 mx-auto mb-4 text-primary" />
+          <Spinner
+            className="h-8 w-8 mx-auto mb-4 text-primary"
+            label="Loading FAQs…"
+          />
           <p className="text-muted-foreground">Loading FAQs...</p>
         </div>
       </div>

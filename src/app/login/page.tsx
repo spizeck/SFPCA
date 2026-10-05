@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { signInWithPopup, GoogleAuthProvider, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { logError, logWarn } from "@/lib/logger";
@@ -20,6 +20,9 @@ export default function LoginPage() {
     null,
   );
   const loading = loadingKind !== null;
+  // Synchronous in-flight guard — `disabled` only applies after React
+  // re-renders, so a same-tick second activation must bail here.
+  const inFlight = useRef(false);
   const [resetting, setResetting] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -60,6 +63,8 @@ export default function LoginPage() {
   }
 
   const handleGoogleSignIn = async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setLoadingKind("google");
     try {
       const provider = new GoogleAuthProvider();
@@ -103,12 +108,15 @@ export default function LoginPage() {
         variant: "destructive",
       });
     } finally {
+      inFlight.current = false;
       setLoadingKind(null);
     }
   };
 
   const handleEmailSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (inFlight.current) return;
+    inFlight.current = true;
     setLoadingKind("email");
     try {
       const result = await signInWithEmailAndPassword(auth, email, password);
@@ -152,12 +160,15 @@ export default function LoginPage() {
         variant: "destructive",
       });
     } finally {
+      inFlight.current = false;
       setLoadingKind(null);
     }
   };
 
   const handleEmailSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (inFlight.current) return;
+    inFlight.current = true;
     setLoadingKind("email");
     try {
       const result = await createUserWithEmailAndPassword(auth, email, password);
@@ -185,6 +196,7 @@ export default function LoginPage() {
         variant: "destructive",
       });
     } finally {
+      inFlight.current = false;
       setLoadingKind(null);
     }
   };
