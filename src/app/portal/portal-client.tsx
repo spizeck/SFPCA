@@ -141,8 +141,8 @@ export function AnimalCard({
       );
       return;
     }
+    setBusyAction("request");
     startTransition(async () => {
-      setBusyAction("request");
       try {
         const submissionId = crypto.randomUUID();
         const result = await requestRegistrationAction({
@@ -200,8 +200,8 @@ export function AnimalCard({
   };
 
   const confirm = () => {
+    setBusyAction("confirm");
     startTransition(async () => {
-      setBusyAction("confirm");
       try {
         const result = await confirmAnimalAction(animal.ownershipId);
         toast({
@@ -219,8 +219,8 @@ export function AnimalCard({
 
   const submitReport = () => {
     if (!reportKind) return;
+    setBusyAction("report");
     startTransition(async () => {
-      setBusyAction("report");
       try {
         const result = await submitOwnerReportAction({
           ownershipId: animal.ownershipId,
@@ -251,8 +251,8 @@ export function AnimalCard({
   };
 
   const reportMissing = () => {
+    setBusyAction("missing");
     startTransition(async () => {
-      setBusyAction("missing");
       try {
         const result = await reportMissingAction({
           ownershipId: animal.ownershipId,
@@ -785,8 +785,8 @@ export function PortalClient({
   const [channel, setChannel] = useState(person.preferredChannel ?? "");
 
   const saveProfile = () => {
+    setBusyAction("profile");
     startTransition(async () => {
-      setBusyAction("profile");
       try {
         const result = await updateOwnerProfileAction({
           fullName,
@@ -807,8 +807,8 @@ export function PortalClient({
   };
 
   const cancelRequest = (requestId: string) => {
+    setBusyAction(`withdraw-${requestId}`);
     startTransition(async () => {
-      setBusyAction(`withdraw-${requestId}`);
       try {
         const result = await cancelOwnerRequestAction(requestId);
         toast({

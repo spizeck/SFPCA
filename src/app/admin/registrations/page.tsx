@@ -146,7 +146,7 @@ export default function RegistrationsPage() {
           variant: "destructive",
         });
       }
-    }, `status-${id}`);
+    }, `status-${id}-${status}`);
   };
 
   const handleViewReceipt = (registration: AnimalRegistration) => {
@@ -364,7 +364,7 @@ export default function RegistrationsPage() {
           variant: "destructive",
         });
       }
-    }, `link-${linking.id}`);
+    }, `link-${linking.id}-${animalId}`);
   };
 
   if (loading) {
@@ -859,7 +859,7 @@ export default function RegistrationsPage() {
                             <Button
                               size="sm"
                               aria-label="Verify registration"
-                              loading={mutation.pendingKey === `status-${registration.id}`}
+                              loading={mutation.pendingKey === `status-${registration.id}-approved`}
                               disabled={mutation.pending}
                               onClick={() => setStatus(registration.id, "approved")}
                             >
@@ -869,7 +869,7 @@ export default function RegistrationsPage() {
                               variant="destructive"
                               size="sm"
                               aria-label="Reject registration"
-                              loading={mutation.pendingKey === `status-${registration.id}`}
+                              loading={mutation.pendingKey === `status-${registration.id}-rejected`}
                               disabled={mutation.pending}
                               onClick={() => setStatus(registration.id, "rejected")}
                             >
@@ -882,7 +882,7 @@ export default function RegistrationsPage() {
                             variant="outline"
                             size="sm"
                             aria-label="Reopen registration as pending"
-                            loading={mutation.pendingKey === `status-${registration.id}`}
+                            loading={mutation.pendingKey === `status-${registration.id}-pending`}
                             disabled={mutation.pending}
                             onClick={() => setStatus(registration.id, "pending")}
                           >
@@ -967,7 +967,7 @@ export default function RegistrationsPage() {
                       </div>
                       <Button
                         size="sm"
-                        loading={mutation.pendingKey === `link-${linking.id}`}
+                        loading={mutation.pendingKey === `link-${linking.id}-${hit.animal.id}`}
                         disabled={mutation.pending}
                         onClick={() => linkSubmission(hit.animal.id)}
                       >
