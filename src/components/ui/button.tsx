@@ -78,6 +78,37 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         e.stopPropagation();
       }
     };
+    // Slot calls the CHILD's own handlers before ours — an inert
+    // slotted element's onClick/onKeyDown would still run. While inert,
+    // replace activation handlers on the child itself; non-activation
+    // keys still fall through to the child's own handler.
+    const slottedChildren =
+      asChild &&
+      inert &&
+      React.isValidElement<{
+        onClick?: React.MouseEventHandler;
+        onKeyDown?: React.KeyboardEventHandler;
+        onKeyUp?: React.KeyboardEventHandler;
+      }>(children)
+        ? React.cloneElement(children, {
+            onClick: guardClick,
+            onKeyDown: (e: React.KeyboardEvent) => {
+              if (e.key === "Enter" || e.key === " ") {
+                guardKeyDown(e);
+              } else {
+                children.props.onKeyDown?.(e);
+              }
+            },
+            onKeyUp: (e: React.KeyboardEvent) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                e.stopPropagation();
+              } else {
+                children.props.onKeyUp?.(e);
+              }
+            },
+          })
+        : children;
     return (
       <Comp
         className={cn(buttonVariants({ variant, size, className }), loading && "pointer-events-none")}
@@ -122,7 +153,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
             </>
           )
         ) : (
-          children
+          slottedChildren
         )}
       </Comp>
     );

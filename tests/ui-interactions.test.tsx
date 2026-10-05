@@ -102,6 +102,28 @@ describe("Button loading", () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
+  test("an inert slotted child's own activation handlers are suppressed", () => {
+    // Slot invokes child-owned handlers before the Button's guards —
+    // while inert the child's onClick/onKeyDown must not run at all.
+    const childClick = vi.fn();
+    const childKey = vi.fn();
+    render(
+      <Button asChild loading>
+        <a href="/somewhere" onClick={childClick} onKeyDown={childKey}>
+          Read more
+        </a>
+      </Button>,
+    );
+    const link = screen.getByRole("link", { name: "Read more" });
+    fireEvent.click(link);
+    fireEvent.keyDown(link, { key: "Enter" });
+    fireEvent.keyUp(link, { key: " " });
+    expect(childClick).not.toHaveBeenCalled();
+    // Non-activation keys still reach the child handler.
+    expect(fireEvent.keyDown(link, { key: "ArrowDown" })).toBe(true);
+    expect(childKey).toHaveBeenCalledTimes(1);
+  });
+
   test("a disabled slotted anchor gets the same inert treatment", () => {
     const onClick = vi.fn();
     render(
