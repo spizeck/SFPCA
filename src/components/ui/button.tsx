@@ -2,9 +2,22 @@ import * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
+import { Spinner } from "@/components/ui/spinner";
 
+// Interaction layer (#280):
+// - cursor-pointer: Tailwind v4 preflight leaves buttons on
+//   `cursor: default`, which made every action read as non-interactive.
+// - select-none: rapid clicks must never select the label text.
+// - active:scale-[0.98] at --duration-press: the button physically
+//   acknowledges the press before the network round-trip. Kept to 2%
+//   so it reads as weight, not a bounce. The `link` variant opts out —
+//   a text link should underline, not shrink.
+// - explicit transition list + --duration-fast: colour/hover/active
+//   changes ride
+//   the shared timing tokens. Reduced-motion users get the same states
+//   instantly via the global transition cap in globals.css.
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  "relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-[color,background-color,border-color,box-shadow,opacity,transform] duration-fast active:duration-press cursor-pointer select-none active:scale-[0.98] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
@@ -13,7 +26,7 @@ const buttonVariants = cva(
         outline: "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
         secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",
-        link: "text-primary underline-offset-4 hover:underline",
+        link: "text-primary underline-offset-4 hover:underline active:scale-100",
       },
       size: {
         default: "h-10 px-4 py-2",
@@ -33,12 +46,117 @@ export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof buttonVariants> {
   asChild?: boolean;
+  // True while an async action is in flight. The button becomes
+  // non-interactive (duplicate submissions can't fire), gains
+  // aria-busy, and shows a centred spinner over the hidden label —
+  // the label keeps its layout box so the button never changes size
+  // mid-interaction, and the accessible name becomes "Loading…".
+  // Pass loadingText when the in-flight verb matters ("Deleting…"):
+  // it replaces the label outright — allowed to shift width, callers
+  // pick it deliberately for consequential actions.
+  loading?: boolean;
+  loadingText?: string;
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, ...props }, ref) => {
+  ({ className, variant, size, asChild = false, loading = false, loadingText, disabled, children, onClick, onKeyDown, ...props }, ref) => {
     const Comp = asChild ? Slot : "button";
-    return <Comp className={cn(buttonVariants({ variant, size, className }))} ref={ref} {...props} />;
+    const inert = disabled || loading;
+    // Slotted children aren't real buttons — aria-disabled and
+    // pointer-events-none leave a focused <a> keyboard-activatable
+    // (Enter activates the href on keydown's default action) and a
+    // slotted <button> can still fire click on Space keyup. Block
+    // activation at the event level while inert, without touching
+    // other keys (Tab must still move focus on).
+    const guardClick = (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    const guardKeyDown = (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    // Slot calls the CHILD's own handlers before ours — an inert
+    // slotted element's onClick/onKeyDown would still run. While inert,
+    // replace activation handlers on the child itself; non-activation
+    // keys still fall through to the child's own handler.
+    const slottedChildren =
+      asChild &&
+      inert &&
+      React.isValidElement<{
+        onClick?: React.MouseEventHandler;
+        onKeyDown?: React.KeyboardEventHandler;
+        onKeyUp?: React.KeyboardEventHandler;
+      }>(children)
+        ? React.cloneElement(children, {
+            onClick: guardClick,
+            onKeyDown: (e: React.KeyboardEvent) => {
+              if (e.key === "Enter" || e.key === " ") {
+                guardKeyDown(e);
+              } else {
+                children.props.onKeyDown?.(e);
+              }
+            },
+            onKeyUp: (e: React.KeyboardEvent) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                e.stopPropagation();
+              } else {
+                children.props.onKeyUp?.(e);
+              }
+            },
+          })
+        : children;
+    return (
+      <Comp
+        className={cn(buttonVariants({ variant, size, className }), loading && "pointer-events-none")}
+        ref={ref}
+        // Native `disabled` blocks re-clicks on real buttons; slotted
+        // children (usually <a>) get aria-disabled + pointer-events-none
+        // instead since anchors have no disabled attribute.
+        {...props}
+        // Spread props first so a caller's aria-busy/aria-disabled
+        // can't weaken the loading guards below.
+        disabled={asChild ? undefined : inert}
+        aria-disabled={asChild && inert ? true : undefined}
+        aria-busy={loading || undefined}
+        // An inert slotted control leaves the tab order entirely —
+        // matching native disabled semantics instead of letting focus
+        // land on a control that cannot act.
+        tabIndex={asChild && inert ? -1 : props.tabIndex}
+        onClick={asChild && inert ? guardClick : onClick}
+        onKeyDown={asChild && inert ? guardKeyDown : onKeyDown}
+      >
+        {loading && !asChild ? (
+          loadingText !== undefined ? (
+            <>
+              <Spinner />
+              {loadingText}
+            </>
+          ) : (
+            <>
+              <span
+                className="inline-flex items-center justify-center gap-2 opacity-0"
+                aria-hidden="true"
+              >
+                {children}
+              </span>
+              <span
+                className="absolute inset-0 flex items-center justify-center"
+                aria-hidden="true"
+              >
+                <Spinner />
+              </span>
+              <span className="sr-only">Loading…</span>
+            </>
+          )
+        ) : (
+          slottedChildren
+        )}
+      </Comp>
+    );
   }
 );
 Button.displayName = "Button";
