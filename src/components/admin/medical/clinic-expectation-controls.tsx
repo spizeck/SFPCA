@@ -140,6 +140,7 @@ export function ClinicExpectationResolveButtons({
         variant="outline"
         size="sm"
         onClick={onMarkSeen ?? seen}
+        loading={mutation.pending}
         disabled={mutation.pending}
         aria-label={`Mark ${label} seen`}
       >

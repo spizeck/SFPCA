@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { logError } from "@/lib/logger";
+import { AdminLoading } from "@/components/admin/admin-loading";
 import {
   CheckCheck,
   CircleAlert,
@@ -245,7 +246,9 @@ export default function DataQualityPage() {
         </CardContent>
       </Card>
 
-      {findings === null && !loadError && <p>Loading…</p>}
+      {findings === null && !loadError && (
+        <AdminLoading label="data-quality findings" rows={2} />
+      )}
       {loadError && (
         <Card>
           <CardContent className="pt-6">

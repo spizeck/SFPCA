@@ -115,6 +115,7 @@ export function FollowUpResolveButtons({
         variant="outline"
         size="sm"
         onClick={complete}
+        loading={mutation.pending}
         disabled={mutation.pending}
         aria-label={`Complete ${label}`}
       >

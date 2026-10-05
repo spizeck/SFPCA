@@ -30,6 +30,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@/hooks/use-mutation";
 import { LoadError } from "@/components/admin/load-error";
+import { AdminLoading } from "@/components/admin/admin-loading";
 import { AnimalRegistration } from "@/lib/types";
 import { Eye, CircleCheckBig, Download, CircleX, RotateCcw, Link2, Shield } from "lucide-react";
 import {
@@ -145,7 +146,7 @@ export default function RegistrationsPage() {
           variant: "destructive",
         });
       }
-    }, `status-${id}`);
+    }, `status-${id}-${status}`);
   };
 
   const handleViewReceipt = (registration: AnimalRegistration) => {
@@ -363,11 +364,15 @@ export default function RegistrationsPage() {
           variant: "destructive",
         });
       }
-    }, `link-${linking.id}`);
+    }, `link-${linking.id}-${animalId}`);
   };
 
   if (loading) {
-    return <div className="p-8">Loading...</div>;
+    return (
+      <div className="p-8">
+        <AdminLoading label="registrations" />
+      </div>
+    );
   }
 
   if (loadError) {
@@ -483,6 +488,7 @@ export default function RegistrationsPage() {
                     <TableCell>
                       <Button
                         size="sm"
+                        loading={mutation.pendingKey === `register-${a.animalId}`}
                         disabled={mutation.pending}
                         onClick={() => registerAnimal(a.animalId)}
                       >
@@ -809,6 +815,10 @@ export default function RegistrationsPage() {
                           registration.status !== "rejected" && (
                             <Button
                               size="sm"
+                              loading={
+                                mutation.pendingKey ===
+                                `register-portal-${registration.id}`
+                              }
                               disabled={mutation.pending}
                               onClick={() =>
                                 registerPortalRequest(registration)
@@ -837,6 +847,7 @@ export default function RegistrationsPage() {
                             variant="outline"
                             size="sm"
                             aria-label="View payment receipt"
+                            loading={mutation.pendingKey === `receipt-${registration.id}`}
                             disabled={mutation.pending}
                             onClick={() => handleViewReceipt(registration)}
                           >
@@ -848,6 +859,7 @@ export default function RegistrationsPage() {
                             <Button
                               size="sm"
                               aria-label="Verify registration"
+                              loading={mutation.pendingKey === `status-${registration.id}-approved`}
                               disabled={mutation.pending}
                               onClick={() => setStatus(registration.id, "approved")}
                             >
@@ -857,6 +869,7 @@ export default function RegistrationsPage() {
                               variant="destructive"
                               size="sm"
                               aria-label="Reject registration"
+                              loading={mutation.pendingKey === `status-${registration.id}-rejected`}
                               disabled={mutation.pending}
                               onClick={() => setStatus(registration.id, "rejected")}
                             >
@@ -869,6 +882,7 @@ export default function RegistrationsPage() {
                             variant="outline"
                             size="sm"
                             aria-label="Reopen registration as pending"
+                            loading={mutation.pendingKey === `status-${registration.id}-pending`}
                             disabled={mutation.pending}
                             onClick={() => setStatus(registration.id, "pending")}
                           >
@@ -926,6 +940,7 @@ export default function RegistrationsPage() {
                   <Button
                     variant="outline"
                     onClick={runLinkSearch}
+                    loading={linkSearching}
                     disabled={linkSearching}
                   >
                     Search
@@ -952,6 +967,7 @@ export default function RegistrationsPage() {
                       </div>
                       <Button
                         size="sm"
+                        loading={mutation.pendingKey === `link-${linking.id}-${hit.animal.id}`}
                         disabled={mutation.pending}
                         onClick={() => linkSubmission(hit.animal.id)}
                       >
@@ -1043,13 +1059,12 @@ export default function RegistrationsPage() {
                     <Button
                       variant="outline"
                       size="sm"
+                      loading={mutation.pendingKey === `receipt-${selected.id}`}
                       disabled={mutation.pending}
                       onClick={() => handleViewReceipt(selected)}
                     >
                       <Download className="h-4 w-4 mr-2" />
-                      {mutation.pendingKey === `receipt-${selected.id}`
-                        ? "Loading…"
-                        : "View Receipt"}
+                      View Receipt
                     </Button>
                   )}
                 </div>
@@ -1077,6 +1092,7 @@ export default function RegistrationsPage() {
                       <Button
                         variant="outline"
                         size="sm"
+                        loading={mutation.pendingKey === `hold-release-${selected.id}`}
                         disabled={mutation.pending}
                         onClick={() => releaseHold(selected)}
                       >
@@ -1093,6 +1109,7 @@ export default function RegistrationsPage() {
                       <Button
                         variant="outline"
                         size="sm"
+                        loading={mutation.pendingKey === `hold-${selected.id}`}
                         disabled={mutation.pending}
                         onClick={() => applyHold(selected)}
                       >

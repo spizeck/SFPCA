@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Upload, X, Plus, LoaderCircle } from "lucide-react";
+import { Upload, X, Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { logError } from "@/lib/logger";
 
@@ -221,19 +221,11 @@ export function TeamManager({ team, onChange }: TeamManagerProps) {
                     variant="outline"
                     size="sm"
                     onClick={() => document.getElementById(`photo-${index}`)?.click()}
-                    disabled={uploadingId === (team[index]?.id || `member-${index}`)}
+                    loading={uploadingId === (team[index]?.id || `member-${index}`)}
+                    loadingText="Uploading…"
                   >
-                    {uploadingId === (team[index]?.id || `member-${index}`) ? (
-                      <>
-                        <LoaderCircle className="h-4 w-4 mr-2 animate-spin" />
-                        Uploading...
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="h-4 w-4 mr-2" />
-                        Upload Photo
-                      </>
-                    )}
+                    <Upload className="h-4 w-4 mr-2" />
+                    Upload Photo
                   </Button>
                   <p className="text-xs text-muted-foreground mt-1">
                     JPG, PNG or GIF. Max 5MB.

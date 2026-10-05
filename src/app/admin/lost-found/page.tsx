@@ -40,6 +40,7 @@ import type { LostFoundOutcome } from "@/lib/lost-found";
 import { todayIsoDate } from "@/lib/vaccinations";
 import { logError } from "@/lib/logger";
 import { LoadError } from "@/components/admin/load-error";
+import { AdminLoading } from "@/components/admin/admin-loading";
 import { Plus } from "lucide-react";
 
 function CaseRow({ c }: { c: LostFoundCaseRecord }) {
@@ -201,7 +202,7 @@ export default function LostFoundWorkspacePage() {
     return <LoadError label="lost/found cases" onRetry={load} />;
   }
   if (!data) {
-    return <div>Loading...</div>;
+    return <AdminLoading label="lost and found cases" />;
   }
 
   return (

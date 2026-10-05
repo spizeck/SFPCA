@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@/hooks/use-mutation";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes";
 import { LoadError } from "@/components/admin/load-error";
+import { AdminLoading } from "@/components/admin/admin-loading";
 import { logError } from "@/lib/logger";
 import {
   AnimalRegistrationContent,
@@ -99,7 +100,7 @@ export default function AnimalRegistrationAdminPage() {
   };
 
   if (loading) {
-    return <div>Loading...</div>;
+    return <AdminLoading label="registration content" />;
   }
 
   if (loadError) {
@@ -117,8 +118,8 @@ export default function AnimalRegistrationAdminPage() {
             here.
           </p>
         </div>
-        <Button onClick={handleSave} disabled={saveMutation.pending}>
-          {saveMutation.pending ? "Saving..." : "Save Changes"}
+        <Button onClick={handleSave} loading={saveMutation.pending}>
+          Save Changes
         </Button>
       </div>
 
@@ -229,8 +230,8 @@ export default function AnimalRegistrationAdminPage() {
       </Card>
 
       <div className="flex justify-end">
-        <Button onClick={handleSave} disabled={saveMutation.pending} size="lg">
-          {saveMutation.pending ? "Saving..." : "Save All Changes"}
+        <Button onClick={handleSave} loading={saveMutation.pending} size="lg">
+          Save All Changes
         </Button>
       </div>
     </div>

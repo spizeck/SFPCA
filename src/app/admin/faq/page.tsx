@@ -16,6 +16,7 @@ import { Plus, Pencil, Trash, GripVertical } from "lucide-react";
 import { logError } from "@/lib/logger";
 import { ConfirmDialog } from "@/components/admin/confirm-dialog";
 import { LoadError } from "@/components/admin/load-error";
+import { AdminLoading } from "@/components/admin/admin-loading";
 
 interface FAQ {
   id: string;
@@ -210,7 +211,11 @@ export default function FAQManager() {
   }, {} as Record<string, FAQ[]>);
 
   if (loading) {
-    return <div className="p-8">Loading...</div>;
+    return (
+      <div className="p-8">
+        <AdminLoading label="FAQs" />
+      </div>
+    );
   }
 
   if (loadError) {
@@ -317,8 +322,8 @@ export default function FAQManager() {
                   </p>
                 )}
               </div>
-              <Button onClick={handleSubmit} className="w-full" disabled={mutation.pending}>
-                {mutation.pending ? "Saving…" : editingFaq ? "Update FAQ" : "Add FAQ"}
+              <Button onClick={handleSubmit} className="w-full" loading={mutation.pending}>
+                {editingFaq ? "Update FAQ" : "Add FAQ"}
               </Button>
             </div>
           </DialogContent>

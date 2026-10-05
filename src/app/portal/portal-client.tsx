@@ -107,6 +107,12 @@ export function AnimalCard({
   const [requestNote, setRequestNote] = useState("");
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptError, setReceiptError] = useState<string | null>(null);
+  // Which action is in flight — pending already locks every control,
+  // but the spinner belongs on the button the owner actually pressed
+  // (#280).
+  const [busyAction, setBusyAction] = useState<
+    "confirm" | "report" | "missing" | "request" | null
+  >(null);
   const [reportKind, setReportKind] = useState<OwnerRequestKind | "">("");
   const [detail, setDetail] = useState("");
   const [targetName, setTargetName] = useState("");
@@ -135,121 +141,141 @@ export function AnimalCard({
       );
       return;
     }
+    setBusyAction("request");
     startTransition(async () => {
-      const submissionId = crypto.randomUUID();
-      const result = await requestRegistrationAction({
-        ownershipId: animal.ownershipId,
-        submissionId,
-        note: requestNote || undefined,
-        wantsReceipt: receiptFile !== null,
-      });
-      if (!result.ok) {
-        toast({
-          title: "Couldn't submit the request",
-          description: result.error,
-          variant: "destructive",
+      try {
+        const submissionId = crypto.randomUUID();
+        const result = await requestRegistrationAction({
+          ownershipId: animal.ownershipId,
+          submissionId,
+          note: requestNote || undefined,
+          wantsReceipt: receiptFile !== null,
         });
-        return;
-      }
-      let receiptDelivered = true;
-      if (receiptFile) {
-        try {
-          const upload = await fetch(`/api/receipts/${submissionId}`, {
-            method: "POST",
-            headers: { "Content-Type": receiptFile.type },
-            body: receiptFile,
+        if (!result.ok) {
+          toast({
+            title: "Couldn't submit the request",
+            description: result.error,
+            variant: "destructive",
           });
-          if (!upload.ok) {
-            if (upload.status !== 429) {
-              logError(
-                "registration",
-                "receipt-upload",
-                new Error(`upload ${upload.status}`),
-              );
-            }
-            receiptDelivered = false;
-          }
-        } catch (uploadError) {
-          receiptDelivered = false;
-          logError("registration", "receipt-upload", uploadError);
+          return;
         }
+        let receiptDelivered = true;
+        if (receiptFile) {
+          try {
+            const upload = await fetch(`/api/receipts/${submissionId}`, {
+              method: "POST",
+              headers: { "Content-Type": receiptFile.type },
+              body: receiptFile,
+            });
+            if (!upload.ok) {
+              if (upload.status !== 429) {
+                logError(
+                  "registration",
+                  "receipt-upload",
+                  new Error(`upload ${upload.status}`),
+                );
+              }
+              receiptDelivered = false;
+            }
+          } catch (uploadError) {
+            receiptDelivered = false;
+            logError("registration", "receipt-upload", uploadError);
+          }
+        }
+        toast({
+          title: "Request submitted",
+          description:
+            receiptFile && !receiptDelivered
+              ? `Your ${animal.registrationYear} request went through, but the receipt could not be uploaded — staff can still review the request.`
+              : `SFPCA staff will review your ${animal.registrationYear} request for ${animal.name}.`,
+        });
+        setRequestOpen(false);
+        setRequestNote("");
+        setReceiptFile(null);
+        setReceiptError(null);
+      } finally {
+        setBusyAction(null);
       }
-      toast({
-        title: "Request submitted",
-        description:
-          receiptFile && !receiptDelivered
-            ? `Your ${animal.registrationYear} request went through, but the receipt could not be uploaded — staff can still review the request.`
-            : `SFPCA staff will review your ${animal.registrationYear} request for ${animal.name}.`,
-      });
-      setRequestOpen(false);
-      setRequestNote("");
-      setReceiptFile(null);
-      setReceiptError(null);
     });
   };
 
   const confirm = () => {
+    setBusyAction("confirm");
     startTransition(async () => {
-      const result = await confirmAnimalAction(animal.ownershipId);
-      toast({
-        title: result.ok ? "Confirmed" : "Couldn't confirm",
-        description: result.ok
-          ? `Thanks — ${animal.name} is confirmed as still living on Saba with you.`
-          : result.error,
-        variant: result.ok ? "default" : "destructive",
-      });
+      try {
+        const result = await confirmAnimalAction(animal.ownershipId);
+        toast({
+          title: result.ok ? "Confirmed" : "Couldn't confirm",
+          description: result.ok
+            ? `Thanks — ${animal.name} is confirmed as still living on Saba with you.`
+            : result.error,
+          variant: result.ok ? "default" : "destructive",
+        });
+      } finally {
+        setBusyAction(null);
+      }
     });
   };
 
   const submitReport = () => {
     if (!reportKind) return;
+    setBusyAction("report");
     startTransition(async () => {
-      const result = await submitOwnerReportAction({
-        ownershipId: animal.ownershipId,
-        kind: reportKind,
-        detail: detail || undefined,
-        targetName: targetName || undefined,
-        targetContact: targetContact || undefined,
-        effectiveOn: effectiveOn || undefined,
-      });
-      toast({
-        title: result.ok ? "Request submitted" : "Couldn't submit",
-        description: result.ok
-          ? "Staff will review your report and follow up if needed."
-          : result.error,
-        variant: result.ok ? "default" : "destructive",
-      });
-      if (result.ok) {
-        setReportKind("");
-        setDetail("");
-        setTargetName("");
-        setTargetContact("");
-        setEffectiveOn("");
+      try {
+        const result = await submitOwnerReportAction({
+          ownershipId: animal.ownershipId,
+          kind: reportKind,
+          detail: detail || undefined,
+          targetName: targetName || undefined,
+          targetContact: targetContact || undefined,
+          effectiveOn: effectiveOn || undefined,
+        });
+        toast({
+          title: result.ok ? "Request submitted" : "Couldn't submit",
+          description: result.ok
+            ? "Staff will review your report and follow up if needed."
+            : result.error,
+          variant: result.ok ? "default" : "destructive",
+        });
+        if (result.ok) {
+          setReportKind("");
+          setDetail("");
+          setTargetName("");
+          setTargetContact("");
+          setEffectiveOn("");
+        }
+      } finally {
+        setBusyAction(null);
       }
     });
   };
 
   const reportMissing = () => {
+    setBusyAction("missing");
     startTransition(async () => {
-      const result = await reportMissingAction({
-        ownershipId: animal.ownershipId,
-        lastSeenLocation: missingLocation || undefined,
-        detail: missingDetail || undefined,
-      });
-      if (result.ok) {
-        setMissingReported(true);
-        setMissingOpen(false);
-        toast({
-          title: "Missing report sent",
-          description:
-            "SFPCA staff have been notified and will start looking. We'll contact you if the animal is found.",
+      try {
+        const result = await reportMissingAction({
+          ownershipId: animal.ownershipId,
+          lastSeenLocation: missingLocation || undefined,
+          detail: missingDetail || undefined,
         });
-      } else {
-        toast({
-          title: "Couldn't send the report",
-          description: result.error,
-          variant: "destructive",
-        });
+        if (result.ok) {
+          setMissingReported(true);
+          setMissingOpen(false);
+          toast({
+            title: "Missing report sent",
+            description:
+              "SFPCA staff have been notified and will start looking. We'll contact you if the animal is found.",
+          });
+        } else {
+          toast({
+            title: "Couldn't send the report",
+            description: result.error,
+            variant: "destructive",
+          });
+        }
+      } finally {
+        setBusyAction(null);
       }
     });
   };
@@ -334,7 +360,12 @@ export function AnimalCard({
               Confirms {animal.name} still lives on Saba with you.
             </p>
             {animal.confirmationDue && (
-              <Button size="sm" onClick={confirm} disabled={pending}>
+              <Button
+                size="sm"
+                onClick={confirm}
+                loading={busyAction === "confirm"}
+                disabled={pending}
+              >
                 Confirm still living on Saba with me
               </Button>
             )}
@@ -492,7 +523,7 @@ export function AnimalCard({
         </div>
 
         {missingOpen && (
-          <div className="border rounded-md p-3 space-y-3 text-sm">
+          <div className="animate-in fade-in-0 slide-in-from-top-1 duration-ui border rounded-md p-3 space-y-3 text-sm">
             <p className="font-medium">Report {animal.name} missing</p>
             <div className="space-y-1">
               <Label htmlFor={`missing-where-${animal.ownershipId}`}>
@@ -518,7 +549,12 @@ export function AnimalCard({
               />
             </div>
             <div className="flex gap-2">
-              <Button size="sm" onClick={reportMissing} disabled={pending}>
+              <Button
+                size="sm"
+                onClick={reportMissing}
+                loading={busyAction === "missing"}
+                disabled={pending}
+              >
                 Send missing report
               </Button>
               <Button
@@ -538,7 +574,7 @@ export function AnimalCard({
         )}
 
         {reportKind && (
-          <div className="border rounded-md p-3 space-y-3 text-sm">
+          <div className="animate-in fade-in-0 slide-in-from-top-1 duration-ui border rounded-md p-3 space-y-3 text-sm">
             <p className="font-medium">{OWNER_REQUEST_KIND_LABELS[reportKind]}</p>
             {reportKind === "transfer" && (
               <div className="grid gap-2 sm:grid-cols-2">
@@ -591,7 +627,12 @@ export function AnimalCard({
               />
             </div>
             <div className="flex gap-2">
-              <Button size="sm" onClick={submitReport} disabled={pending}>
+              <Button
+                size="sm"
+                onClick={submitReport}
+                loading={busyAction === "report"}
+                disabled={pending}
+              >
                 Submit request
               </Button>
               <Button
@@ -691,7 +732,12 @@ export function AnimalCard({
                 )}
               </div>
               <div className="flex gap-2">
-                <Button size="sm" onClick={submitRequest} disabled={pending}>
+                <Button
+                  size="sm"
+                  onClick={submitRequest}
+                  loading={busyAction === "request"}
+                  disabled={pending}
+                >
                   Submit request
                 </Button>
                 <Button
@@ -731,6 +777,7 @@ export function PortalClient({
 }) {
   const { toast } = useToast();
   const [pending, startTransition] = useTransition();
+  const [busyAction, setBusyAction] = useState<string | null>(null);
   const [fullName, setFullName] = useState(person.fullName);
   const [email, setEmail] = useState(person.email ?? "");
   const [phone, setPhone] = useState(person.phone ?? "");
@@ -738,30 +785,40 @@ export function PortalClient({
   const [channel, setChannel] = useState(person.preferredChannel ?? "");
 
   const saveProfile = () => {
+    setBusyAction("profile");
     startTransition(async () => {
-      const result = await updateOwnerProfileAction({
-        fullName,
-        email: email || null,
-        phone: phone || null,
-        address: address || null,
-        preferredChannel: channel || null,
-      });
-      toast({
-        title: result.ok ? "Profile saved" : "Couldn't save",
-        description: result.ok ? undefined : result.error,
-        variant: result.ok ? "default" : "destructive",
-      });
+      try {
+        const result = await updateOwnerProfileAction({
+          fullName,
+          email: email || null,
+          phone: phone || null,
+          address: address || null,
+          preferredChannel: channel || null,
+        });
+        toast({
+          title: result.ok ? "Profile saved" : "Couldn't save",
+          description: result.ok ? undefined : result.error,
+          variant: result.ok ? "default" : "destructive",
+        });
+      } finally {
+        setBusyAction(null);
+      }
     });
   };
 
   const cancelRequest = (requestId: string) => {
+    setBusyAction(`withdraw-${requestId}`);
     startTransition(async () => {
-      const result = await cancelOwnerRequestAction(requestId);
-      toast({
-        title: result.ok ? "Request cancelled" : "Couldn't cancel",
-        description: result.ok ? undefined : result.error,
-        variant: result.ok ? "default" : "destructive",
-      });
+      try {
+        const result = await cancelOwnerRequestAction(requestId);
+        toast({
+          title: result.ok ? "Request cancelled" : "Couldn't cancel",
+          description: result.ok ? undefined : result.error,
+          variant: result.ok ? "default" : "destructive",
+        });
+      } finally {
+        setBusyAction(null);
+      }
     });
   };
 
@@ -880,6 +937,7 @@ export function PortalClient({
                         size="sm"
                         variant="ghost"
                         onClick={() => cancelRequest(r.id)}
+                        loading={busyAction === `withdraw-${r.id}`}
                         disabled={pending}
                       >
                         Withdraw
@@ -979,7 +1037,11 @@ export function PortalClient({
                 onChange={(e) => setAddress(e.target.value)}
               />
             </div>
-            <Button onClick={saveProfile} disabled={pending}>
+            <Button
+              onClick={saveProfile}
+              loading={busyAction === "profile"}
+              disabled={pending}
+            >
               Save details
             </Button>
           </CardContent>

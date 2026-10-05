@@ -60,6 +60,7 @@ import type {
 import { todayIsoDate } from "@/lib/vaccinations";
 import { logError } from "@/lib/logger";
 import { LoadError } from "@/components/admin/load-error";
+import { AdminLoading } from "@/components/admin/admin-loading";
 import { ArrowLeft, PawPrint } from "lucide-react";
 
 function OwnerBlock({ owner }: { owner: AnimalOwnerContacts }) {
@@ -219,7 +220,7 @@ export default function LostFoundCasePage() {
     return <LoadError label="case" onRetry={load} />;
   }
   if (!detail && !notFound) {
-    return <div>Loading...</div>;
+    return <AdminLoading label="case details" />;
   }
   if (notFound || !detail) {
     return (

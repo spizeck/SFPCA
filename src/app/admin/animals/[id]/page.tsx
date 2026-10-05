@@ -90,6 +90,7 @@ import {
 import { ArrowLeft, Plus } from "lucide-react";
 import { logError } from "@/lib/logger";
 import { LoadError } from "@/components/admin/load-error";
+import { AdminLoading } from "@/components/admin/admin-loading";
 
 type DialogType =
   | "encounter"
@@ -163,7 +164,7 @@ export default function AnimalMedicalPage() {
   };
 
   if (loading) {
-    return <div>Loading...</div>;
+    return <AdminLoading label="animal record" />;
   }
 
   if (loadError) {
@@ -825,10 +826,11 @@ export default function AnimalMedicalPage() {
               </div>
               <Button
                 className="w-full"
+                loading={savingLifecycle}
                 disabled={!lifecycleDialog.toStatus || savingLifecycle}
                 onClick={submitLifecycleTransition}
               >
-                {savingLifecycle ? "Saving…" : "Apply transition"}
+                Apply transition
               </Button>
             </div>
           )}

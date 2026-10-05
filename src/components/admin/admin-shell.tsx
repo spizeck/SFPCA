@@ -126,10 +126,10 @@ function NavSectionList({ onNavigate }: { onNavigate?: () => void }) {
                     aria-current={active ? "page" : undefined}
                     onClick={onNavigate}
                     className={cn(
-                      "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                      "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-fast",
                       active
-                        ? "bg-primary text-primary-foreground"
-                        : "text-foreground/80 hover:bg-accent hover:text-foreground",
+                        ? "bg-primary text-primary-foreground shadow-sm"
+                        : "text-foreground/80 hover:bg-accent hover:text-foreground active:bg-accent/70",
                     )}
                   >
                     <item.icon className="h-4 w-4 shrink-0" />
@@ -179,7 +179,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           <Link
             href="/"
             target="_blank"
-            className="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium text-foreground/80 transition-colors hover:bg-accent hover:text-foreground"
+            className="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium text-foreground/80 transition-colors duration-fast hover:bg-accent hover:text-foreground active:bg-accent/70"
           >
             <SquareArrowOutUpRight className="h-4 w-4 shrink-0" />
             View Site
@@ -191,11 +191,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           <Button
             variant="ghost"
             onClick={handleLogout}
-            disabled={loggingOut}
+            loading={loggingOut}
+            loadingText="Logging out…"
             className="w-full justify-start gap-2.5 px-3 text-foreground/80 hover:text-foreground"
           >
             <LogOut className="h-4 w-4 shrink-0" />
-            {loggingOut ? "Logging out…" : "Logout"}
+            Logout
           </Button>
         </div>
       </aside>
@@ -238,7 +239,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                 <Link
                   href="/"
                   target="_blank"
-                  className="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium text-foreground/80 transition-colors hover:bg-accent hover:text-foreground"
+                  className="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium text-foreground/80 transition-colors duration-fast hover:bg-accent hover:text-foreground active:bg-accent/70"
                 >
                   <SquareArrowOutUpRight className="h-4 w-4 shrink-0" />
                   View Site
@@ -246,11 +247,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                 <Button
                   variant="ghost"
                   onClick={handleLogout}
-                  disabled={loggingOut}
+                  loading={loggingOut}
+                  loadingText="Logging out…"
                   className="w-full justify-start gap-2.5 px-3 text-foreground/80 hover:text-foreground"
                 >
                   <LogOut className="h-4 w-4 shrink-0" />
-                  {loggingOut ? "Logging out…" : "Logout"}
+                  Logout
                 </Button>
               </div>
             </DialogPrimitive.Content>
@@ -268,7 +270,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             variant="ghost"
             size="sm"
             onClick={handleLogout}
-            disabled={loggingOut}
+            loading={loggingOut}
             aria-label="Log out"
           >
             <LogOut className="h-4 w-4" />

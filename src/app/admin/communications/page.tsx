@@ -38,6 +38,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { LoadError } from "@/components/admin/load-error";
+import { AdminLoading } from "@/components/admin/admin-loading";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@/hooks/use-mutation";
 import { logError } from "@/lib/logger";
@@ -148,7 +149,7 @@ function ExceptionActions({
           variant: "destructive",
         });
       }
-    });
+    }, "requeue");
 
   const setOptOut = (optedOut: boolean) =>
     mutation.run(async () => {
@@ -173,7 +174,7 @@ function ExceptionActions({
           variant: "destructive",
         });
       }
-    });
+    }, "optout");
 
   return (
     <div className="flex items-center justify-end gap-1">
@@ -182,6 +183,7 @@ function ExceptionActions({
           variant="outline"
           size="sm"
           onClick={requeue}
+          loading={mutation.pendingKey === "requeue"}
           disabled={mutation.pending}
           aria-label={`Requeue ${label}`}
         >
@@ -193,6 +195,7 @@ function ExceptionActions({
           variant="ghost"
           size="sm"
           onClick={() => setOptOut(!comm.optedOut)}
+          loading={mutation.pendingKey === "optout"}
           disabled={mutation.pending}
           aria-label={
             comm.optedOut
@@ -247,7 +250,7 @@ export default function CommunicationsPage() {
     });
 
   if (loading) {
-    return <div>Loading...</div>;
+    return <AdminLoading label="communications" />;
   }
   if (loadError || !overview) {
     return <LoadError label="communications" onRetry={load} />;
@@ -280,10 +283,11 @@ export default function CommunicationsPage() {
           <Button
             variant="outline"
             onClick={runPreview}
-            disabled={dryRun.pending}
+            loading={dryRun.pending}
+            loadingText="Evaluating…"
           >
             <FlaskConical className="h-4 w-4 mr-2" />
-            {dryRun.pending ? "Evaluating…" : "Preview next reminder run"}
+            Preview next reminder run
           </Button>
           {preview && (
             <div className="mt-4 text-sm space-y-1" aria-live="polite">

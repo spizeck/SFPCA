@@ -112,8 +112,8 @@ export function MarkSeenDialog({
           >
             Back
           </Button>
-          <Button onClick={confirm} disabled={mutation.pending}>
-            {mutation.pending ? "Saving…" : "Mark seen"}
+          <Button onClick={confirm} loading={mutation.pending}>
+            Mark seen
           </Button>
         </DialogFooter>
       </DialogContent>

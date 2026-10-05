@@ -384,7 +384,7 @@ export function OwnershipPanel({
             )}
 
             <div className="flex gap-2">
-              <Button size="sm" onClick={submit} disabled={busy}>
+              <Button size="sm" onClick={submit} loading={busy}>
                 Save
               </Button>
               <Button
