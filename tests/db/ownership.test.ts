@@ -386,6 +386,93 @@ describe("owner authorization", () => {
   });
 });
 
+describe("portal registration request projection (#297)", () => {
+  async function seedOwned(ownerName = "Jane Owner") {
+    const owner = await seedPerson("owner@example.com", ownerName);
+    const animal = await seedAnimal("Captain");
+    const own = await createOwnership(
+      { animalId: animal.id, personId: owner.id, validFrom: "2025-01-01" },
+      STAFF,
+      db,
+    );
+    if (!own.ok) throw new Error("setup");
+    return { owner, animal, ownership: own.ownership };
+  }
+
+  function portalSubmission(
+    owned: Awaited<ReturnType<typeof seedOwned>>,
+    over: Partial<typeof schema.registrationSubmissions.$inferInsert> = {},
+  ) {
+    return {
+      ownerName: owned.owner.fullName,
+      source: "portal",
+      animalId: owned.animal.id,
+      ownershipId: owned.ownership.id,
+      personId: owned.owner.id,
+      requestedYear: 2026,
+      status: "pending",
+      ...over,
+    } satisfies typeof schema.registrationSubmissions.$inferInsert;
+  }
+
+  test("the latest portal request state rides the animal card DTO", async () => {
+    const owned = await seedOwned();
+    await db.insert(schema.registrationSubmissions).values(
+      portalSubmission(owned, {
+        submittedAt: new Date("2026-09-01T10:00:00Z"),
+      }),
+    );
+
+    const [card] = await listPortalAnimals(owned.owner.id, TODAY, db);
+    expect(card.registrationRequest).toMatchObject({
+      status: "pending",
+      submittedAt: "2026-09-01T10:00:00.000Z",
+    });
+    expect(card.registration).toBeNull();
+    expect(card.registrationCancelled).toBe(false);
+
+    // A newer decided row supersedes — the owner sees where it landed.
+    await db.insert(schema.registrationSubmissions).values(
+      portalSubmission(owned, {
+        status: "rejected",
+        submittedAt: new Date("2026-09-10T10:00:00Z"),
+        decidedAt: new Date("2026-09-11T10:00:00Z"),
+      }),
+    );
+    const [after] = await listPortalAnimals(owned.owner.id, TODAY, db);
+    expect(after.registrationRequest?.status).toBe("rejected");
+  });
+
+  test("a public submission never surfaces as an owner request", async () => {
+    const owned = await seedOwned();
+    await db.insert(schema.registrationSubmissions).values({
+      ownerName: "Someone Else",
+      source: "public",
+      // Public rows claim nothing canonical — even a stray linkage
+      // would still mean a different provenance.
+      animals: [{ name: "Captain", type: "dog", sex: "male", isFixed: "no" }],
+    });
+    const [card] = await listPortalAnimals(owned.owner.id, TODAY, db);
+    expect(card.registrationRequest).toBeNull();
+  });
+
+  test("a cancelled current-year registration surfaces the held slot", async () => {
+    const owned = await seedOwned();
+    await db.insert(schema.registrations).values({
+      animalId: owned.animal.id,
+      year: 2026,
+      status: "cancelled",
+      cancelledAt: new Date("2026-09-01T10:00:00Z"),
+      cancellationReason: "correction",
+      cancellationNote: "Wrong animal",
+    });
+    const [card] = await listPortalAnimals(owned.owner.id, TODAY, db);
+    expect(card.registration).toBeNull();
+    expect(card.registrationCancelled).toBe(true);
+    expect(card.registrationRequest).toBeNull();
+  });
+});
+
 describe("annual confirmations", () => {
   test("portal confirm writes a deliberate row + audit; non-party rejected", async () => {
     const owner = await seedPerson();

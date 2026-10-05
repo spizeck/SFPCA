@@ -8,13 +8,17 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 import type { PortalAnimal } from "@/lib/registry/ownership";
 
-const { mockConfirmAnimal, mockToast } = vi.hoisted(() => ({
-  mockConfirmAnimal: vi.fn(),
-  mockToast: vi.fn(),
-}));
+const { mockConfirmAnimal, mockRequestRegistration, mockToast } = vi.hoisted(
+  () => ({
+    mockConfirmAnimal: vi.fn(),
+    mockRequestRegistration: vi.fn(),
+    mockToast: vi.fn(),
+  }),
+);
 
 vi.mock("@/app/portal/actions", () => ({
   confirmAnimalAction: mockConfirmAnimal,
+  requestRegistrationAction: mockRequestRegistration,
   submitOwnerReportAction: vi.fn(),
   reportMissingAction: vi.fn(),
   cancelOwnerRequestAction: vi.fn(),
@@ -45,6 +49,8 @@ function fixture(overrides: Partial<PortalAnimal>): PortalAnimal {
     registration: null,
     registrationYear: 2026,
     registrationYears: [2025],
+    registrationRequest: null,
+    registrationCancelled: false,
     lastConfirmedOn: null,
     confirmationDueOn: "2026-05-18",
     confirmationDue: false,
@@ -69,15 +75,15 @@ describe("AnimalCard — confirmation vs registration presentation", () => {
     ).toBeEnabled();
 
     // Registration area: clearly the registry record, not the
-    // confirmation, with the existing intake path offered.
+    // confirmation, with the portal-native request action offered.
     expect(screen.getByText("2026 registration")).toBeInTheDocument();
     expect(screen.getByText("Not registered")).toBeInTheDocument();
     expect(
       screen.getByText("Previously registered: 2025"),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: "Start 2026 registration" }),
-    ).toHaveAttribute("href", "/animal-registration#form");
+      screen.getByRole("button", { name: "Register Captain for 2026" }),
+    ).toBeEnabled();
   });
 
   test("confirmation complete + registration still incomplete — the Captain acceptance state", () => {
@@ -108,8 +114,8 @@ describe("AnimalCard — confirmation vs registration presentation", () => {
       screen.getByText("Previously registered: 2025"),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: "Start 2026 registration" }),
-    ).toBeInTheDocument();
+      screen.getByRole("button", { name: "Register Captain for 2026" }),
+    ).toBeEnabled();
   });
 
   test("confirmation complete + paid current registration is calm (Sunny)", () => {
@@ -239,6 +245,128 @@ describe("AnimalCard — confirmation vs registration presentation", () => {
     const grid = container.querySelector(".grid.gap-4.border-t");
     expect(grid).toHaveClass("sm:grid-cols-2");
     expect(grid).not.toHaveClass("grid-cols-2");
+  });
+
+  test("pending portal request shows awaiting-review and no CTA", () => {
+    render(
+      <AnimalCard
+        animal={fixture({
+          registrationRequest: {
+            status: "pending",
+            submittedAt: "2026-10-04T12:00:00.000Z",
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText("Request submitted")).toBeInTheDocument();
+    expect(
+      screen.getByText("Awaiting SFPCA review · sent Oct 4, 2026"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Not registered")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Register Captain for/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("approved request shows finalizing state and no CTA", () => {
+    render(
+      <AnimalCard
+        animal={fixture({
+          registrationRequest: {
+            status: "approved",
+            submittedAt: "2026-10-04T12:00:00.000Z",
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText("Approved")).toBeInTheDocument();
+    expect(
+      screen.getByText("SFPCA is finalizing the registration."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Register Captain for/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("rejected request shows declined state with contact path, no CTA", () => {
+    render(
+      <AnimalCard
+        animal={fixture({
+          registrationRequest: {
+            status: "rejected",
+            submittedAt: "2026-10-04T12:00:00.000Z",
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText("Request declined")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "contact us" }),
+    ).toHaveAttribute("href", "/contact");
+    expect(
+      screen.queryByRole("button", { name: /Register Captain for/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("cancelled current-year registration suppresses the CTA", () => {
+    render(
+      <AnimalCard animal={fixture({ registrationCancelled: true })} />,
+    );
+    expect(screen.getByText("Not registered")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Contact us" }),
+    ).toHaveAttribute("href", "/contact");
+    expect(
+      screen.queryByRole("button", { name: /Register Captain for/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("request dialog shows canonical animal + owner info and submits", async () => {
+    mockRequestRegistration.mockResolvedValue({
+      ok: true,
+      submissionId: "sub-1",
+    });
+    render(
+      <AnimalCard
+        animal={fixture({ chipNumber: "985-113-000-111-222" })}
+        owner={{
+          fullName: "Maria Hendricks",
+          email: "maria.hendricks@example.com",
+          phone: "+599 416 2201",
+          address: "Windwardside 14, Saba",
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Register Captain for 2026" }),
+    );
+
+    // Prefilled canonical data — nothing typed by the owner.
+    expect(
+      screen.getByRole("heading", { name: "Register Captain for 2026" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Maria Hendricks/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/maria.hendricks@example.com/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Microchip 985-113-000-111-222/),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Submit request" }));
+
+    await waitFor(() => {
+      expect(mockRequestRegistration).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ownershipId: "own-1",
+          submissionId: expect.any(String),
+        }),
+      );
+      expect(mockToast).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Request submitted" }),
+      );
+    });
   });
 
   test("confirm action calls the server action for this ownership only", async () => {

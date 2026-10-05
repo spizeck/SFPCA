@@ -13,6 +13,13 @@ import { motion } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -29,9 +36,12 @@ import {
   cancelOwnerRequestAction,
   confirmAnimalAction,
   reportMissingAction,
+  requestRegistrationAction,
   submitOwnerReportAction,
   updateOwnerProfileAction,
 } from "./actions";
+import { isReceiptFile, RECEIPT_MAX_BYTES } from "@/lib/animal-registration";
+import { logError } from "@/lib/logger";
 import {
   OWNER_REQUEST_KIND_LABELS,
   OWNER_SUBMITTABLE_KINDS,
@@ -75,13 +85,28 @@ function formatMoney(cents: number, currency: string): string {
 
 // Exported for component tests — the status presentation carries the
 // confirmation-vs-registration distinction owners must understand.
-export function AnimalCard({ animal }: { animal: PortalAnimal }) {
+export function AnimalCard({
+  animal,
+  owner,
+}: {
+  animal: PortalAnimal;
+  // The signed-in owner's own contact snapshot — shown read-only in the
+  // registration request dialog. Optional so card tests can omit it.
+  owner?: Pick<
+    PersonRecord,
+    "fullName" | "email" | "phone" | "address"
+  > | null;
+}) {
   const { toast } = useToast();
   const [pending, startTransition] = useTransition();
   const statusTransition = useMotionTransition({
     duration: 0.25,
     ease: "easeOut",
   });
+  const [requestOpen, setRequestOpen] = useState(false);
+  const [requestNote, setRequestNote] = useState("");
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptError, setReceiptError] = useState<string | null>(null);
   const [reportKind, setReportKind] = useState<OwnerRequestKind | "">("");
   const [detail, setDetail] = useState("");
   const [targetName, setTargetName] = useState("");
@@ -98,6 +123,70 @@ export function AnimalCard({ animal }: { animal: PortalAnimal }) {
   const priorRegistrationYears = animal.registrationYears.filter(
     (y) => y !== animal.registration?.year,
   );
+
+  // The receipt is a second write AFTER the request row lands — the
+  // same bounded upload route as the public form (claim + byte
+  // validation + create-only storage). A failed upload must not undo
+  // the request, only warn about the file.
+  const submitRequest = () => {
+    if (receiptFile && !isReceiptFile(receiptFile)) {
+      setReceiptError(
+        `Receipt must be a PDF or image up to ${Math.round(RECEIPT_MAX_BYTES / (1024 * 1024))} MB.`,
+      );
+      return;
+    }
+    startTransition(async () => {
+      const submissionId = crypto.randomUUID();
+      const result = await requestRegistrationAction({
+        ownershipId: animal.ownershipId,
+        submissionId,
+        note: requestNote || undefined,
+        wantsReceipt: receiptFile !== null,
+      });
+      if (!result.ok) {
+        toast({
+          title: "Couldn't submit the request",
+          description: result.error,
+          variant: "destructive",
+        });
+        return;
+      }
+      let receiptDelivered = true;
+      if (receiptFile) {
+        try {
+          const upload = await fetch(`/api/receipts/${submissionId}`, {
+            method: "POST",
+            headers: { "Content-Type": receiptFile.type },
+            body: receiptFile,
+          });
+          if (!upload.ok) {
+            if (upload.status !== 429) {
+              logError(
+                "registration",
+                "receipt-upload",
+                new Error(`upload ${upload.status}`),
+              );
+            }
+            receiptDelivered = false;
+          }
+        } catch (uploadError) {
+          receiptDelivered = false;
+          logError("registration", "receipt-upload", uploadError);
+        }
+      }
+      toast({
+        title: "Request submitted",
+        description:
+          receiptFile && !receiptDelivered
+            ? `Your ${animal.registrationYear} request went through, but the receipt could not be uploaded — staff can still review the request.`
+            : `SFPCA staff will review your ${animal.registrationYear} request for ${animal.name}.`,
+      });
+      setRequestOpen(false);
+      setRequestNote("");
+      setReceiptFile(null);
+      setReceiptError(null);
+    });
+  };
 
   const confirm = () => {
     startTransition(async () => {
@@ -256,22 +345,66 @@ export function AnimalCard({ animal }: { animal: PortalAnimal }) {
               {registrationPeriodLabel(animal.registrationYear)}
             </p>
             {animal.registration === null ? (
-              <>
-                <p className="flex items-center gap-1.5 text-sm font-medium text-destructive">
-                  <CircleAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
-                  Not registered
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Required for every animal each year.
-                </p>
-                {/* The existing intake path: the public form lands in
-                    staff review, which produces the registration row. */}
-                <Button size="sm" variant="outline" asChild>
-                  <Link href="/animal-registration#form">
-                    Start {animal.registrationYear} registration
-                  </Link>
-                </Button>
-              </>
+              animal.registrationRequest ? (
+                /* In-flight portal request (#297) — the honest in-between
+                   state: not yet registered, no second request allowed. */
+                <>
+                  <p className="text-sm font-medium">
+                    {animal.registrationRequest.status === "rejected"
+                      ? "Request declined"
+                      : animal.registrationRequest.status === "approved"
+                        ? "Approved"
+                        : "Request submitted"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {animal.registrationRequest.status === "rejected" ? (
+                      <>
+                        Staff declined the request —{" "}
+                        <Link
+                          href="/contact"
+                          className="text-primary underline"
+                        >
+                          contact us
+                        </Link>{" "}
+                        if you have questions.
+                      </>
+                    ) : animal.registrationRequest.status === "approved" ? (
+                      "SFPCA is finalizing the registration."
+                    ) : (
+                      `Awaiting SFPCA review · sent ${formatIsoDate(animal.registrationRequest.submittedAt)}`
+                    )}
+                  </p>
+                </>
+              ) : animal.registrationCancelled ? (
+                /* A cancelled row still holds the (animal, year) slot —
+                   staff resolve it; an owner request can never fulfil it. */
+                <>
+                  <p className="text-sm font-medium">Not registered</p>
+                  <p className="text-xs text-muted-foreground">
+                    <Link href="/contact" className="text-primary underline">
+                      Contact us
+                    </Link>{" "}
+                    about {animal.name}&apos;s {animal.registrationYear}{" "}
+                    registration.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="flex items-center gap-1.5 text-sm font-medium text-destructive">
+                    <CircleAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    Not registered
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Required for every animal each year.
+                  </p>
+                  {/* Portal-native request (#297): prefilled from canonical
+                      data, lands in the same staff review queue as the
+                      public intake — never a direct registration. */}
+                  <Button size="sm" onClick={() => setRequestOpen(true)}>
+                    Register {animal.name} for {animal.registrationYear}
+                  </Button>
+                </>
+              )
             ) : OUTSTANDING_PAYMENT_STATES.includes(
                 animal.registration.paymentState,
               ) ? (
@@ -476,6 +609,108 @@ export function AnimalCard({ animal }: { animal: PortalAnimal }) {
             </p>
           </div>
         )}
+
+        {/* Registration request dialog (#297) — prefilled from the
+            canonical records the portal already knows; nothing typed
+            here mutates them. */}
+        <Dialog open={requestOpen} onOpenChange={setRequestOpen}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>
+                Register {animal.name} for {animal.registrationYear}
+              </DialogTitle>
+              <DialogDescription>
+                We&apos;ll use the information already on file. SFPCA staff
+                will review the request before the registration is
+                finalized.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 text-sm">
+              <div>
+                <p className="font-medium">Animal on file</p>
+                <p className="text-muted-foreground capitalize">
+                  {animal.name} · {animal.species} · {animal.sex}
+                  {animal.chipNumber ? ` · Microchip ${animal.chipNumber}` : ""}
+                </p>
+              </div>
+              {owner && (
+                <div>
+                  <p className="font-medium">Your details on file</p>
+                  <p className="text-muted-foreground">
+                    {owner.fullName}
+                    {owner.address ? ` · ${owner.address}` : ""}
+                  </p>
+                  <p className="text-muted-foreground">
+                    {[owner.phone, owner.email].filter(Boolean).join(" · ") ||
+                      "No contact details on file"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Out of date? Update your profile below before
+                    submitting.
+                  </p>
+                </div>
+              )}
+              <div className="space-y-1">
+                <Label htmlFor={`request-note-${animal.ownershipId}`}>
+                  Anything changed? (optional)
+                </Label>
+                <Textarea
+                  id={`request-note-${animal.ownershipId}`}
+                  value={requestNote}
+                  onChange={(e) => setRequestNote(e.target.value)}
+                  rows={2}
+                  maxLength={500}
+                  placeholder="e.g. spayed/neutered recently, new phone number"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Staff see this note with your request — it doesn&apos;t
+                  change your records by itself.
+                </p>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor={`request-receipt-${animal.ownershipId}`}>
+                  Payment receipt (optional)
+                </Label>
+                <Input
+                  id={`request-receipt-${animal.ownershipId}`}
+                  type="file"
+                  accept="image/*,application/pdf"
+                  onChange={(e) => {
+                    setReceiptFile(e.target.files?.[0] ?? null);
+                    setReceiptError(null);
+                  }}
+                />
+                {receiptError ? (
+                  <p className="text-xs text-destructive">{receiptError}</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    PDF or image, up to{" "}
+                    {Math.round(RECEIPT_MAX_BYTES / (1024 * 1024))} MB —
+                    only if you&apos;ve already paid.
+                  </p>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={submitRequest} disabled={pending}>
+                  Submit request
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setRequestOpen(false)}
+                  disabled={pending}
+                >
+                  Cancel
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                The annual registration fee is set by staff when they
+                review your request — you&apos;ll see it once it&apos;s
+                registered.
+              </p>
+            </div>
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
   );
@@ -563,7 +798,11 @@ export function PortalClient({
           </Card>
         ) : (
           animals.map((animal) => (
-            <AnimalCard key={animal.ownershipId} animal={animal} />
+            <AnimalCard
+              key={animal.ownershipId}
+              animal={animal}
+              owner={person}
+            />
           ))
         )}
       </section>

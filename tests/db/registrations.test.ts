@@ -22,13 +22,16 @@ import { runMigrationsOnPglite } from "@/lib/db/migrate";
 import {
   cancelRegistration,
   correctRegistrationAmount,
+  createPortalRegistrationRequest,
   createRegistration,
   createRegistrationSubmission,
   getRegistrationQueues,
+  getSubmissionLinkTarget,
   listRegistrationsForAnimal,
   listUnregisteredAnimals,
   recordRegistrationPayment,
   resolveRegistrationFee,
+  updateSubmissionStatus,
 } from "@/lib/registry/registrations";
 import { confirmedPaidByRegistration } from "@/lib/registry/payments";
 import { createOwnership } from "@/lib/registry/ownership";
@@ -713,5 +716,351 @@ describe("payments seam — set-based, never N+1", () => {
     // No confirmed rows → absent from the map (callers treat as 0).
     expect(map.has(rb.registration.id)).toBe(false);
     expect(map.size).toBe(1);
+  });
+});
+
+// Portal-originated registration requests (#297): an authenticated
+// owner asks staff to register THEIR animal for the current period.
+// Same table + staff queue as public intake, but every canonical link
+// is resolved server-side from the authorized ownership — a client id
+// is never proof of anything.
+describe("portal registration requests (#297)", () => {
+  let subSeq = 0;
+  const nextSubmissionId = () =>
+    `00000000-0000-4000-8000-${String(++subSeq).padStart(12, "0")}`;
+
+  async function seedIdentity(personId: string) {
+    const [identity] = await db
+      .insert(schema.authIdentities)
+      .values({
+        provider: "password",
+        providerUid: `uid-${personId}`,
+        email: "owner@example.com",
+        personId,
+      })
+      .returning();
+    return identity;
+  }
+
+  async function seedOwner(opts: Parameters<typeof seedAnimal>[0] = {}) {
+    const owned = await seedOwnedAnimal(opts);
+    const identity = await seedIdentity(owned.person.id);
+    return { ...owned, identity };
+  }
+
+  function requestInput(
+    owned: Awaited<ReturnType<typeof seedOwner>>,
+    extra: Record<string, unknown> = {},
+  ) {
+    return {
+      ownershipId: owned.ownership.id,
+      personId: owned.person.id,
+      authIdentityId: owned.identity.id,
+      submissionId: nextSubmissionId(),
+      year: YEAR,
+      ...extra,
+    };
+  }
+
+  async function submissionById(id: string) {
+    const [row] = await db
+      .select()
+      .from(schema.registrationSubmissions)
+      .where(eq(schema.registrationSubmissions.id, id));
+    return row;
+  }
+
+  test("a linked owner's request lands with portal provenance and canonical links", async () => {
+    const owned = await seedOwner({ name: "Captain", sterilization: "sterilized" });
+    const r = await createPortalRegistrationRequest(
+      requestInput(owned, { ownerNote: "Neutered in March" }),
+      "owner@example.com",
+      db,
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+
+    const row = await submissionById(r.submissionId);
+    expect(row.source).toBe("portal");
+    expect(row.animalId).toBe(owned.animal.id);
+    expect(row.ownershipId).toBe(owned.ownership.id);
+    expect(row.personId).toBe(owned.person.id);
+    expect(row.authIdentityId).toBe(owned.identity.id);
+    expect(row.requestedYear).toBe(YEAR);
+    expect(row.ownerNote).toBe("Neutered in March");
+    expect(row.status).toBe("pending");
+    // Canonical snapshots — same shape the public intake produces.
+    expect(row.ownerName).toBe("Jane Owner");
+    expect(row.animals).toEqual([
+      { name: "Captain", type: "dog", sex: "female", isFixed: "yes" },
+    ]);
+    expect(row.totalFeeCents).toBe(REGISTRATION_FEE_FIXED * 100);
+    expect(await auditActions("registration_submission")).toContain(
+      "create",
+    );
+  });
+
+  test("a household member can request for a household-owned animal", async () => {
+    const animal = await seedAnimal();
+    const person = await seedPerson();
+    const identity = await seedIdentity(person.id);
+    const [household] = await db
+      .insert(schema.households)
+      .values({ name: "Bay Family" })
+      .returning();
+    await db.insert(schema.householdMembers).values({
+      householdId: household.id,
+      personId: person.id,
+    });
+    const own = await createOwnership(
+      { animalId: animal.id, householdId: household.id, validFrom: "2025-01-01" },
+      STAFF,
+      db,
+    );
+    if (!own.ok) throw new Error("setup");
+
+    const r = await createPortalRegistrationRequest(
+      {
+        ownershipId: own.ownership.id,
+        personId: person.id,
+        authIdentityId: identity.id,
+        submissionId: nextSubmissionId(),
+        year: YEAR,
+      },
+      "owner@example.com",
+      db,
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const row = await submissionById(r.submissionId);
+    expect(row.animalId).toBe(animal.id);
+    expect(row.personId).toBe(person.id);
+  });
+
+  test("a different owner cannot request for someone else's animal (IDOR)", async () => {
+    const owned = await seedOwner();
+    const stranger = await seedPerson("Stranger");
+    const strangerId = await seedIdentity(stranger.id);
+
+    const r = await createPortalRegistrationRequest(
+      {
+        ownershipId: owned.ownership.id,
+        personId: stranger.id,
+        authIdentityId: strangerId.id,
+        submissionId: nextSubmissionId(),
+        year: YEAR,
+      },
+      "stranger@example.com",
+      db,
+    );
+    expect(r).toMatchObject({ ok: false, reason: "not-owner" });
+  });
+
+  test("a fabricated ownership id is rejected", async () => {
+    const owned = await seedOwner();
+    const r = await createPortalRegistrationRequest(
+      requestInput(owned, {
+        ownershipId: "11111111-2222-3333-4444-555555555555",
+      }),
+      "owner@example.com",
+      db,
+    );
+    expect(r).toMatchObject({ ok: false, reason: "not-owner" });
+  });
+
+  test("an active current-year registration blocks the request", async () => {
+    const owned = await seedOwner();
+    const reg = await createRegistration(
+      { animalId: owned.animal.id, year: YEAR },
+      STAFF,
+      db,
+    );
+    if (!reg.ok) throw new Error("setup");
+    const r = await createPortalRegistrationRequest(
+      requestInput(owned),
+      "owner@example.com",
+      db,
+    );
+    expect(r).toMatchObject({ ok: false, reason: "conflict" });
+  });
+
+  test("a cancelled current-year row still blocks the request — the slot is held", async () => {
+    const owned = await seedOwner();
+    const reg = await createRegistration(
+      { animalId: owned.animal.id, year: YEAR },
+      STAFF,
+      db,
+    );
+    if (!reg.ok) throw new Error("setup");
+    await cancelRegistration(
+      reg.registration.id,
+      { reason: "correction", note: "Wrong year recorded" },
+      STAFF,
+      db,
+    );
+    const r = await createPortalRegistrationRequest(
+      requestInput(owned),
+      "owner@example.com",
+      db,
+    );
+    expect(r).toMatchObject({ ok: false, reason: "conflict" });
+  });
+
+  test("an ineligible animal lifecycle is rejected", async () => {
+    const owned = await seedOwner({ lifecycleStatus: "deceased" });
+    const r = await createPortalRegistrationRequest(
+      requestInput(owned),
+      "owner@example.com",
+      db,
+    );
+    expect(r).toMatchObject({ ok: false, reason: "not-eligible" });
+  });
+
+  test("a pending request blocks a second — and a simultaneous pair yields exactly one", async () => {
+    const owned = await seedOwner();
+    const first = await createPortalRegistrationRequest(
+      requestInput(owned),
+      "owner@example.com",
+      db,
+    );
+    expect(first.ok).toBe(true);
+    const second = await createPortalRegistrationRequest(
+      requestInput(owned),
+      "owner@example.com",
+      db,
+    );
+    expect(second).toMatchObject({ ok: false, reason: "conflict" });
+
+    // Concurrent submits for a different animal serialize on the
+    // partial unique index — exactly one wins.
+    const owned2 = await seedOwner({ name: "Twin" });
+    const [a, b] = await Promise.all([
+      createPortalRegistrationRequest(requestInput(owned2), "o@e.com", db),
+      createPortalRegistrationRequest(requestInput(owned2), "o@e.com", db),
+    ]);
+    const results = [a, b].map((r) => (r.ok ? "ok" : r.reason));
+    expect(results.sort()).toEqual(["conflict", "ok"]);
+    const pending = await db
+      .select()
+      .from(schema.registrationSubmissions)
+      .where(eq(schema.registrationSubmissions.animalId, owned2.animal.id));
+    expect(pending).toHaveLength(1);
+  });
+
+  test("retrying with the same submission id is idempotent", async () => {
+    const owned = await seedOwner();
+    const input = requestInput(owned);
+    const first = await createPortalRegistrationRequest(input, "o@e.com", db);
+    const retry = await createPortalRegistrationRequest(input, "o@e.com", db);
+    expect(first.ok && retry.ok).toBe(true);
+    if (first.ok && retry.ok) {
+      expect(retry.submissionId).toBe(first.submissionId);
+    }
+  });
+
+  test("another owner's submission id is a conflict, never a borrowed success", async () => {
+    // Owner A's submission lands; owner B submits their own eligible
+    // request but presents A's submission id — the PK conflict must not
+    // be mistaken for B's own idempotent retry.
+    const ownerA = await seedOwner();
+    const stolenId = nextSubmissionId();
+    const first = await createPortalRegistrationRequest(
+      requestInput(ownerA, { submissionId: stolenId }),
+      "owner-a@example.com",
+      db,
+    );
+    expect(first.ok).toBe(true);
+
+    const ownerB = await seedOwner({ name: "Other Dog" });
+    const second = await createPortalRegistrationRequest(
+      requestInput(ownerB, { submissionId: stolenId }),
+      "owner-b@example.com",
+      db,
+    );
+    expect(second).toMatchObject({ ok: false, reason: "conflict" });
+    // And nothing was created under owner B's identity.
+    const bRows = await db
+      .select()
+      .from(schema.registrationSubmissions)
+      .where(eq(schema.registrationSubmissions.personId, ownerB.person.id));
+    expect(bRows).toHaveLength(0);
+  });
+
+  test("a rejected request does not pin the slot — a fresh request is a new row", async () => {
+    const owned = await seedOwner();
+    const first = await createPortalRegistrationRequest(
+      requestInput(owned),
+      "o@e.com",
+      db,
+    );
+    if (!first.ok) throw new Error("setup");
+    const rej = await updateSubmissionStatus(
+      first.submissionId,
+      "rejected",
+      STAFF,
+      db,
+    );
+    if (!rej.ok) throw new Error("setup");
+
+    // Staff declined is not 'pending' — the unique index only guards
+    // in-flight work, so a deliberate re-request lands as a new row
+    // for staff to review on its own merits.
+    const again = await createPortalRegistrationRequest(
+      requestInput(owned),
+      "o@e.com",
+      db,
+    );
+    expect(again.ok).toBe(true);
+  });
+
+  test("staff registration from a portal request keeps the submission link + requested year", async () => {
+    const owned = await seedOwner();
+    const req = await createPortalRegistrationRequest(
+      requestInput(owned),
+      "o@e.com",
+      db,
+    );
+    if (!req.ok) throw new Error("setup");
+
+    const target = await getSubmissionLinkTarget(req.submissionId, db);
+    expect(target).toMatchObject({
+      source: "portal",
+      animalId: owned.animal.id,
+      requestedYear: YEAR,
+    });
+
+    const reg = await createRegistration(
+      {
+        animalId: target!.animalId!,
+        submissionId: req.submissionId,
+        year: target!.requestedYear!,
+      },
+      STAFF,
+      db,
+    );
+    if (!reg.ok) throw new Error("setup");
+    expect(reg.registration.submissionId).toBe(req.submissionId);
+    expect(reg.registration.year).toBe(YEAR);
+  });
+
+  test("public submissions are untouched — no animal link, no dedup index participation", async () => {
+    const pub = await createRegistrationSubmission(
+      {
+        submissionId: "99999999-8888-7777-6666-555555555555",
+        receiptRequested: false,
+        ownerName: "Public",
+        ownerAddress: "Windwardside",
+        ownerPhone: "+5994161234",
+        ownerEmail: "pub@example.com",
+        animals: [{ name: "Stray", type: "dog", sex: "male", isFixed: "no" }],
+      },
+      db,
+    );
+    expect(pub.ok).toBe(true);
+    if (!pub.ok) throw new Error("public submission failed");
+    const row = await submissionById(pub.submissionId);
+    expect(row.source).toBe("public");
+    expect(row.animalId).toBeNull();
+    expect(row.requestedYear).toBeNull();
   });
 });

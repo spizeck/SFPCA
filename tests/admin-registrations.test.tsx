@@ -67,6 +67,29 @@ const REG_PENDING = {
   updatedAt: "2025-01-01T00:00:00.000Z",
 };
 
+// A portal-originated request (#297): canonical animal linkage on the
+// row, one-click Register, and no register affordance once rejected.
+const REG_PORTAL = {
+  id: "22222222-2222-4222-8222-222222222222",
+  ownerInfo: {
+    name: "Sea Owner",
+    address: "The Bottom",
+    phone: null,
+    email: "owner@example.com",
+  },
+  animals: [{ name: "Reggie", type: "Dog", sex: "male", isFixed: "no" }],
+  totalFee: 100,
+  status: "pending",
+  source: "portal" as const,
+  linkedAnimalId: "33333333-3333-4333-8333-333333333333",
+  linkedAnimalName: "Reggie",
+  linkedAnimalRegistryRef: null,
+  requestedYear: 2026,
+  ownerNote: null,
+  createdAt: "2025-01-01T00:00:00.000Z",
+  updatedAt: "2025-01-01T00:00:00.000Z",
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockListRegistrations.mockResolvedValue([]);
@@ -194,5 +217,40 @@ describe("admin registrations", () => {
       REG_PENDING.paymentReceipt,
     );
     openSpy.mockRestore();
+  });
+
+  test("portal requests register one-click with the canonical animal", async () => {
+    mockListRegistrations.mockResolvedValue([REG_PORTAL]);
+    render(<RegistrationsPage />);
+    await waitFor(() => screen.getByText("Sea Owner"));
+
+    expect(screen.getByText("Owner portal")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Reggie" }),
+    ).toHaveAttribute("href", `/admin/animals/${REG_PORTAL.linkedAnimalId}`);
+
+    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+    await waitFor(() =>
+      // animalId=null → the server resolves the canonical animal from
+      // the submission row; the client picks nothing.
+      expect(mockCreateFromSubmission).toHaveBeenCalledWith(
+        null,
+        REG_PORTAL.id,
+      ),
+    );
+  });
+
+  test("a rejected portal request offers no register affordance", async () => {
+    mockListRegistrations.mockResolvedValue([
+      { ...REG_PORTAL, status: "rejected" },
+    ]);
+    render(<RegistrationsPage />);
+    await waitFor(() => screen.getByText("Sea Owner"));
+
+    expect(screen.getByText("Owner portal")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Register" }),
+    ).not.toBeInTheDocument();
+    expect(mockCreateFromSubmission).not.toHaveBeenCalled();
   });
 });

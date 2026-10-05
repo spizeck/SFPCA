@@ -61,7 +61,7 @@ import {
   type LedgerAggregate,
   type ManualPaymentMethod,
 } from "../payments";
-import { currentOwnershipSq } from "./ownership";
+import { currentOwnershipSq, getOwnedOwnership } from "./ownership";
 import { moneyByRegistration, recordManualPayment } from "./payments";
 import { stampReceiptVerified } from "./retention";
 import type { RegistryDb } from "./public-animals";
@@ -74,6 +74,17 @@ export interface AdminRegistrationSubmission {
   ownerPhone: string | null;
   ownerEmail: string | null;
   animals: RegistrationAnimalInput[];
+  // Portal provenance (#297): 'portal' rows carry the canonical links
+  // staff would otherwise have to re-derive by hand. linkedAnimalName /
+  // linkedAnimalRegistryRef are display conveniences resolved from
+  // animalId — the id is the truth.
+  source: string;
+  animalId: string | null;
+  linkedAnimalName: string | null;
+  linkedAnimalRegistryRef: string | null;
+  requestedYear: number | null;
+  ownerNote: string | null;
+  personId: string | null;
   paymentReceiptPath: string | null;
   receiptVerifiedAt: string | null;
   receiptPurgedAt: string | null;
@@ -93,6 +104,11 @@ const SUBMISSION_COLUMNS = {
   ownerPhone: registrationSubmissions.ownerPhone,
   ownerEmail: registrationSubmissions.ownerEmail,
   animals: registrationSubmissions.animals,
+  source: registrationSubmissions.source,
+  animalId: registrationSubmissions.animalId,
+  requestedYear: registrationSubmissions.requestedYear,
+  ownerNote: registrationSubmissions.ownerNote,
+  personId: registrationSubmissions.personId,
   paymentReceiptPath: registrationSubmissions.paymentReceiptPath,
   receiptVerifiedAt: registrationSubmissions.receiptVerifiedAt,
   receiptPurgedAt: registrationSubmissions.receiptPurgedAt,
@@ -109,12 +125,15 @@ function toSubmissionDto(
     typeof registrationSubmissions.$inferSelect,
     keyof typeof SUBMISSION_COLUMNS
   >,
+  linkedAnimal?: { name: string | null; registryRef: string | null },
 ): AdminRegistrationSubmission {
   return {
     ...row,
     animals: Array.isArray(row.animals)
       ? (row.animals as RegistrationAnimalInput[])
       : [],
+    linkedAnimalName: linkedAnimal?.name ?? null,
+    linkedAnimalRegistryRef: linkedAnimal?.registryRef ?? null,
     submittedAt: row.submittedAt.toISOString(),
     decidedAt: row.decidedAt?.toISOString() ?? null,
     receiptVerifiedAt: row.receiptVerifiedAt?.toISOString() ?? null,
@@ -127,11 +146,47 @@ export async function listRegistrationSubmissions(
   db: RegistryDb = getRegistryDb(),
 ): Promise<AdminRegistrationSubmission[]> {
   const rows = await db
-    .select(SUBMISSION_COLUMNS)
+    .select({
+      ...SUBMISSION_COLUMNS,
+      linkedAnimalName: animals.name,
+      linkedAnimalRegistryRef: animals.registryRef,
+    })
     .from(registrationSubmissions)
+    .leftJoin(animals, eq(registrationSubmissions.animalId, animals.id))
     // Newest first — staff work the pending queue top-down.
     .orderBy(desc(registrationSubmissions.submittedAt));
-  return rows.map(toSubmissionDto);
+  return rows.map((r) =>
+    toSubmissionDto(r, {
+      name: r.linkedAnimalName,
+      registryRef: r.linkedAnimalRegistryRef,
+    }),
+  );
+}
+
+// The canonical link target for a submission that already knows its
+// animal/year — portal-originated rows carry these; public rows never
+// do (staff choose the animal at review).
+export async function getSubmissionLinkTarget(
+  id: string,
+  db: RegistryDb = getRegistryDb(),
+): Promise<{
+  source: string;
+  status: string;
+  animalId: string | null;
+  requestedYear: number | null;
+} | null> {
+  if (!UUID_RE.test(id)) return null;
+  const [row] = await db
+    .select({
+      source: registrationSubmissions.source,
+      status: registrationSubmissions.status,
+      animalId: registrationSubmissions.animalId,
+      requestedYear: registrationSubmissions.requestedYear,
+    })
+    .from(registrationSubmissions)
+    .where(eq(registrationSubmissions.id, id))
+    .limit(1);
+  return row ?? null;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -200,6 +255,217 @@ export async function createRegistrationSubmission(
     throw error;
   }
   return { ok: true, submissionId: input.submissionId };
+}
+
+// --- Portal-originated requests (#297) -----------------------------------------
+//
+// An authenticated owner asks staff to register one of THEIR animals
+// for the current period. Same table, same staff queue, same review
+// transitions as public intake — the difference is provenance: the
+// canonical animal/ownership/person/identity are resolved server-side
+// from the authorized relationship, never taken from the client.
+//
+// The owner-facing request is deliberately thin: the portal supplies
+// only the ownership id, an optional corrections note, a receipt
+// declaration, and the client-generated submission uuid (the receipt
+// object name + idempotent retry handle, same contract as public
+// intake). Contact fields are a canonical PERSON SNAPSHOT — owners
+// edit their profile, not this record.
+export const PORTAL_REQUEST_NOTE_MAX = 500;
+
+export type PortalRequestResult =
+  | { ok: true; submissionId: string }
+  | {
+      ok: false;
+      reason: "invalid" | "not-owner" | "not-eligible" | "conflict";
+    };
+
+export async function createPortalRegistrationRequest(
+  input: {
+    ownershipId: string;
+    // Server-resolved caller — the action's requireOwner result, never
+    // client-supplied.
+    personId: string;
+    authIdentityId: string;
+    submissionId: string;
+    ownerNote?: string | null;
+    receiptRequested?: boolean;
+    year?: number;
+  },
+  actorLabel: string,
+  db: RegistryDb = getRegistryDb(),
+): Promise<PortalRequestResult> {
+  const year = input.year ?? currentRegistrationYear();
+  if (
+    !UUID_RE.test(input.ownershipId) ||
+    !UUID_RE.test(input.personId) ||
+    !UUID_RE.test(input.authIdentityId) ||
+    !UUID_RE.test(input.submissionId) ||
+    !isRegistrationYear(year)
+  ) {
+    return { ok: false, reason: "invalid" };
+  }
+  const note = input.ownerNote?.trim() || null;
+  if (note && note.length > PORTAL_REQUEST_NOTE_MAX) {
+    return { ok: false, reason: "invalid" };
+  }
+
+  try {
+    return await runPortalRequestTx(input, note, year, actorLabel, db);
+  } catch (error) {
+    // A failed statement aborts the transaction — recovery checks run
+    // AFTER it rolls back, never inside it.
+    const code = (error as { code?: unknown })?.code;
+    const causeCode = (error as { cause?: { code?: unknown } })?.cause
+      ?.code;
+    if (code === "23505" || causeCode === "23505") {
+      // PK conflict → idempotent retry, but ONLY when the existing row
+      // belongs to this same caller: another owner's submission id is a
+      // conflict, not a borrowed success. Dedup-index conflict → a
+      // pending request for this animal/year already exists: exactly
+      // one concurrent submit wins, the loser reads 'conflict'.
+      const [same] = await db
+        .select({ id: registrationSubmissions.id })
+        .from(registrationSubmissions)
+        .where(
+          and(
+            eq(registrationSubmissions.id, input.submissionId),
+            eq(registrationSubmissions.personId, input.personId),
+          ),
+        )
+        .limit(1);
+      return same
+        ? { ok: true, submissionId: input.submissionId }
+        : { ok: false, reason: "conflict" };
+    }
+    throw error;
+  }
+}
+
+async function runPortalRequestTx(
+  input: Parameters<typeof createPortalRegistrationRequest>[0],
+  note: string | null,
+  year: number,
+  actorLabel: string,
+  db: RegistryDb,
+): Promise<PortalRequestResult> {
+  return db.transaction(async (tx) => {
+    // Re-authorize inside the mutation transaction: the ownership must
+    // be current AND held by this person (directly or via household) —
+    // a fabricated or foreign ownership id dies here.
+    const owned = await getOwnedOwnership(
+      input.ownershipId,
+      input.personId,
+      todayIsoDate(),
+      tx,
+    );
+    if (!owned) return { ok: false as const, reason: "not-owner" as const };
+
+    const [animal] = await tx
+      .select({
+        id: animals.id,
+        name: animals.name,
+        species: animals.species,
+        sex: animals.sex,
+        lifecycleStatus: animals.lifecycleStatus,
+        sterilizationStatus: animals.sterilizationStatus,
+      })
+      .from(animals)
+      .where(eq(animals.id, owned.animalId))
+      .limit(1);
+    if (!animal) return { ok: false as const, reason: "invalid" as const };
+    if (
+      !(REGISTRATION_ELIGIBLE_LIFECYCLES as readonly string[]).includes(
+        animal.lifecycleStatus,
+      )
+    ) {
+      return { ok: false as const, reason: "not-eligible" as const };
+    }
+
+    // The (animal, year) slot is held by ANY registration row — a
+    // cancelled one still blocks a fresh owner request (staff own the
+    // slot; see listUnregisteredAnimals). Registrations are unique on
+    // (animal, year) so at most one row can exist.
+    const [existingReg] = await tx
+      .select({ id: registrations.id })
+      .from(registrations)
+      .where(
+        and(
+          eq(registrations.animalId, animal.id),
+          eq(registrations.year, year),
+        ),
+      )
+      .limit(1);
+    if (existingReg) {
+      return { ok: false as const, reason: "conflict" as const };
+    }
+
+    const [person] = await tx
+      .select({
+        fullName: persons.fullName,
+        email: persons.email,
+        phone: persons.phone,
+        address: persons.address,
+      })
+      .from(persons)
+      .where(eq(persons.id, input.personId))
+      .limit(1);
+    if (!person) return { ok: false as const, reason: "invalid" as const };
+
+    // The unique index on (animal_id, requested_year) WHERE pending is
+    // the concurrency contract — a loser raises 23505, recovered by the
+    // caller after this transaction rolls back.
+    await tx.insert(registrationSubmissions).values({
+        id: input.submissionId,
+        source: "portal",
+        animalId: animal.id,
+        ownershipId: owned.id,
+        authIdentityId: input.authIdentityId,
+        personId: input.personId,
+        requestedYear: year,
+        ownerNote: note,
+        // Canonical snapshots — staff compare these against the linked
+        // records at review; editing them is a profile change, not a
+        // request edit.
+        ownerName: person.fullName,
+        ownerAddress: person.address,
+        ownerPhone: person.phone,
+        ownerEmail: person.email,
+        animals: [
+          {
+            name: animal.name,
+            type: animal.species,
+            sex: animal.sex,
+            isFixed:
+              animal.sterilizationStatus === "sterilized" ? "yes" : "no",
+          },
+        ],
+        receiptRequested: input.receiptRequested === true,
+        // Indicative quote from the same rule createRegistration
+        // assesses — staff confirm the real fee at registration time.
+        totalFeeCents:
+          (animal.sterilizationStatus === "sterilized"
+            ? REGISTRATION_FEE_FIXED
+            : REGISTRATION_FEE_NOT_FIXED) * 100,
+        currency: "USD",
+        status: REGISTRATION_INITIAL_STATUS,
+      });
+
+    await tx.insert(auditEvents).values({
+      actorLabel,
+      entityType: "registration_submission",
+      entityId: input.submissionId,
+      action: "create",
+      // Who asked, for which animal, which period — no PII fields.
+      after: {
+        source: "portal",
+        animalId: animal.id,
+        year,
+        personId: input.personId,
+      },
+    });
+    return { ok: true as const, submissionId: input.submissionId };
+  });
 }
 
 export type StatusUpdateResult =
