@@ -2,6 +2,7 @@
 // loading contract (width-stable, non-reentrant, accessible), Spinner,
 // Skeleton, and Checkbox state feedback.
 import { fireEvent, render, screen } from "@testing-library/react";
+import type { MouseEvent } from "react";
 import { describe, expect, test, vi } from "vitest";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -78,6 +79,61 @@ describe("Button loading", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     expect(onClick).toHaveBeenCalledTimes(2);
+  });
+
+  test("a loading slotted anchor is not keyboard-activatable", () => {
+    // A slotted <a> has no native disabled — aria-disabled +
+    // pointer-events-none alone leave Enter able to fire the href.
+    const onClick = vi.fn();
+    render(
+      <Button asChild loading onClick={onClick}>
+        <a href="/somewhere">Read more</a>
+      </Button>,
+    );
+    const link = screen.getByRole("link", { name: "Read more" });
+    expect(link).toHaveAttribute("aria-disabled", "true");
+    expect(link).toHaveAttribute("aria-busy", "true");
+    expect(link).toHaveAttribute("tabIndex", "-1");
+    // Enter activation on an anchor is keydown's default action —
+    // preventing it prevents the click entirely.
+    expect(fireEvent.keyDown(link, { key: "Enter" })).toBe(false);
+    expect(fireEvent.keyDown(link, { key: " " })).toBe(false);
+    fireEvent.click(link);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  test("a disabled slotted anchor gets the same inert treatment", () => {
+    const onClick = vi.fn();
+    render(
+      <Button asChild disabled onClick={onClick}>
+        <a href="/somewhere">Read more</a>
+      </Button>,
+    );
+    const link = screen.getByRole("link", { name: "Read more" });
+    expect(link).toHaveAttribute("aria-disabled", "true");
+    expect(link).toHaveAttribute("tabIndex", "-1");
+    expect(fireEvent.keyDown(link, { key: "Enter" })).toBe(false);
+    fireEvent.click(link);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  test("an interactive slotted anchor keeps full keyboard behaviour", () => {
+    // Guard keys only while inert — Enter/Space and click work, and
+    // unrelated keys (Tab) must pass through so focus can still move.
+    // preventDefault keeps jsdom from logging a navigation notice.
+    const onClick = vi.fn((e: MouseEvent) => e.preventDefault());
+    render(
+      <Button asChild onClick={onClick}>
+        <a href="/somewhere">Read more</a>
+      </Button>,
+    );
+    const link = screen.getByRole("link", { name: "Read more" });
+    expect(link).not.toHaveAttribute("aria-disabled");
+    expect(link).not.toHaveAttribute("tabIndex");
+    expect(fireEvent.keyDown(link, { key: "Enter" })).toBe(true);
+    expect(fireEvent.keyDown(link, { key: "Tab" })).toBe(true);
+    fireEvent.click(link);
+    expect(onClick).toHaveBeenCalledTimes(1);
   });
 });
 

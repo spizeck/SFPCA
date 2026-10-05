@@ -59,8 +59,25 @@ export interface ButtonProps
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, loading = false, loadingText, disabled, children, ...props }, ref) => {
+  ({ className, variant, size, asChild = false, loading = false, loadingText, disabled, children, onClick, onKeyDown, ...props }, ref) => {
     const Comp = asChild ? Slot : "button";
+    const inert = disabled || loading;
+    // Slotted children aren't real buttons — aria-disabled and
+    // pointer-events-none leave a focused <a> keyboard-activatable
+    // (Enter activates the href on keydown's default action) and a
+    // slotted <button> can still fire click on Space keyup. Block
+    // activation at the event level while inert, without touching
+    // other keys (Tab must still move focus on).
+    const guardClick = (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    const guardKeyDown = (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
     return (
       <Comp
         className={cn(buttonVariants({ variant, size, className }), loading && "pointer-events-none")}
@@ -71,9 +88,15 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         {...props}
         // Spread props first so a caller's aria-busy/aria-disabled
         // can't weaken the loading guards below.
-        disabled={asChild ? undefined : disabled || loading}
-        aria-disabled={asChild && (disabled || loading) ? true : undefined}
+        disabled={asChild ? undefined : inert}
+        aria-disabled={asChild && inert ? true : undefined}
         aria-busy={loading || undefined}
+        // An inert slotted control leaves the tab order entirely —
+        // matching native disabled semantics instead of letting focus
+        // land on a control that cannot act.
+        tabIndex={asChild && inert ? -1 : props.tabIndex}
+        onClick={asChild && inert ? guardClick : onClick}
+        onKeyDown={asChild && inert ? guardKeyDown : onKeyDown}
       >
         {loading && !asChild ? (
           loadingText !== undefined ? (
