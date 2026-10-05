@@ -239,6 +239,12 @@ export async function createRegistrationFromSubmissionAction(
   try {
     const target = await getSubmissionLinkTarget(submissionId);
     if (!target) return { ok: false, reason: "not-found" };
+    // A rejected submission records a staff decision — registering it
+    // anyway would contradict that decision. Reconsideration goes
+    // through the review transition back to pending first.
+    if (target.status === "rejected") {
+      return { ok: false, reason: "invalid" };
+    }
     const resolvedAnimalId =
       target.source === "portal" && target.animalId
         ? target.animalId

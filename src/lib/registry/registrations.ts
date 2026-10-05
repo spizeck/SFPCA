@@ -171,6 +171,7 @@ export async function getSubmissionLinkTarget(
   db: RegistryDb = getRegistryDb(),
 ): Promise<{
   source: string;
+  status: string;
   animalId: string | null;
   requestedYear: number | null;
 } | null> {
@@ -178,6 +179,7 @@ export async function getSubmissionLinkTarget(
   const [row] = await db
     .select({
       source: registrationSubmissions.source,
+      status: registrationSubmissions.status,
       animalId: registrationSubmissions.animalId,
       requestedYear: registrationSubmissions.requestedYear,
     })

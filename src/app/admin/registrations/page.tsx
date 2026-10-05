@@ -802,15 +802,21 @@ export default function RegistrationsPage() {
                         </Button>
                         {/* Portal requests are pre-linked server-side —
                             one deliberate click registers them; public
-                            submissions still need the animal picker. */}
+                            submissions still need the animal picker.
+                            A rejected row records a decision — no
+                            register affordance on it. */}
                         {registration.source === "portal" ? (
-                          <Button
-                            size="sm"
-                            disabled={mutation.pending}
-                            onClick={() => registerPortalRequest(registration)}
-                          >
-                            Register
-                          </Button>
+                          registration.status !== "rejected" && (
+                            <Button
+                              size="sm"
+                              disabled={mutation.pending}
+                              onClick={() =>
+                                registerPortalRequest(registration)
+                              }
+                            >
+                              Register
+                            </Button>
+                          )
                         ) : (
                           <Button
                             variant="outline"
