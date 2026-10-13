@@ -245,8 +245,10 @@ While All Deployments protection is on, unauthenticated machine callers are
 blocked before reaching the app — notably the Resend webhook
 (`/api/webhooks/resend`) and owner `/portal` links in reminder emails. Confirm
 Vercel Cron reaches `/api/cron/*` in the cron logs. If a machine caller must
-get through, use a Protection Bypass for Automation secret scoped to that URL,
-never a Protection Exception; the routes keep their own authentication
+get through, give only that caller's URL a Protection Bypass for Automation
+secret. The secret is project-wide (it bypasses protection on every
+deployment), so treat it as a credential and rotate it if exposed. Never use a
+Protection Exception; the routes keep their own authentication
 (`RESEND_WEBHOOK_SECRET`, `CRON_SECRET`).
 
 Application authorization (`ADMIN`/`EDITOR`/`MODERATOR`) is independent of
