@@ -231,9 +231,32 @@ boundary and §18 for the Storage procedure.
 3. Add all environment variables from `.env.example` in the Vercel dashboard
 4. Deploy
 
+### Pre-launch access (Vercel Deployment Protection)
+
+Pre-launch access to the whole site is controlled by Vercel, not by the
+application: Vercel → Settings → Deployment Protection → Vercel
+Authentication → **All Deployments** restricts production domains, generated
+`*.vercel.app` URLs and previews to Vercel team members. At launch, switch to
+**Standard Protection** (previews stay protected). Standard Protection alone
+does not protect the production domain. Check for Protection Exceptions,
+Shareable Links and unused Protection Bypass for Automation secrets.
+
+While All Deployments protection is on, unauthenticated machine callers are
+blocked before reaching the app — notably the Resend webhook
+(`/api/webhooks/resend`) and owner `/portal` links in reminder emails. Confirm
+Vercel Cron reaches `/api/cron/*` in the cron logs. If a machine caller must
+get through, use a Protection Bypass for Automation secret scoped to that URL,
+never a Protection Exception; the routes keep their own authentication
+(`RESEND_WEBHOOK_SECRET`, `CRON_SECRET`).
+
+Application authorization (`ADMIN`/`EDITOR`/`MODERATOR`) is independent of
+Vercel settings.
+
 ### Maintenance mode
 
-The production public site can be gated behind `/under-construction` while
+Maintenance mode is an operational control (risky work, freezing public
+writes), not the pre-launch gate. The production public site can be gated
+behind `/under-construction` while
 `/login`, `/admin`, the auth session API, and framework/static assets stay
 reachable.
 
