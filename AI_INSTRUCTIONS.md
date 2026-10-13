@@ -33,9 +33,14 @@ when the token is unset.
   workflow, #168 — owner contact is staff-only via authorized server
   actions), `reports` (#179 — aggregate metrics workspace + audited CSV
   export; public counterpart is `/statistics`, a separate suppressed DTO)
-- **Production gate**: `SITE_MAINTENANCE_MODE=true` (Vercel Production
-  only) redirects all public paths to `/under-construction`; `/login`,
-  `/admin`, `/api/auth`, and static assets stay reachable
+- **Pre-launch access**: Vercel Deployment Protection (Vercel
+  Authentication, All Deployments) — deployment configuration, not code.
+- **Maintenance mode** (operational, not the launch gate):
+  `SITE_MAINTENANCE_MODE=true` (Vercel Production
+  only) redirects public paths to `/under-construction` unless the request
+  has a verified admin session; `/login`, `/admin`, `/portal`, `/api/auth`,
+  `/api/cron`, `/api/webhooks`, and static assets stay reachable, so portal,
+  cron, and webhook writes continue
 
 ## Architectural invariants — do not casually violate
 

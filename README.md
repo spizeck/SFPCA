@@ -229,13 +229,41 @@ boundary and §18 for the Storage procedure.
 1. Push code to GitHub
 2. Import the project in [Vercel](https://vercel.com)
 3. Add all environment variables from `.env.example` in the Vercel dashboard
-4. Deploy
+4. Before the first deploy, enable Vercel Authentication → **All Deployments**
+   (see Pre-launch access below) so production is never briefly public
+5. Deploy
+
+### Pre-launch access (Vercel Deployment Protection)
+
+Pre-launch access to the whole site is controlled by Vercel, not by the
+application: Vercel → Settings → Deployment Protection → Vercel
+Authentication → **All Deployments** restricts production domains, generated
+`*.vercel.app` URLs and previews to Vercel team members. At launch, switch to
+**Standard Protection** (previews stay protected). Standard Protection alone
+does not protect the production domain. Check for Protection Exceptions,
+Shareable Links and unused Protection Bypass for Automation secrets.
+
+While All Deployments protection is on, unauthenticated machine callers are
+blocked before reaching the app — notably the Resend webhook
+(`/api/webhooks/resend`) and owner `/portal` links in reminder emails. Confirm
+Vercel Cron reaches `/api/cron/*` in the cron logs. If a machine caller must
+get through, give only that caller's URL a Protection Bypass for Automation
+secret. The secret is project-wide (it bypasses protection on every
+deployment), so treat it as a credential and rotate it if exposed. Never use a
+Protection Exception; the routes keep their own authentication
+(`RESEND_WEBHOOK_SECRET`, `CRON_SECRET`).
+
+Application authorization (`admin`/`editor` roles in `admin_users`, owner
+`/portal` sessions) is independent of Vercel settings.
 
 ### Maintenance mode
 
-The production public site can be gated behind `/under-construction` while
-`/login`, `/admin`, the auth session API, and framework/static assets stay
-reachable.
+Maintenance mode is an operational control for risky work, not the pre-launch
+gate. The production public site can be gated behind `/under-construction`
+while `/login`, `/admin`, `/portal`, `/api/auth/*`, `/api/cron/*`,
+`/api/webhooks/*`, and framework/static assets stay reachable; verified admins
+also bypass the redirect. It does **not** stop owner `/portal` actions, cron
+jobs, or webhook writebacks — pausing those needs a separate action.
 
 - **Enable (production only):** set `SITE_MAINTENANCE_MODE=true` in the
   Vercel **Production** environment and redeploy.
@@ -466,8 +494,9 @@ placeholder-only variable lists. Categories:
   `NEXT_PUBLIC_FIREBASE_*`, `NEXT_PUBLIC_GTM_ID`, `NEXT_PUBLIC_SITE_URL`
 - **Server-only secrets** (never commit): `FIREBASE_ADMIN_*`,
   `ADMIN_EMAILS`, `VERCEL_TOKEN`, `VERCEL_PROJECT_ID`
-- **Behavior flags** (server-only): `SITE_MAINTENANCE_MODE` (production
-  gate, see Deployment); `NEXT_PUBLIC_USE_FIREBASE_EMULATOR` is set only
+- **Behavior flags** (server-only): `SITE_MAINTENANCE_MODE` (operational
+  maintenance mode, see Deployment — pre-launch access is Vercel Deployment
+  Protection); `NEXT_PUBLIC_USE_FIREBASE_EMULATOR` is set only
   by the E2E harness — never set it for real deployments
 
 Analytics runs through Google Tag Manager (`NEXT_PUBLIC_GTM_ID`), which
